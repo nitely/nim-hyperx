@@ -85,81 +85,80 @@ const
 
 type
   FrmPayloadLen* = uint32  # range[0 .. 24.ones.int]
-  Frame = object
+  Frame* = ref object
     s: seq[byte]
-  FrameRef* = ref Frame
 
-func newFrame*(): FrameRef {.inline.} =
-  FrameRef(s: newSeq[byte](frmHeaderSize))
+func newFrame*(): Frame {.inline.} =
+  Frame(s: newSeq[byte](frmHeaderSize))
 
-func setRawBytes*(frm: FrameRef, data: string) =
+func setRawBytes*(frm: Frame, data: string) =
   # XXX x_x
   frm.s.setLen 0
   for c in data:
     frm.s.add c.byte
 
-func rawLen*(frm: FrameRef): int =
+func rawLen*(frm: Frame): int =
   frm.s.len
 
-func rawBytesPtr*(frm: FrameRef): ptr byte =
+func rawBytesPtr*(frm: Frame): ptr byte =
   addr frm.s[0]
 
-func clear*(frm: FrameRef) {.inline.} =
+func clear*(frm: Frame) {.inline.} =
   #frm.s.setLen 0
   frm.s.setLen frmHeaderSize
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0
 
-func setPayloadLen*(frm: FrameRef, n: FrmPayloadLen) {.inline.} =
+func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline.} =
   doAssert n <= 24.ones.uint
   frm.s[0] = ((n.uint shr 16) and 8.ones).byte
   frm.s[1] = ((n.uint shr 8) and 8.ones).byte
   frm.s[2] = (n.uint and 8.ones).byte
 
-func setTyp*(frm: FrameRef, t: FrmTyp) {.inline.} =
+func setTyp*(frm: Frame, t: FrmTyp) {.inline.} =
   frm.s[3] = t.uint8
 
-func setFlags*(frm: FrameRef, f: FrmFlags) {.inline.} =
+func setFlags*(frm: Frame, f: FrmFlags) {.inline.} =
   frm.s[4] = f.uint8
 
-func setSid*(frm: FrameRef, sid: FrmSid) {.inline.} =
+func setSid*(frm: Frame, sid: FrmSid) {.inline.} =
   ## Set the stream ID
   frm.s[5] = ((sid.uint shr 24) and 8.ones).byte
   frm.s[6] = ((sid.uint shr 16) and 8.ones).byte
   frm.s[7] = ((sid.uint shr 8) and 8.ones).byte
   frm.s[8] = (sid.uint and 8.ones).byte
 
-func payloadLen*(frm: FrameRef): FrmPayloadLen {.inline.} =
+func payloadLen*(frm: Frame): FrmPayloadLen {.inline.} =
   # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
   result += frm.s[0].uint32 shl 16
   result += frm.s[1].uint32 shl 8
   result += frm.s[2].uint32
   doAssert result <= 24.ones.uint
 
-func typ*(frm: FrameRef): FrmTyp {.inline.} =
+func typ*(frm: Frame): FrmTyp {.inline.} =
   result = frm.s[3].FrmTyp
 
-func flags*(frm: FrameRef): var FrmFlags {.inline.} =
+func flags*(frm: Frame): var FrmFlags {.inline.} =
   result = frm.s[4].FrmFlags
 
-func sid*(frm: FrameRef): FrmSid {.inline.} =
+func sid*(frm: Frame): FrmSid {.inline.} =
   result += frm.s[5].uint shl 24
   result += frm.s[6].uint shl 16
   result += frm.s[7].uint shl 8
   result += frm.s[8].uint
 
-func add*(frm: FrameRef, payload: openArray[byte]) {.inline.} =
+func add*(frm: Frame, payload: openArray[byte]) {.inline.} =
   frm.s.add payload
   frm.setPayloadLen FrmPayloadLen(frm.rawLen-frmHeaderSize)
 
-template payload*(frm: FrameRef): untyped =
+template payload*(frm: Frame): untyped =
   toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
-func rawStr*(frm: FrameRef): string =
+func rawStr*(frm: Frame): string =
   for b in frm.s:
     result.add b.char
 
-func `$`*(frm: FrameRef): string =
+func `$`*(frm: Frame): string =
   result = &"""
 ===Frame===
 sid: {$frm.sid.int}
@@ -168,7 +167,7 @@ ack: {$(frmfAck in frm.flags)}
 payload len: {$frm.payloadLen.int}
 ==========="""
 
-func toString*(frm: FrameRef, payload: seq[byte]): string =
+func toString*(frm: Frame, payload: seq[byte]): string =
   result = "===Payload==="
   case frm.typ
   of frmtGoAway:

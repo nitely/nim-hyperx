@@ -185,7 +185,7 @@ func transition(s: StreamState, e: StreamEvent): StreamState =
     #assert false
     strmInvalid
 
-func toEventRecv(frm: FrameRef): StreamEvent =
+func toEventRecv(frm: Frame): StreamEvent =
   case frm.typ
   of frmtData:
     if frmfEndStream in frm.flags:
@@ -212,11 +212,11 @@ func toEventRecv(frm: FrameRef): StreamEvent =
     doAssert false
     seUnknown
 
-func isAllowedToSend(state: StreamState, frm: FrameRef): bool =
+func isAllowedToSend(state: StreamState, frm: Frame): bool =
   ## Check if the stream is allowed to send the frame
   true
 
-func isAllowedToRecv(state: StreamState, frm: FrameRef): bool =
+func isAllowedToRecv(state: StreamState, frm: Frame): bool =
   ## Check if the stream is allowed to receive the frame
   # https://httpwg.org/specs/rfc9113.html#StreamStates
   case state
@@ -292,10 +292,10 @@ type
 proc read(s: Stream): Future[Response] {.async.} =
   await Future[Response](s.recvData)
 
-proc doTransitionSend(s: var Stream, frm: FrameRef) =
+proc doTransitionSend(s: var Stream, frm: Frame) =
   discard
 
-proc doTransitionRecv(s: var Stream, frm: FrameRef) =
+proc doTransitionRecv(s: var Stream, frm: Frame) =
   if s.id == frmsidMain.StreamId:
     return
   if frm.typ in {frmtSettings, frmtPing, frmtGoAway}:
@@ -316,29 +316,26 @@ proc doTransitionRecv(s: var Stream, frm: FrameRef) =
     discard
 
 type
-  ClientContext = object
+  ClientContext = ref object
     sock: AsyncSocket
     hostname: string
     port: Port
     isConnected: bool
-    dynHeaders: ref DynHeaders
+    dynHeaders: DynHeaders
     streams: Table[StreamId, Stream]
     currStreamId: StreamId
     maxConcurrentStreams: int
-  ClientContextRef* = ref ClientContext
 
 proc newSocket(): AsyncSocket =
   result = newAsyncSocket()
   wrapSocket(defaultSslContext(), result)
 
-proc newClient*(hostname: string, port = Port 443): ClientContextRef =
-  var dynHeaders = new DynHeaders
-  dynHeaders[] = initDynHeaders(1024, 16)
-  result = ClientContextRef(
+proc newClient*(hostname: string, port = Port 443): ClientContext =
+  result = ClientContext(
     sock: newSocket(),
     hostname: hostname,
     port: port,
-    dynHeaders: dynHeaders,
+    dynHeaders: initDynHeaders(1024, 16),
     streams: initTable[StreamId, Stream](16),
     currStreamId: 1.StreamId,
     maxConcurrentStreams: 256)
@@ -351,16 +348,16 @@ proc initStream(id: StreamId): Stream =
     isConsumed: newFutureVar[void]("Stream.isConsumed"))
   result.isConsumed.complete()
 
-func stream(client: ClientContextRef, sid: StreamId): var Stream =
+func stream(client: ClientContext, sid: StreamId): var Stream =
   try:
     result = client.streams[sid]
   except KeyError:
     raiseError ProtocolError
 
-func stream(client: ClientContextRef, sid: FrmSid): var Stream =
+func stream(client: ClientContext, sid: FrmSid): var Stream =
   client.stream sid.StreamId
 
-proc readUntilEnd(client: ClientContextRef, frm: FrameRef, payload: ptr seq[byte]) {.async.} =
+proc readUntilEnd(client: ClientContext, frm: Frame, payload: ptr seq[byte]) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
   assert frm.typ == frmtHeaders or frm.typ == frmtPushPromise
   assert frmfEndHeaders notin frm.flags
@@ -376,7 +373,7 @@ proc readUntilEnd(client: ClientContextRef, frm: FrameRef, payload: ptr seq[byte
     payload[].add(await client.sock.recv(frm.payloadLen.int))
     check(payload[].len > 0, ConnectionClosedError)
 
-proc read(client: ClientContextRef, frm: FrameRef, payload: ptr seq[byte]) {.async.} =
+proc read(client: ClientContext, frm: Frame, payload: ptr seq[byte]) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
   ## ``PushPromise``, read frames until ``END_HEADERS`` flag is set
   ## Frames cannot be interleaved here
@@ -401,12 +398,12 @@ proc read(client: ClientContextRef, frm: FrameRef, payload: ptr seq[byte]) {.asy
   else:
     discard
 
-proc openMainStream(client: ClientContextRef): StreamId =
+proc openMainStream(client: ClientContext): StreamId =
   doAssert frmsidMain.StreamId notin client.streams
   result = frmsidMain.StreamId
   client.streams[result] = initStream result
 
-proc openStream(client: ClientContextRef): StreamId =
+proc openStream(client: ClientContext): StreamId =
   # XXX some error if max sid is reached
   # XXX error if maxStreams is reached
   result = client.currStreamId
@@ -414,11 +411,11 @@ proc openStream(client: ClientContextRef): StreamId =
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
 
-proc write(client: ClientContextRef, frm: FrameRef) {.async.} =
+proc write(client: ClientContext, frm: Frame) {.async.} =
   client.stream(frm.sid).doTransitionSend frm
   await client.sock.send(frm.rawBytesPtr, frm.rawLen)
 
-proc startHandshake(client: ClientContextRef) {.async.} =
+proc startHandshake(client: ClientContext) {.async.} =
   debugInfo "startHandshake"
   # we need to do this before sending any other frame
   await client.sock.send preface
@@ -430,7 +427,7 @@ proc startHandshake(client: ClientContextRef) {.async.} =
   frm.setSid frmsidMain
   await client.write frm
 
-proc connect(client: ClientContextRef) {.async.} =
+proc connect(client: ClientContext) {.async.} =
   doAssert(not client.isConnected)
   client.isConnected = true
   await client.sock.connect(client.hostname, client.port)
@@ -438,10 +435,10 @@ proc connect(client: ClientContextRef) {.async.} =
   await client.startHandshake()
   # await handshake()
 
-proc close(client: ClientContextRef) =
+proc close(client: ClientContext) =
   client.sock.close()
 
-proc recvTaskNaked(client: ClientContextRef) {.async.} =
+proc recvTaskNaked(client: ClientContext) {.async.} =
   ## Receive frames and dispatch to opened streams
   ## Meant to be asyncCheck'ed
   doAssert client.isConnected
@@ -467,20 +464,17 @@ proc recvTaskNaked(client: ClientContextRef) {.async.} =
       debugInfo "wait isConsumed"
       await Future[void](stream.isConsumed)
       debugInfo "done isConsumed"
-    if frm.sid.StreamId notin client.streams:  # XXX check if stream is closed instead
-      debugInfo "stream not found " & $frm.sid.int
-      continue
     #doAssert stream.recvData.finished
     stream.isConsumed.clean()
     stream.recvData.clean()
     try:
       if frm.typ == frmtHeaders:
-        decode(resp.data, resp.headers, client.dynHeaders[])
+        decode(resp.data, resp.headers, client.dynHeaders)
       stream.recvData.complete resp
     except CompressionError as err:
       Future[Response](stream.recvData).fail err
 
-proc recvTask(client: ClientContextRef) {.async.} =
+proc recvTask(client: ClientContext) {.async.} =
   try:
     await client.recvTaskNaked()
   except Exception as err:
@@ -489,7 +483,7 @@ proc recvTask(client: ClientContextRef) {.async.} =
   finally:
     debugInfo "recvTask exited"
 
-proc consumeMainStream(client: ClientContextRef) {.async.} =
+proc consumeMainStream(client: ClientContext) {.async.} =
   # XXX process settings, window updates, etc
   doAssert client.isConnected
   while client.isConnected:
@@ -498,7 +492,7 @@ proc consumeMainStream(client: ClientContextRef) {.async.} =
     client.stream(frmsidMain.StreamId).isConsumed.complete()
 
 template withConnection*(
-  client: ClientContextRef,
+  client: ClientContext,
   body: untyped
 ) =
   var recvFut: Future[void]
@@ -525,15 +519,14 @@ template withConnection*(
 type
   Request* = ref object
     data: seq[byte]
-    dynHeaders: ref DynHeaders
 
-proc newRequest(dynHeaders: ref DynHeaders): Request =
-  Request(dynHeaders: dynHeaders)
+func newRequest(): Request =
+  Request()
 
-proc addHeader(r: var Request, n, v: string) =
-  discard hencode(n, v, r.dynHeaders[], r.data, huffman = false)
+func addHeader(client: ClientContext, r: Request, n, v: string) =
+  discard hencode(n, v, client.dynHeaders, r.data, huffman = false)
 
-proc request(client: ClientContextRef, req: Request): Future[Response] {.async.} =
+proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   let sid = client.openStream()
   doAssert sid.FrmSid != frmsidMain
   var frm = newFrame()
@@ -547,14 +540,14 @@ proc request(client: ClientContextRef, req: Request): Future[Response] {.async.}
   client.streams.del sid  # XXX need to reply as closed stream
 
 proc get*(
-  client: ClientContextRef,
+  client: ClientContext,
   path: string
 ): Future[Response] {.async.} =
-  var req = newRequest(client.dynHeaders)
-  req.addHeader(":method", "GET")
-  req.addHeader(":scheme", "https")
-  req.addHeader(":path", path)
-  req.addHeader(":authority", client.hostname)
+  var req = newRequest()
+  client.addHeader(req, ":method", "GET")
+  client.addHeader(req, ":scheme", "https")
+  client.addHeader(req, ":path", path)
+  client.addHeader(req, ":authority", client.hostname)
   debugInfo "REQUEST"
   result = await client.request req
 
