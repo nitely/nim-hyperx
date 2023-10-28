@@ -296,11 +296,27 @@ proc read(s: Stream): Future[Response] {.async.} =
 proc doTransitionSend(s: var Stream, frm: Frame) =
   discard
 
+const connFrmAllowed = {
+  frmtSettings,
+  frmtPing,
+  frmtGoAway,
+  frmtWindowUpdate
+}
+const strmFrmAllowed = {
+  frmtData,
+  frmtHeaders,
+  frmtPriority,
+  frmtRstStream,
+  frmtPushPromise,
+  frmtWindowUpdate
+  #frmtContinuation
+}
+
 proc doTransitionRecv(s: var Stream, frm: Frame) =
   if s.id == frmsidMain.StreamId:
-    # frm.typ in {frmtSettings, frmtPing, frmtGoAway}
+    check(frm.typ in connFrmAllowed, ProtocolError)
     return
-  check(frm.typ notin {frmtSettings, frmtPing, frmtGoAway}, ProtocolError)
+  check(frm.typ in strmFrmAllowed, ProtocolError)
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
       raiseError StreamClosedError
@@ -369,9 +385,9 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
   assert frmfEndHeaders notin frm.flags
   while frmfEndHeaders notin frm.flags:
     doAssert frm.rawLen >= frmHeaderSize
-    client.stream(frm.sid).doTransitionRecv frm
     frm.setRawBytes(await client.sock.recv(frmHeaderSize))
     check(frm.rawLen > 0, ConnectionClosedError)
+    debugInfo $frm
     check frm.typ == frmtContinuation
     check frm.payloadLen >= 0
     if frm.payloadLen == 0:
@@ -384,11 +400,11 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## ``PushPromise``, read frames until ``END_HEADERS`` flag is set
   ## Frames cannot be interleaved here
   doAssert frm.rawLen >= frmHeaderSize
-  client.stream(frm.sid).doTransitionRecv frm
   frm.setRawBytes await client.sock.recv(frmHeaderSize)
   check(frm.rawLen > 0, ConnectionClosedError)
   debugInfo $frm
   check frm.payloadLen >= 0
+  client.stream(frm.sid).doTransitionRecv frm
   if frm.payloadLen > 0:
     payload.s.setLen 0
     payload.s.add await client.sock.recv(frm.payloadLen.int)
@@ -445,14 +461,13 @@ proc close(client: ClientContext) =
   client.sock.close()
 
 proc responseDispatcherNaked(client: ClientContext) {.async.} =
-  var stream: Stream
   while client.isConnected:
-    var data = await client.msgBuff.pop()
+    let data = await client.msgBuff.pop()
     if data.strmId notin client.streams:
       debugInfo "stream not found " & $data.strmId.int
       continue
     debugInfo "recv data on stream " & $data.strmId.int
-    stream = client.streams[data.strmId]
+    let stream = client.streams[data.strmId]
     if not stream.isConsumed.finished:
       await Future[void](stream.isConsumed)
     #doAssert stream.recvData.finished
@@ -506,11 +521,20 @@ proc recvTask(client: ClientContext) {.async.} =
   finally:
     debugInfo "recvTask exited"
 
-proc consumeMainStream(client: ClientContext) {.async.} =
+proc consumeMainStreamNaked(client: ClientContext) {.async.} =
   # XXX process settings, window updates, etc
   doAssert client.isConnected
   while client.isConnected:
     discard await client.stream(frmsidMain.StreamId).read()
+
+proc consumeMainStream(client: ClientContext) {.async.} =
+  try:
+    await client.consumeMainStreamNaked()
+  except Exception as err:
+    debugInfo err.msg
+    raise err
+  finally:
+    debugInfo "consumeMainStream exited"
 
 template withConnection*(
   client: ClientContext,
