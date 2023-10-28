@@ -289,7 +289,9 @@ type
     isConsumed: FutureVar[void]
 
 proc read(s: Stream): Future[Response] {.async.} =
-  await Future[Response](s.recvData)
+  result = await Future[Response](s.recvData)
+  s.recvData.clean()
+  s.isConsumed.complete()
 
 proc doTransitionSend(s: var Stream, frm: Frame) =
   discard
@@ -442,7 +444,7 @@ proc connect(client: ClientContext) {.async.} =
 proc close(client: ClientContext) =
   client.sock.close()
 
-proc responseDispatcher(client: ClientContext) {.async.} =
+proc responseDispatcherNaked(client: ClientContext) {.async.} =
   var stream: Stream
   while client.isConnected:
     var data = await client.msgBuff.pop()
@@ -451,7 +453,6 @@ proc responseDispatcher(client: ClientContext) {.async.} =
       continue
     debugInfo "recv data on stream " & $data.strmId.int
     stream = client.streams[data.strmId]
-    # XXX use a queue/stream on the client to delay blocking sock reads?
     if not stream.isConsumed.finished:
       await Future[void](stream.isConsumed)
     #doAssert stream.recvData.finished
@@ -465,6 +466,15 @@ proc responseDispatcher(client: ClientContext) {.async.} =
       stream.recvData.complete resp
     except CompressionError as err:
       Future[Response](stream.recvData).fail err
+
+proc responseDispatcher(client: ClientContext) {.async.} =
+  try:
+    await client.responseDispatcherNaked()
+  except Exception as err:
+    debugInfo err.msg
+    raise err
+  finally:
+    debugInfo "responseDispatcher exited"
 
 proc recvTaskNaked(client: ClientContext) {.async.} =
   ## Receive frames and dispatch to opened streams
@@ -501,8 +511,6 @@ proc consumeMainStream(client: ClientContext) {.async.} =
   doAssert client.isConnected
   while client.isConnected:
     discard await client.stream(frmsidMain.StreamId).read()
-    client.stream(frmsidMain.StreamId).recvData.clean()
-    client.stream(frmsidMain.StreamId).isConsumed.complete()
 
 template withConnection*(
   client: ClientContext,
@@ -550,7 +558,6 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   frm.add req.data
   await client.write frm
   result = await client.stream(sid).read()
-  client.stream(sid).isConsumed.complete()
   client.streams.del sid  # XXX need to reply as closed stream
 
 proc get*(
