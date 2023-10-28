@@ -1,10 +1,7 @@
 ## HTTP/2 client
 ## WIP
 
-when defined(ssl):
-  discard
-else:
-  {.fatal: "Compile this program with -d:ssl".}
+{.define: ssl.}
 
 import pkg/hpack/decoder
 import ./frame
@@ -18,16 +15,13 @@ type
   CompressionError = object of ConnectionError
   FrameSizeError = object of HyperxError
 
-template ones(n: untyped): uint = (1.uint shl n) - 1
-
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
 
-when defined(hyperxDebug):
-  template debugInfo(s: string): untyped =
+template debugInfo(s: string): untyped =
+  when defined(hyperxDebug):
     debugEcho s
-else:
-  template debugInfo(s: string): untyped =
+  else:
     discard
 
 template raiseError(err, msg) =
@@ -236,7 +230,6 @@ func isAllowedToRecv(state: StreamState, frm: Frame): bool =
 
 type
   StreamId = distinct uint32  # range[0 .. 31.ones.int]
-  RawHeaders* = seq[byte]
 
 proc `==`(a, b: StreamId): bool {.borrow.}
 proc `+=`(a: var StreamId, b: StreamId) {.borrow.}
@@ -297,10 +290,9 @@ proc doTransitionSend(s: var Stream, frm: Frame) =
 
 proc doTransitionRecv(s: var Stream, frm: Frame) =
   if s.id == frmsidMain.StreamId:
+    # frm.typ in {frmtSettings, frmtPing, frmtGoAway}
     return
-  if frm.typ in {frmtSettings, frmtPing, frmtGoAway}:
-    check(frm.sid == frmsidMain, ProtocolError)
-    return
+  check(frm.typ notin {frmtSettings, frmtPing, frmtGoAway}, ProtocolError)
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
       raiseError StreamClosedError
@@ -309,14 +301,13 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
   let event = frm.toEventRecv()
   let oldState = s.state
   s.state = transition(s.state, event)
-  if s.state == strmInvalid:
-    raiseError(ConnectionError, "invalid stream state")
+  check(s.state != strmInvalid, ProtocolError)
   if oldState == strmIdle:
     # XXX close streams < s.id in idle state
     discard
 
 type
-  ClientContext = ref object
+  ClientContext* = ref object
     sock: AsyncSocket
     hostname: string
     port: Port
