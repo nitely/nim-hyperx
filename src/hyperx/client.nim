@@ -5,6 +5,7 @@
 
 import pkg/hpack/decoder
 import ./frame
+import ./queue
 
 type
   HyperxError* = object of CatchableError
@@ -268,9 +269,14 @@ proc decode(payload: openArray[byte], ds: var DecodedStr, dh: var DynHeaders) =
     raiseError CompressionError, err.msg
 
 type
+  Payload = ref object
+    s: seq[byte]
   Response* = ref object
-    headers*: DecodedStr
-    data*: seq[byte]
+    headers: DecodedStr
+    data: Payload
+
+func newPayload(): Payload =
+  Payload()
 
 func newResponse(): Response =
   Response(headers: initDecodedStr())
@@ -307,6 +313,10 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
     discard
 
 type
+  MsgData = object
+    strmId: StreamId
+    frmTyp: FrmTyp
+    payload: Payload
   ClientContext* = ref object
     sock: AsyncSocket
     hostname: string
@@ -316,6 +326,7 @@ type
     streams: Table[StreamId, Stream]
     currStreamId: StreamId
     maxConcurrentStreams: int
+    msgBuff: QueueAsync[MsgData]
 
 proc newSocket(): AsyncSocket =
   result = newAsyncSocket()
@@ -329,7 +340,9 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     dynHeaders: initDynHeaders(1024, 16),
     streams: initTable[StreamId, Stream](16),
     currStreamId: 1.StreamId,
-    maxConcurrentStreams: 256)
+    maxConcurrentStreams: 256,
+    msgBuff: newQueue[MsgData](10)
+  )
 
 proc initStream(id: StreamId): Stream =
   result = Stream(
@@ -348,7 +361,7 @@ func stream(client: ClientContext, sid: StreamId): var Stream =
 func stream(client: ClientContext, sid: FrmSid): var Stream =
   client.stream sid.StreamId
 
-proc readUntilEnd(client: ClientContext, frm: Frame, payload: ptr seq[byte]) {.async.} =
+proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
   assert frm.typ == frmtHeaders or frm.typ == frmtPushPromise
   assert frmfEndHeaders notin frm.flags
@@ -361,10 +374,10 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: ptr seq[byte]) {.a
     check frm.payloadLen >= 0
     if frm.payloadLen == 0:
       continue
-    payload[].add(await client.sock.recv(frm.payloadLen.int))
-    check(payload[].len > 0, ConnectionClosedError)
+    payload.s.add(await client.sock.recv(frm.payloadLen.int))
+    check(payload.s.len > 0, ConnectionClosedError)
 
-proc read(client: ClientContext, frm: Frame, payload: ptr seq[byte]) {.async.} =
+proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
   ## ``PushPromise``, read frames until ``END_HEADERS`` flag is set
   ## Frames cannot be interleaved here
@@ -375,10 +388,10 @@ proc read(client: ClientContext, frm: Frame, payload: ptr seq[byte]) {.async.} =
   debugInfo $frm
   check frm.payloadLen >= 0
   if frm.payloadLen > 0:
-    payload[].setLen 0
-    payload[].add await client.sock.recv(frm.payloadLen.int)
-    check(payload[].len > 0, ConnectionClosedError)
-    debugInfo toString(frm, payload[])
+    payload.s.setLen 0
+    payload.s.add await client.sock.recv(frm.payloadLen.int)
+    check(payload.s.len > 0, ConnectionClosedError)
+    debugInfo toString(frm, payload.s)
   case frm.typ
   of frmtHeaders, frmtPushPromise:
     if frmfPadded in frm.flags:
@@ -429,41 +442,50 @@ proc connect(client: ClientContext) {.async.} =
 proc close(client: ClientContext) =
   client.sock.close()
 
+proc responseDispatcher(client: ClientContext) {.async.} =
+  var stream: Stream
+  while client.isConnected:
+    var data = await client.msgBuff.pop()
+    if data.strmId notin client.streams:
+      debugInfo "stream not found " & $data.strmId.int
+      continue
+    debugInfo "recv data on stream " & $data.strmId.int
+    stream = client.streams[data.strmId]
+    # XXX use a queue/stream on the client to delay blocking sock reads?
+    if not stream.isConsumed.finished:
+      await Future[void](stream.isConsumed)
+    #doAssert stream.recvData.finished
+    stream.isConsumed.clean()
+    stream.recvData.clean()
+    var resp = newResponse()
+    #resp.data = payload
+    try:
+      if data.frmTyp == frmtHeaders:
+        decode(data.payload.s, resp.headers, client.dynHeaders)
+      stream.recvData.complete resp
+    except CompressionError as err:
+      Future[Response](stream.recvData).fail err
+
 proc recvTaskNaked(client: ClientContext) {.async.} =
   ## Receive frames and dispatch to opened streams
   ## Meant to be asyncCheck'ed
   doAssert client.isConnected
-  var stream: Stream
   var frm = newFrame()
   while client.isConnected:
     frm.clear()
-    var resp = newResponse()  # XXX remove
+    var payload = newPayload()  # XXX remove
     try:
-      await client.read(frm, addr resp.data)
+      await client.read(frm, payload)
     except OSError as err:
       if not client.isConnected:
         debugInfo "not connected"
         break
       raise err
-    if frm.sid.StreamId notin client.streams:
-      debugInfo "stream not found " & $frm.sid.int
-      continue
-    debugInfo "recv data on stream " & $frm.sid.int
-    stream = client.streams[frm.sid.StreamId]
-    # XXX use a queue/stream on the client to delay blocking sock reads?
-    if not stream.isConsumed.finished:
-      debugInfo "wait isConsumed"
-      await Future[void](stream.isConsumed)
-      debugInfo "done isConsumed"
-    #doAssert stream.recvData.finished
-    stream.isConsumed.clean()
-    stream.recvData.clean()
-    try:
-      if frm.typ == frmtHeaders:
-        decode(resp.data, resp.headers, client.dynHeaders)
-      stream.recvData.complete resp
-    except CompressionError as err:
-      Future[Response](stream.recvData).fail err
+    await client.msgBuff.put MsgData(
+      strmId: frm.sid.StreamId,
+      frmTyp: frm.typ,
+      payload: payload
+    )
 
 proc recvTask(client: ClientContext) {.async.} =
   try:
@@ -495,6 +517,7 @@ template withConnection*(
     recvFut = client.recvTask()
     waitForRecvFut = true
     asyncCheck client.consumeMainStream()
+    asyncCheck client.responseDispatcher()
     block:
       body
   except Exception as err:

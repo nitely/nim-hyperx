@@ -2,59 +2,61 @@ import std/asyncdispatch
 import std/deques
 
 type
-  CircularQ*[T] = ref object
-    s: seq[T]
-    wi, ri: int
+  QueueAsync*[T] = ref object
+    s: Deque[T]
+    size, used: int
     # XXX use/reuse FutureVars
     putEv, popEv: Deque[Future[void]]
 
-proc newCircularQ*[T](size: Natural): CircularQ[T] =
-  doAssert size >= 2
+proc newQueue*[T](size: int): QueueAsync[T] =
+  doAssert size > 0
   new result
-  result = CircularQ[T](
-    s: newSeq[T](size),
-    wi: 0,
-    ri: 0,
-    putEv: initDeque[Future[void]](),
-    popEv: initDeque[Future[void]]()
+  result = QueueAsync[T](
+    s: initDeque[T](size),
+    size: size,
+    used: 0,
+    putEv: initDeque[Future[void]](2),
+    popEv: initDeque[Future[void]](2)
   )
 
-proc popEvent[T](q: CircularQ[T]): Future[void] =
+proc popEvent[T](q: QueueAsync[T]): Future[void] =
   result = newFuture[void]()
   q.popEv.addLast result
 
-proc popDone[T](q: CircularQ[T]) =
+proc popDone[T](q: QueueAsync[T]) =
   if q.popEv.len > 0:
     q.popEv.popFirst().complete()
 
-proc putEvent[T](q: CircularQ[T]): Future[void] =
+proc putEvent[T](q: QueueAsync[T]): Future[void] =
   result = newFuture[void]()
   q.putEv.addLast result
 
-proc putDone[T](q: CircularQ[T]) =
+proc putDone[T](q: QueueAsync[T]) =
   if q.putEv.len > 0:
     q.putEv.popFirst().complete()
 
-proc put*[T](q: CircularQ[T], v: T) {.async.} =
-  if (q.wi+1) mod q.s.len == q.ri:
+proc put*[T](q: QueueAsync[T], v: T) {.async.} =
+  doAssert q.used <= q.size
+  if q.used == q.size:
     await q.popEvent()
-  doAssert (q.wi+1) mod q.s.len != q.ri
-  q.s[q.wi] = v
-  q.wi = (q.wi+1) mod q.s.len
+  q.s.addFirst v
+  inc q.used
+  doAssert q.used <= q.size
   q.putDone()
 
-proc pop*[T](q: CircularQ[T]): Future[T] {.async.} =
-  if q.wi == q.ri:
+proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
+  doAssert q.used >= 0
+  if q.used == 0:
     await q.putEvent()
-  doAssert q.wi != q.ri
-  result = q.s[q.ri]
-  q.ri = (q.ri+1) mod q.s.len
+  result = q.s.popLast()
+  dec q.used
+  doAssert q.used >= 0
   q.popDone()
 
 when isMainModule:
   block:
     proc test() {.async.} =
-      var q = newCircularQ[int](2)
+      var q = newQueue[int](2)
       await q.put 1
       doAssert (await q.pop()) == 1
       await q.put 2
@@ -66,7 +68,7 @@ when isMainModule:
     waitFor test()
   block:
     proc test() {.async.} =
-      var q = newCircularQ[int](2)
+      var q = newQueue[int](2)
       var res = newSeq[int]()
       proc popOne() {.async.} =
         res.add(await q.pop())
