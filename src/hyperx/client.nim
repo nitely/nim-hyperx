@@ -9,6 +9,7 @@ import ./queue
 
 type
   HyperxError* = object of CatchableError
+  # XXX rename to ConnError + use prefix Conn
   ConnectionError = object of HyperxError
   ConnectionClosedError = object of HyperxError
   ProtocolError = object of ConnectionError
@@ -17,6 +18,7 @@ type
   FrameSizeError = object of HyperxError
   StrmError = object of HyperxError
   StrmProtocolError = object of StrmError
+  StrmStreamClosedError = object of StrmError
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
@@ -321,7 +323,7 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
   check(frm.typ in strmFrmAllowed, ProtocolError)
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
-      raiseError StreamClosedError
+      raiseError StrmStreamClosedError
     else:
       raiseError ProtocolError
   let event = frm.toEventRecv()
@@ -407,13 +409,13 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   frm.setRawBytes await client.sock.recv(frmHeaderSize)
   check(frm.rawLen > 0, ConnectionClosedError)
   debugInfo $frm
-  client.stream(frm.sid).doTransitionRecv frm
   check frm.payloadLen >= 0
   if frm.payloadLen > 0:
     payload.s.setLen 0
     payload.s.add await client.sock.recv(frm.payloadLen.int)
     check(payload.s.len > 0, ConnectionClosedError)
     debugInfo toString(frm, payload.s)
+  let frmTyp = frm.typ
   case frm.typ
   of frmtHeaders, frmtPushPromise:
     if frmfPadded in frm.flags:
@@ -423,6 +425,9 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
       await client.readUntilEnd(frm, payload)
   else:
     discard
+  # transition may raise a stream error, so do after processing
+  # all continuation frames
+  #client.stream(frm.sid).doTransitionRecv frmTyp  # XXX fix
 
 proc openMainStream(client: ClientContext): StreamId =
   doAssert frmsidMain.StreamId notin client.streams
