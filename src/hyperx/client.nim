@@ -383,12 +383,14 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
   ## Read continuation frames until ``END_HEADERS`` flag is set
   assert frm.typ == frmtHeaders or frm.typ == frmtPushPromise
   assert frmfEndHeaders notin frm.flags
+  let sid = frm.sid
   while frmfEndHeaders notin frm.flags:
     doAssert frm.rawLen >= frmHeaderSize
     frm.setRawBytes(await client.sock.recv(frmHeaderSize))
+    #check sid == frm.typ  # XXX conn error?
     check(frm.rawLen > 0, ConnectionClosedError)
     debugInfo $frm
-    check frm.typ == frmtContinuation
+    check frm.typ == frmtContinuation  # XXX conn error?
     check frm.payloadLen >= 0
     if frm.payloadLen == 0:
       continue
@@ -404,12 +406,13 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   check(frm.rawLen > 0, ConnectionClosedError)
   debugInfo $frm
   check frm.payloadLen >= 0
-  client.stream(frm.sid).doTransitionRecv frm
   if frm.payloadLen > 0:
     payload.s.setLen 0
     payload.s.add await client.sock.recv(frm.payloadLen.int)
     check(payload.s.len > 0, ConnectionClosedError)
     debugInfo toString(frm, payload.s)
+  let sid = frm.sid
+  let frmTyp = frm.typ
   case frm.typ
   of frmtHeaders, frmtPushPromise:
     if frmfPadded in frm.flags:
@@ -419,6 +422,9 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
       await client.readUntilEnd(frm, payload)
   else:
     discard
+  # check after consuming good/bad frames
+  # protocol error does not end the connection
+  #client.stream(sid).doTransitionRecv frmTyp  # XXX fix
 
 proc openMainStream(client: ClientContext): StreamId =
   doAssert frmsidMain.StreamId notin client.streams
