@@ -15,6 +15,8 @@ type
   StreamClosedError = object of ConnectionError
   CompressionError = object of ConnectionError
   FrameSizeError = object of HyperxError
+  StrmError = object of HyperxError
+  StrmProtocolError = object of StrmError
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
@@ -387,10 +389,10 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
   while frmfEndHeaders notin frm.flags:
     doAssert frm.rawLen >= frmHeaderSize
     frm.setRawBytes(await client.sock.recv(frmHeaderSize))
-    #check sid == frm.typ  # XXX conn error?
     check(frm.rawLen > 0, ConnectionClosedError)
     debugInfo $frm
-    check frm.typ == frmtContinuation  # XXX conn error?
+    check(frm.sid == sid, ProtocolError)
+    check(frm.typ == frmtContinuation, ProtocolError)
     check frm.payloadLen >= 0
     if frm.payloadLen == 0:
       continue
@@ -405,14 +407,13 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   frm.setRawBytes await client.sock.recv(frmHeaderSize)
   check(frm.rawLen > 0, ConnectionClosedError)
   debugInfo $frm
+  client.stream(frm.sid).doTransitionRecv frm
   check frm.payloadLen >= 0
   if frm.payloadLen > 0:
     payload.s.setLen 0
     payload.s.add await client.sock.recv(frm.payloadLen.int)
     check(payload.s.len > 0, ConnectionClosedError)
     debugInfo toString(frm, payload.s)
-  let sid = frm.sid
-  let frmTyp = frm.typ
   case frm.typ
   of frmtHeaders, frmtPushPromise:
     if frmfPadded in frm.flags:
@@ -422,9 +423,6 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
       await client.readUntilEnd(frm, payload)
   else:
     discard
-  # check after consuming good/bad frames
-  # protocol error does not end the connection
-  #client.stream(sid).doTransitionRecv frmTyp  # XXX fix
 
 proc openMainStream(client: ClientContext): StreamId =
   doAssert frmsidMain.StreamId notin client.streams
