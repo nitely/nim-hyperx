@@ -86,28 +86,32 @@ const
 type
   FrmPayloadLen* = uint32  # range[0 .. 24.ones.int]
   Frame* = ref object
-    s: seq[byte]
+    s: array[frmHeaderSize, byte]
+    rawL: int8  # XXX remove
 
 func newFrame*(): Frame {.inline.} =
-  Frame(s: newSeq[byte](frmHeaderSize))
+  Frame()
 
 func setRawBytes*(frm: Frame, data: string) =
-  # XXX x_x
-  frm.s.setLen 0
-  for c in data:
-    frm.s.add c.byte
+  doAssert data.len <= frmHeaderSize
+  for i in 0 .. data.len-1:
+    frm.s[i] = data[i].byte
+  frm.rawL = data.len.int8
 
-func rawLen*(frm: Frame): int =
-  frm.s.len
+# XXX remove
+func rawLen*(frm: Frame): int {.inline.} =
+  frm.rawL
+
+func len*(frm: Frame): int {.inline.} =
+  frmHeaderSize
 
 func rawBytesPtr*(frm: Frame): ptr byte =
   addr frm.s[0]
 
 func clear*(frm: Frame) {.inline.} =
-  #frm.s.setLen 0
-  frm.s.setLen frmHeaderSize
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0
+  frm.rawL = 0
 
 func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline.} =
   doAssert n <= 24.ones.uint
@@ -147,12 +151,12 @@ func sid*(frm: Frame): FrmSid {.inline.} =
   result += frm.s[7].uint shl 8
   result += frm.s[8].uint
 
-func add*(frm: Frame, payload: openArray[byte]) {.inline.} =
-  frm.s.add payload
-  frm.setPayloadLen FrmPayloadLen(frm.rawLen-frmHeaderSize)
+#func add*(frm: Frame, payload: openArray[byte]) {.inline.} =
+#  frm.s.add payload
+#  frm.setPayloadLen FrmPayloadLen(frm.rawLen-frmHeaderSize)
 
-template payload*(frm: Frame): untyped =
-  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
+#template payload*(frm: Frame): untyped =
+#  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
 func rawStr*(frm: Frame): string =
   for b in frm.s:

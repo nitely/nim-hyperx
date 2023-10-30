@@ -10,6 +10,7 @@ import ./queue
 type
   HyperxError* = object of CatchableError
   # XXX rename to ConnError + use prefix Conn
+  # XXX rename to ConnError + use prefix Conn
   ConnectionError = object of HyperxError
   ConnectionClosedError = object of HyperxError
   ProtocolError = object of ConnectionError
@@ -18,6 +19,7 @@ type
   FrameSizeError = object of HyperxError
   StrmError = object of HyperxError
   StrmProtocolError = object of StrmError
+  StrmStreamClosedError = object of StrmError
   StrmStreamClosedError = object of StrmError
 
 const
@@ -324,6 +326,7 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
       raiseError StrmStreamClosedError
+      raiseError StrmStreamClosedError
     else:
       raiseError ProtocolError
   let event = frm.toEventRecv()
@@ -385,36 +388,39 @@ func stream(client: ClientContext, sid: FrmSid): var Stream =
 
 proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
-  assert frm.typ == frmtHeaders or frm.typ == frmtPushPromise
+  assert frm.typ in {frmtHeaders, frmtPushPromise}
   assert frmfEndHeaders notin frm.flags
-  let sid = frm.sid
+  var frm2 = newFrame()
   while frmfEndHeaders notin frm.flags:
-    doAssert frm.rawLen >= frmHeaderSize
-    frm.setRawBytes(await client.sock.recv(frmHeaderSize))
-    check(frm.rawLen > 0, ConnectionClosedError)
-    debugInfo $frm
-    check(frm.sid == sid, ProtocolError)
-    check(frm.typ == frmtContinuation, ProtocolError)
-    check frm.payloadLen >= 0
-    if frm.payloadLen == 0:
+    frm2.setRawBytes await client.sock.recv(frmHeaderSize)
+    check(frm2.rawLen > 0, ConnectionClosedError)
+    check(frm2.rawLen == frmHeaderSize, ProtocolError)
+    debugInfo $frm2
+    check(frm2.sid == frm.sid, ProtocolError)
+    check(frm2.typ == frmtContinuation, ProtocolError)
+    check frm2.payloadLen >= 0
+    if frm2.payloadLen == 0:
       continue
-    payload.s.add(await client.sock.recv(frm.payloadLen.int))
+    payload.s.add await client.sock.recv(frm2.payloadLen.int)
     check(payload.s.len > 0, ConnectionClosedError)
+    check(payload.s.len == frm2.payloadLen.int, ProtocolError)
 
 proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
   ## ``PushPromise``, read frames until ``END_HEADERS`` flag is set
   ## Frames cannot be interleaved here
-  doAssert frm.rawLen >= frmHeaderSize
   frm.setRawBytes await client.sock.recv(frmHeaderSize)
   check(frm.rawLen > 0, ConnectionClosedError)
+  check(frm.rawLen == frmHeaderSize, ProtocolError)
   debugInfo $frm
   check frm.payloadLen >= 0
   if frm.payloadLen > 0:
     payload.s.setLen 0
     payload.s.add await client.sock.recv(frm.payloadLen.int)
     check(payload.s.len > 0, ConnectionClosedError)
+    check(payload.s.len == frm.payloadLen.int, ProtocolError)
     debugInfo toString(frm, payload.s)
+  let frmTyp = frm.typ
   let frmTyp = frm.typ
   case frm.typ
   of frmtHeaders, frmtPushPromise:
@@ -426,8 +432,9 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   else:
     discard
   # transition may raise a stream error, so do after processing
-  # all continuation frames
-  #client.stream(frm.sid).doTransitionRecv frmTyp  # XXX fix
+  # all continuation frames. Code before this can only raise
+  # conn errors
+  client.stream(frm.sid).doTransitionRecv frm
 
 proc openMainStream(client: ClientContext): StreamId =
   doAssert frmsidMain.StreamId notin client.streams
@@ -444,7 +451,13 @@ proc openStream(client: ClientContext): StreamId =
 
 proc write(client: ClientContext, frm: Frame) {.async.} =
   client.stream(frm.sid).doTransitionSend frm
-  await client.sock.send(frm.rawBytesPtr, frm.rawLen)
+  await client.sock.send(frm.rawBytesPtr, frm.len)
+
+proc write(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
+  doAssert frm.payloadLen.int == payload.s.len
+  await client.write frm
+  if payload.s.len > 0:
+    await client.sock.send(addr payload.s[0], payload.s.len)
 
 proc startHandshake(client: ClientContext) {.async.} =
   debugInfo "startHandshake"
@@ -588,8 +601,10 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   frm.setTyp frmtHeaders
   frm.setSid sid.FrmSid
   frm.flags.incl frmfEndHeaders
-  frm.add req.data
-  await client.write frm
+  var payload = newPayload()
+  payload.s.add req.data
+  frm.setPayloadLen payload.s.len.FrmPayloadLen
+  await client.write(frm, payload)
   result = await client.stream(sid).read()
   client.streams.del sid  # XXX need to reply as closed stream
 
