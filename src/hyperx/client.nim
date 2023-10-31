@@ -10,7 +10,6 @@ import ./queue
 type
   HyperxError* = object of CatchableError
   # XXX rename to ConnError + use prefix Conn
-  # XXX rename to ConnError + use prefix Conn
   ConnectionError = object of HyperxError
   ConnectionClosedError = object of HyperxError
   ProtocolError = object of ConnectionError
@@ -324,7 +323,6 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
   check(frm.typ in strmFrmAllowed, ProtocolError)
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
-      raiseError StrmStreamClosedError
       raiseError StrmStreamClosedError
     else:
       raiseError ProtocolError
