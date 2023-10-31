@@ -20,7 +20,6 @@ type
   StrmError = object of HyperxError
   StrmProtocolError = object of StrmError
   StrmStreamClosedError = object of StrmError
-  StrmStreamClosedError = object of StrmError
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
@@ -420,8 +419,6 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
     check(payload.s.len > 0, ConnectionClosedError)
     check(payload.s.len == frm.payloadLen.int, ProtocolError)
     debugInfo toString(frm, payload.s)
-  let frmTyp = frm.typ
-  let frmTyp = frm.typ
   case frm.typ
   of frmtHeaders, frmtPushPromise:
     if frmfPadded in frm.flags:
