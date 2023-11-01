@@ -388,7 +388,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
   assert frm.typ in {frmtHeaders, frmtPushPromise}
   assert frmfEndHeaders notin frm.flags
   var frm2 = newFrame()
-  while frmfEndHeaders notin frm.flags:
+  while frmfEndHeaders notin frm2.flags:
     frm2.setRawBytes await client.sock.recv(frmHeaderSize)
     check(frm2.rawLen > 0, ConnectionClosedError)
     check(frm2.rawLen == frmHeaderSize, ProtocolError)
