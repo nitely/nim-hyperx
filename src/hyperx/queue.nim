@@ -56,7 +56,7 @@ proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
 when isMainModule:
   block:
     proc test() {.async.} =
-      var q = newQueue[int](2)
+      var q = newQueue[int](1)
       await q.put 1
       doAssert (await q.pop()) == 1
       await q.put 2
@@ -85,6 +85,50 @@ when isMainModule:
         popOne() and
         popOne() and
         popOne()
+      )
+      doAssert res == @[1,2,3,4,5,6]
+    waitFor test()
+  block:
+    proc test() {.async.} =
+      var q = newQueue[int](2)
+      var res = newSeq[int]()
+      proc popOne() {.async.} =
+        res.add(await q.pop())
+      await (
+        popOne() and
+        popOne() and
+        popOne() and
+        popOne() and
+        popOne() and
+        popOne() and
+        q.put(1) and
+        q.put(2) and
+        q.put(3) and
+        q.put(4) and
+        q.put(5) and
+        q.put(6)
+      )
+      doAssert res == @[1,2,3,4,5,6]
+    waitFor test()
+  block:
+    proc test() {.async.} =
+      var q = newQueue[int](2)
+      var res = newSeq[int]()
+      proc popOne() {.async.} =
+        res.add(await q.pop())
+      await (
+        popOne() and
+        popOne() and
+        q.put(1) and
+        popOne() and
+        q.put(2) and
+        popOne() and
+        q.put(3) and
+        popOne() and
+        popOne() and
+        q.put(4) and
+        q.put(5) and
+        q.put(6)
       )
       doAssert res == @[1,2,3,4,5,6]
     waitFor test()
