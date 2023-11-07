@@ -1,3 +1,5 @@
+# XXX: remove if not used
+
 import std/asyncdispatch
 import std/deques
 

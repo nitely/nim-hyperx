@@ -289,13 +289,10 @@ type
   Stream = object
     id: StreamId
     state: StreamState
-    recvData: FutureVar[Response]
-    isConsumed: FutureVar[void]
+    recvData: QueueAsync[Response]
 
 proc read(s: Stream): Future[Response] {.async.} =
-  result = await Future[Response](s.recvData)
-  s.recvData.clean()
-  s.isConsumed.complete()
+  result = await s.recvData.pop()
 
 proc doTransitionSend(s: var Stream, frm: Frame) =
   discard
@@ -370,9 +367,7 @@ proc initStream(id: StreamId): Stream =
   result = Stream(
     id: id,
     state: strmIdle,
-    recvData: newFutureVar[Response]("Stream.recvData"),
-    isConsumed: newFutureVar[void]("Stream.isConsumed"))
-  result.isConsumed.complete()
+    recvData: newQueue[Response](1))
 
 func stream(client: ClientContext, sid: StreamId): var Stream =
   try:
@@ -485,19 +480,16 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       continue
     debugInfo "recv data on stream " & $data.strmId.int
     let stream = client.streams[data.strmId]
-    if not stream.isConsumed.finished:
-      await Future[void](stream.isConsumed)
-    #doAssert stream.recvData.finished
-    stream.isConsumed.clean()
-    stream.recvData.clean()
+    # XXX put data instead of response
     var resp = newResponse()
     #resp.data = payload
     try:
       if data.frmTyp == frmtHeaders:
         decode(data.payload.s, resp.headers, client.dynHeaders)
-      stream.recvData.complete resp
+      await stream.recvData.put resp
     except CompressionError as err:
-      Future[Response](stream.recvData).fail err
+      # XXX propagate error
+      await stream.recvData.put resp
 
 proc responseDispatcher(client: ClientContext) {.async.} =
   try:
