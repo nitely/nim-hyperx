@@ -48,6 +48,11 @@ func add(s: var seq[byte], ss: string) =
   for c in ss:
     s.add c.byte
 
+func add(s: var string, ss: seq[byte]) =
+  # XXX x_x
+  for c in ss:
+    s.add c.char
+
 # Section 5.1
 type
   StreamState = enum
@@ -275,24 +280,36 @@ proc decode(payload: openArray[byte], ds: var DecodedStr, dh: var DynHeaders) =
 type
   Payload = ref object
     s: seq[byte]
+  StrmMsgData = object
+    frmTyp: FrmTyp
+    payload: Payload
   Response* = ref object
-    headers: DecodedStr
+    headers: string
     data: Payload
 
 func newPayload(): Payload =
   Payload()
 
+func initStrmMsgData(frmTyp: FrmTyp): StrmMsgData =
+  StrmMsgData(
+    frmTyp: frmTyp,
+    payload: newPayload()
+  )
+
 func newResponse(): Response =
-  Response(headers: initDecodedStr())
+  Response(
+    headers: "",
+    data: newPayload()
+  )
 
 type
   Stream = object
     id: StreamId
     state: StreamState
-    recvData: QueueAsync[Response]
+    strmMsgs: QueueAsync[StrmMsgData]
 
-proc read(s: Stream): Future[Response] {.async.} =
-  result = await s.recvData.pop()
+proc read(s: Stream): Future[StrmMsgData] {.async.} =
+  result = await s.strmMsgs.pop()
 
 proc doTransitionSend(s: var Stream, frm: Frame) =
   discard
@@ -332,7 +349,7 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
     discard
 
 type
-  MsgData = object
+  DptMsgData = object
     strmId: StreamId
     frmTyp: FrmTyp
     payload: Payload
@@ -345,7 +362,7 @@ type
     streams: Table[StreamId, Stream]
     currStreamId: StreamId
     maxConcurrentStreams: int
-    msgBuff: QueueAsync[MsgData]
+    dptMsgs: QueueAsync[DptMsgData]
 
 proc newSocket(): AsyncSocket =
   result = newAsyncSocket()
@@ -360,14 +377,15 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     streams: initTable[StreamId, Stream](16),
     currStreamId: 1.StreamId,
     maxConcurrentStreams: 256,
-    msgBuff: newQueue[MsgData](10)
+    dptMsgs: newQueue[DptMsgData](10)
   )
 
 proc initStream(id: StreamId): Stream =
   result = Stream(
     id: id,
     state: strmIdle,
-    recvData: newQueue[Response](1))
+    strmMsgs: newQueue[StrmMsgData](1)
+  )
 
 func stream(client: ClientContext, sid: StreamId): var Stream =
   try:
@@ -473,23 +491,32 @@ proc close(client: ClientContext) =
   client.sock.close()
 
 proc responseDispatcherNaked(client: ClientContext) {.async.} =
+  ## Dispatch messages to open streams. Note decoding
+  ## headers must be done in message received order, so
+  ## it needs to be done here. Same for processing the main
+  ## stream messages.
+  # XXX call main stream processing here instead of
+  #     using another task
   while client.isConnected:
-    let data = await client.msgBuff.pop()
-    if data.strmId notin client.streams:
-      debugInfo "stream not found " & $data.strmId.int
+    let dptMsg = await client.dptMsgs.pop()
+    if dptMsg.strmId notin client.streams:
+      debugInfo "stream not found " & $dptMsg.strmId.int
       continue
-    debugInfo "recv data on stream " & $data.strmId.int
-    let stream = client.streams[data.strmId]
-    # XXX put data instead of response
-    var resp = newResponse()
-    #resp.data = payload
-    try:
-      if data.frmTyp == frmtHeaders:
-        decode(data.payload.s, resp.headers, client.dynHeaders)
-      await stream.recvData.put resp
-    except CompressionError as err:
-      # XXX propagate error
-      await stream.recvData.put resp
+    debugInfo "recv data on stream " & $dptMsg.strmId.int
+    let stream = client.streams[dptMsg.strmId]
+    var strmMsg = initStrmMsgData(dptMsg.frmTyp)
+    if dptMsg.frmTyp == frmtHeaders:
+      # XXX implement initDecodedBytes as seq[byte] in hpack
+      var headers = initDecodedStr()
+      try:
+        decode(dptMsg.payload.s, headers, client.dynHeaders)
+        strmMsg.payload.s.add $headers
+      except CompressionError as err:
+        # XXX propagate error in strmMsg
+        discard
+    else:
+      strmMsg.payload = dptMsg.payload
+    await stream.strmMsgs.put strmMsg
 
 proc responseDispatcher(client: ClientContext) {.async.} =
   try:
@@ -515,7 +542,7 @@ proc recvTaskNaked(client: ClientContext) {.async.} =
         debugInfo "not connected"
         break
       raise err
-    await client.msgBuff.put MsgData(
+    await client.dptMsgs.put DptMsgData(
       strmId: frm.sid.StreamId,
       frmTyp: frm.typ,
       payload: payload
@@ -582,6 +609,7 @@ func addHeader(client: ClientContext, r: Request, n, v: string) =
   discard hencode(n, v, client.dynHeaders, r.data, huffman = false)
 
 proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
+  result = newResponse()
   let sid = client.openStream()
   doAssert sid.FrmSid != frmsidMain
   var frm = newFrame()
@@ -592,7 +620,13 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   payload.s.add req.data
   frm.setPayloadLen payload.s.len.FrmPayloadLen
   await client.write(frm, payload)
-  result = await client.stream(sid).read()
+  # XXX read in loop, discard other frames
+  let strmMsg = await client.stream(sid).read()
+  doAssert strmMsg.frmTyp == frmtHeaders
+  result.headers.add strmMsg.payload.s
+  let strmMsg2 = await client.stream(sid).read()
+  doAssert strmMsg2.frmTyp == frmtData
+  result.data = strmMsg2.payload
   client.streams.del sid  # XXX need to reply as closed stream
 
 proc get*(
@@ -613,7 +647,9 @@ when isMainModule:
     withConnection(client):
       let r = await client.get("/")
       echo r.headers
-      #echo r.data  # XXX set from Data frame, not headers
+      var dataStr = ""
+      dataStr.add r.data.s
+      echo dataStr
       await sleepAsync 2000
   waitFor main()
   echo "ok"
