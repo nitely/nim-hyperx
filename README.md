@@ -4,8 +4,7 @@
   It's likely broken. Only a few parts of the spec are
   implemented. I'm focusing on coding the client ATM.
   If you want to join the effort, you are welcome.
-  Just read the spec and fix whatever is broken.
-  Do not create issues unless you are gonna work on them :)
+  Just read the spec and fix whatever is broken :)
 
 Pure Nim Http2 client/server implementation.
 
