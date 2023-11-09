@@ -6,6 +6,7 @@
 import pkg/hpack/decoder
 import ./frame
 import ./queue
+import ./lock
 
 type
   HyperxError* = object of CatchableError
@@ -363,6 +364,7 @@ type
     currStreamId: StreamId
     maxConcurrentStreams: int
     dptMsgs: QueueAsync[DptMsgData]
+    writeLock: LockAsync
 
 proc newSocket(): AsyncSocket =
   result = newAsyncSocket()
@@ -377,7 +379,8 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     streams: initTable[StreamId, Stream](16),
     currStreamId: 1.StreamId,
     maxConcurrentStreams: 256,
-    dptMsgs: newQueue[DptMsgData](10)
+    dptMsgs: newQueue[DptMsgData](10),
+    writeLock: newLock()
   )
 
 proc initStream(id: StreamId): Stream =
@@ -459,13 +462,16 @@ proc openStream(client: ClientContext): StreamId =
 
 proc write(client: ClientContext, frm: Frame) {.async.} =
   client.stream(frm.sid).doTransitionSend frm
-  await client.sock.send(frm.rawBytesPtr, frm.len)
+  withLock(client.writeLock):
+    await client.sock.send(frm.rawBytesPtr, frm.len)
 
 proc write(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   doAssert frm.payloadLen.int == payload.s.len
-  await client.write frm
-  if payload.s.len > 0:
-    await client.sock.send(addr payload.s[0], payload.s.len)
+  client.stream(frm.sid).doTransitionSend frm
+  withLock(client.writeLock):
+    await client.sock.send(frm.rawBytesPtr, frm.len)
+    if payload.s.len > 0:
+      await client.sock.send(addr payload.s[0], payload.s.len)
 
 proc startHandshake(client: ClientContext) {.async.} =
   debugInfo "startHandshake"
