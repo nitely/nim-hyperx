@@ -460,6 +460,7 @@ proc openStream(client: ClientContext): StreamId =
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
 
+# XXX writing should be a task + queue like read
 proc write(client: ClientContext, frm: Frame) {.async.} =
   client.stream(frm.sid).doTransitionSend frm
   withLock(client.writeLock):

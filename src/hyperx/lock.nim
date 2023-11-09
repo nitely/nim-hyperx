@@ -26,6 +26,7 @@ proc relDone(lck: LockAsync) =
 proc acquire(lck: LockAsync): Future[void] {.async.} =
   if lck.used:
     await lck.relEvent()
+  doAssert(not lck.used)
   lck.used = true
 
 proc release(lck: LockAsync) =
