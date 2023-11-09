@@ -4,3 +4,4 @@ src/hyperx/client
 src/hyperx/server
 src/hyperx/queue
 src/hyperx/lock
+src/hyperx/untestable

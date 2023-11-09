@@ -279,14 +279,14 @@ proc decode(payload: openArray[byte], ds: var DecodedStr, dh: var DynHeaders) =
     raiseError CompressionError, err.msg
 
 type
-  Payload = ref object
+  Payload* = ref object
     s: seq[byte]
   StrmMsgData = object
     frmTyp: FrmTyp
     payload: Payload
   Response* = ref object
-    headers: string
-    data: Payload
+    headers*: string
+    data*: Payload
 
 func newPayload(): Payload =
   Payload()
@@ -297,11 +297,15 @@ func initStrmMsgData(frmTyp: FrmTyp): StrmMsgData =
     payload: newPayload()
   )
 
-func newResponse(): Response =
+func newResponse*(): Response =
   Response(
     headers: "",
     data: newPayload()
   )
+
+func text*(r: Response): string =
+  result = ""
+  result.add r.data.s
 
 type
   Stream = object

@@ -1,9 +1,11 @@
 # HyperX
 
-> Warning: Do not use. This lib is just a toy, and it may
-  never be finished. If you are working on an Http2 implementation,
-  do not get discourage by this one. Just let me know, I'm ok
-  with making this repo private ;)
+> Warning: Do not use. This lib is in pre-alpha state.
+  It's likely broken. Only a few parts of the spec are
+  implemented. I'm focusing on coding the client ATM.
+  If you want to join the effort, you are welcome.
+  Just read the spec and fix whatever is broken.
+  Do not create issues unless you are gonna work on them :)
 
 Pure Nim Http2 client/server implementation.
 
@@ -13,22 +15,46 @@ Pure Nim Http2 client/server implementation.
 
 ## Client
 
+This snippet actually works at the time of writing
+
 ```nim
-import hyperx
+{.define: ssl.}
 
-func httpGet(client: ClientContext): string {.async.} =
-  let r = await client.get("/?q=hello+world")
-  assert r.statusCode == 200
-  assert r.headers["content-type"] == "qwe"
-  assert r.text == "asd"
-  return r.text
+import std/asyncdispatch
+import pkg/hyperx/client
 
-var client = initClient("google.com")
-withConnection(client):
-  var tasks = newSeq[Future]()
-  for i in 0 .. 9:
-    tasks.add httpGet(client)
-  await all(tasks)
+proc httpGet(client: ClientContext, query: string) {.async.} =
+  let r = await client.get("/search?q=" & query)
+  echo r.headers
+  echo r.text[0..100]
+
+proc main() {.async.} =
+  var client = newClient("www.google.com")
+  withConnection(client):
+    let queries = [
+      "john+wick",
+      "winston",
+      "ms+perkins"
+    ]
+    var tasks = newSeq[Future[void]]()
+    for q in queries:
+      tasks.add client.httpGet(q)
+    await all(tasks)
+waitFor main()
+echo "ok"
+```
+
+## Server
+
+Unimplemented
+
+## Debugging
+
+This will print received frames, and some other
+debugging messages
+
+```
+nim c -r -d:hyperxDebug client.nim
 ```
 
 ## LICENSE
