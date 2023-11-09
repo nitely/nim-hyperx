@@ -6,13 +6,12 @@ type
     ## Akin to a queue of size one
     used: bool
     # XXX use/reuse FutureVars
-    acqEv, relEv: Deque[Future[void]]
+    relEv: Deque[Future[void]]
 
 proc newLock*(): LockAsync =
   new result
   result = LockAsync(
     used: false,
-    acqEv: initDeque[Future[void]](2),
     relEv: initDeque[Future[void]](2)
   )
 
@@ -24,23 +23,13 @@ proc relDone(lck: LockAsync) =
   if lck.relEv.len > 0:
     lck.relEv.popFirst().complete()
 
-proc acqEvent(lck: LockAsync): Future[void] =
-  result = newFuture[void]()
-  lck.acqEv.addLast result
-
-proc acqDone(lck: LockAsync) =
-  if lck.acqEv.len > 0:
-    lck.acqEv.popFirst().complete()
-
-proc acquire*(lck: LockAsync): Future[void] {.async.} =
+proc acquire(lck: LockAsync): Future[void] {.async.} =
   if lck.used:
     await lck.relEvent()
   lck.used = true
-  lck.acqDone()
 
-proc release*(lck: LockAsync): Future[void] {.async.} =
-  if not lck.used:
-    await lck.acqEvent()
+proc release(lck: LockAsync) =
+  doAssert lck.used
   lck.used = false
   lck.relDone()
 
@@ -49,16 +38,16 @@ template withLock*(lck: LockAsync, body: untyped): untyped =
   try:
     body
   finally:
-    await lck.release()
+    lck.release()
 
 when isMainModule:
   block:
     proc test() {.async.} =
       var lck = newLock()
       await lck.acquire()
-      await lck.release()
+      lck.release()
       await lck.acquire()
-      await lck.release()
+      lck.release()
     waitFor test()
   block:
     proc test() {.async.} =
@@ -69,7 +58,7 @@ when isMainModule:
         await lck.acquire()
         resPut.add i
       proc popOne(i: int) {.async.} =
-        await lck.release()
+        lck.release()
         resPop.add i
       await (
         putOne(1) and
