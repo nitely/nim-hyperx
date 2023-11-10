@@ -85,4 +85,25 @@ when isMainModule:
       )
       doAssert puts == @[1,2,3,4,5,6]
     waitFor test()
+  block:
+    proc test() {.async.} =
+      var lck = newLock()
+      proc release() {.async.} =
+        lck.release()
+      var puts = newSeq[int]()
+      proc putOne(i: int) {.async.} =
+        withLock lck:
+          puts.add i
+      await lck.acquire()
+      await (
+        putOne(1) and
+        putOne(2) and
+        putOne(3) and
+        putOne(4) and
+        putOne(5) and
+        putOne(6) and
+        release()
+      )
+      doAssert puts == @[1,2,3,4,5,6]
+    waitFor test()
   echo "ok"
