@@ -52,31 +52,21 @@ when isMainModule:
     waitFor test()
   block:
     proc test() {.async.} =
+      var res: seq[string]
       var lck = newLock()
-      var resPut = newSeq[int]()
-      var resPop = newSeq[int]()
-      proc putOne(i: int) {.async.} =
+      proc acquire() {.async.} =
         await lck.acquire()
-        resPut.add i
-      proc popOne(i: int) {.async.} =
+        res.add "acq"
+      proc release() {.async.} =
+        res.add "rel"
         lck.release()
-        resPop.add i
+      await acquire()
       await (
-        putOne(1) and
-        putOne(2) and
-        putOne(3) and
-        putOne(4) and
-        putOne(5) and
-        putOne(6) and
-        popOne(1) and
-        popOne(2) and
-        popOne(3) and
-        popOne(4) and
-        popOne(5) and
-        popOne(6)
+        acquire() and
+        release()
       )
-      doAssert resPut == @[1,2,3,4,5,6]
-      doAssert resPop == @[1,2,3,4,5,6]
+      await release()
+      doAssert res == @["acq", "rel", "acq", "rel"]
     waitFor test()
   block:
     proc test() {.async.} =
