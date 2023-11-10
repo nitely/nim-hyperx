@@ -54,19 +54,19 @@ when isMainModule:
     proc test() {.async.} =
       var res: seq[string]
       var lck = newLock()
-      proc acquire() {.async.} =
+      proc acquire(i: int) {.async.} =
         await lck.acquire()
-        res.add "acq"
-      proc release() {.async.} =
-        res.add "rel"
+        res.add "acq" & $i
+      proc release(i: int) {.async.} =
+        res.add "rel" & $i
         lck.release()
-      await acquire()
+      await acquire(1)
       await (
-        acquire() and
-        release()
+        acquire(2) and
+        release(1)
       )
-      await release()
-      doAssert res == @["acq", "rel", "acq", "rel"]
+      await release(2)
+      doAssert res == @["acq1", "rel1", "acq2", "rel2"]
     waitFor test()
   block:
     proc test() {.async.} =
