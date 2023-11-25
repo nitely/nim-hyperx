@@ -5,6 +5,7 @@
 
 import pkg/hpack/decoder
 import ./frame
+import ./stream
 import ./queue
 import ./lock
 
@@ -53,169 +54,6 @@ func add(s: var string, ss: seq[byte]) =
   # XXX x_x
   for c in ss:
     s.add c.char
-
-# Section 5.1
-type
-  StreamState = enum
-    strmIdle
-    strmOpen
-    strmClosed
-    strmReservedLocal
-    strmReservedRemote
-    strmHalfClosedLocal
-    strmHalfClosedRemote
-    strmInvalid
-  StreamEvent = enum
-    seHeadersRecv
-    seHeadersSend
-    sePushPromiseRecv
-    sePushPromiseSend
-    seEndStreamRecv
-    seEndStreamSend
-    seRstStream
-    sePriorityRecv
-    sePrioritySend
-    seWindowUpdateRecv
-    seWindowUpdateSend
-    seDataRecv
-    # seFlowControlRecv
-    # seFlowControlSend
-    # seSomeRecv
-    # seSomeSend
-    seUnknown
-
-# XXX strmInvalid is a connection error when recv
-#     and some programming error when send
-# XXX ignore unknow evet
-func transition(s: StreamState, e: StreamEvent): StreamState =
-  case s
-  of strmIdle:
-    case e:
-    of seHeadersRecv, seHeadersSend:
-      strmOpen
-    of sePushPromiseRecv: # or error?
-      strmReservedRemote
-    of sePushPromiseSend:
-      strmReservedLocal
-    of seEndStreamRecv:
-      strmHalfClosedRemote
-    of seEndStreamSend:
-      strmHalfClosedLocal
-    of sePriorityRecv:
-      strmIdle
-    else:
-      strmInvalid
-  of strmOpen:
-    case e
-    of seEndStreamSend:
-      strmHalfClosedLocal
-    of seEndStreamRecv:
-      strmHalfClosedRemote
-    of seRstStream:
-      strmClosed
-    else:
-      strmOpen
-  of strmClosed:
-    case e
-    # XXX allow Flow-controlled frames recv
-    of sePrioritySend,
-        sePriorityRecv,
-        seWindowUpdateRecv,
-        seRstStream:
-      strmClosed
-    # XXX this is like limiting the window
-    #     to receive after close to 0.
-    #     Maybe just ignore all received?
-    #     however, in case of sending
-    #     is correct, and in case of
-    #     receiving, it should be handled
-    #     by the receiver...?
-    else:
-      strmInvalid
-  of strmReservedLocal:
-    case e
-    of seHeadersSend:
-      strmHalfClosedRemote
-    of seRstStream:
-      strmClosed
-    of sePrioritySend,
-        sePriorityRecv,
-        seWindowUpdateRecv:
-      strmReservedLocal
-    else:
-      strmInvalid
-  of strmReservedRemote:
-    case e
-    of seHeadersRecv:
-      strmHalfClosedLocal
-    of seRstStream:
-      strmClosed
-    of seWindowUpdateSend,
-        sePriorityRecv,
-        sePrioritySend:
-      strmReservedRemote
-    else:
-      strmInvalid
-  of strmHalfClosedLocal:
-    case e
-    of seEndStreamRecv,
-        seRstStream:
-      strmClosed
-    # can receive any type
-    of seHeadersRecv,
-        sePushPromiseRecv,
-        sePriorityRecv,
-        seWindowUpdateRecv,
-        seWindowUpdateSend,
-        sePrioritySend:
-      strmHalfClosedLocal
-    else:
-      strmInvalid
-  of strmHalfClosedRemote:
-    case e
-    of seEndStreamSend,
-        seRstStream:
-      strmClosed
-    # can send any type
-    of seHeadersSend,
-        sePushPromiseSend,
-        sePrioritySend,
-        seWindowUpdateSend,
-        seWindowUpdateRecv,
-        sePriorityRecv:
-      strmHalfClosedRemote
-    else:
-      strmInvalid
-  of strmInvalid:
-    #assert false
-    strmInvalid
-
-func toEventRecv(frm: Frame): StreamEvent =
-  case frm.typ
-  of frmtData:
-    if frmfEndStream in frm.flags:
-      seEndStreamRecv
-    else:
-      seDataRecv
-  of frmtHeaders:
-    # XXX needs fixing if ES can be in
-    #     a continuation frm
-    if frmfEndStream in frm.flags:
-      seEndStreamRecv
-    else:
-      seHeadersRecv
-  of frmtPriority:
-    sePriorityRecv
-  of frmtRstStream:
-    seRstStream
-  of frmtPushPromise:
-    sePushPromiseRecv
-  of frmtWindowUpdate:
-    seWindowUpdateRecv
-  else:
-    doAssert frm.typ in {frmtSettings, frmtPing, frmtGoAway, frmtContinuation}
-    doAssert false
-    seUnknown
 
 func isAllowedToSend(state: StreamState, frm: Frame): bool =
   ## Check if the stream is allowed to send the frame
@@ -325,21 +163,12 @@ const connFrmAllowed = {
   frmtGoAway,
   frmtWindowUpdate
 }
-const strmFrmAllowed = {
-  frmtData,
-  frmtHeaders,
-  frmtPriority,
-  frmtRstStream,
-  frmtPushPromise,
-  frmtWindowUpdate
-  #frmtContinuation
-}
 
 proc doTransitionRecv(s: var Stream, frm: Frame) =
   if s.id == frmsidMain.StreamId:
     check(frm.typ in connFrmAllowed, ProtocolError)
     return
-  check(frm.typ in strmFrmAllowed, ProtocolError)
+  check(frm.typ in frmRecvAllowed, ProtocolError)
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
       raiseError StrmStreamClosedError
@@ -347,7 +176,7 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
       raiseError ProtocolError
   let event = frm.toEventRecv()
   let oldState = s.state
-  s.state = transition(s.state, event)
+  s.state = s.state.toNextStateRecv event
   check(s.state != strmInvalid, ProtocolError)
   if oldState == strmIdle:
     # XXX close streams < s.id in idle state
