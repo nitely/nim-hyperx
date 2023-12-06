@@ -55,28 +55,6 @@ func add(s: var string, ss: seq[byte]) =
   for c in ss:
     s.add c.char
 
-func isAllowedToSend(state: StreamState, frm: Frame): bool =
-  ## Check if the stream is allowed to send the frame
-  true
-
-func isAllowedToRecv(state: StreamState, frm: Frame): bool =
-  ## Check if the stream is allowed to receive the frame
-  # https://httpwg.org/specs/rfc9113.html#StreamStates
-  case state
-  of strmIdle:
-    frm.typ in {frmtHeaders, frmtPriority}
-  of strmReservedLocal:
-    frm.typ in {frmtRstStream, frmtPriority, frmtWindowUpdate}
-  of strmReservedRemote:
-    frm.typ in {frmtHeaders, frmtRstStream, frmtPriority}
-  of strmOpen, strmHalfClosedLocal:
-    true
-  of strmHalfClosedRemote:
-    frm.typ in {frmtWindowUpdate, frmtPriority, frmtRstStream}
-  of strmClosed:  # XXX only do minimal processing of frames
-    true
-  of strmInvalid: false
-
 type
   StreamId = distinct uint32  # range[0 .. 31.ones.int]
 
