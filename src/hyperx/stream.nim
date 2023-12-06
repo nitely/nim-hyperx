@@ -48,7 +48,6 @@ const frmRecvAllowed* = {
 # Section 5.1
 func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState =
   doAssert e in eventRecvAllowed
-  # XXX: seDataRecv ???
   case s
   of strmIdle:
     case e:
@@ -196,6 +195,7 @@ when isMainModule:
       doAssert toNextStateRecv(strmIdle, ev) == strmInvalid
     doAssert toNextStateRecv(strmOpen, seEndStreamRecv) == strmHalfClosedRemote
     doAssert toNextStateRecv(strmOpen, seRstStream) == strmClosed
+    doAssert toNextStateRecv(strmOpen, seDataRecv) == strmOpen
     for ev in eventRecvAllowed-{seEndStreamRecv, seRstStream}:
       doAssert toNextStateRecv(strmOpen, ev) == strmOpen
     doAssert toNextStateRecv(strmClosed, sePriorityRecv) == strmClosed
@@ -211,6 +211,7 @@ when isMainModule:
       doAssert toNextStateRecv(strmReservedRemote, ev) == strmInvalid
     doAssert toNextStateRecv(strmHalfClosedLocal, seEndStreamRecv) == strmClosed
     doAssert toNextStateRecv(strmHalfClosedLocal, seRstStream) == strmClosed
+    doAssert toNextStateRecv(strmHalfClosedLocal, seDataRecv) == strmHalfClosedLocal
     for ev in eventRecvAllowed-{seEndStreamRecv,seRstStream}:
       doAssert toNextStateRecv(strmHalfClosedLocal, ev) == strmHalfClosedLocal
     doAssert toNextStateRecv(strmHalfClosedRemote, seRstStream) == strmClosed

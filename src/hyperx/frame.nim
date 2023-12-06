@@ -214,4 +214,3 @@ func toString*(frm: Frame, payload: seq[byte]): string =
   else:
     result.add "\nUnimplemented debug"
   result.add "\n============="
-  
