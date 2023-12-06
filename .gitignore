@@ -5,3 +5,5 @@ src/hyperx/server
 src/hyperx/queue
 src/hyperx/lock
 src/hyperx/untestable
+src/hyperx/frame
+src/hyperx/stream
