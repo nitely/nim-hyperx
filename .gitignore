@@ -7,3 +7,4 @@ src/hyperx/lock
 src/hyperx/untestable
 src/hyperx/frame
 src/hyperx/stream
+src/hyperx/utils

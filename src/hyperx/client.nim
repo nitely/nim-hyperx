@@ -394,27 +394,28 @@ template withConnection*(
   client: ClientContext,
   body: untyped
 ) =
-  var recvFut: Future[void]
-  var waitForRecvFut = false
-  try:
-    debugInfo "connecting"
-    await client.connect()
-    debugInfo "connected"
-    recvFut = client.recvTask()
-    waitForRecvFut = true
-    asyncCheck client.consumeMainStream()
-    asyncCheck client.responseDispatcher()
-    block:
-      body
-  except Exception as err:
-    debugInfo err.msg
-    raise err
-  finally:
-    debugInfo "exit"
-    client.close()
-    client.isConnected = false
-    if waitForRecvFut:
-      await recvFut
+  block:
+    var recvFut: Future[void]
+    var waitForRecvFut = false
+    try:
+      debugInfo "connecting"
+      await client.connect()
+      debugInfo "connected"
+      recvFut = client.recvTask()
+      waitForRecvFut = true
+      asyncCheck client.consumeMainStream()
+      asyncCheck client.responseDispatcher()
+      block:
+        body
+    except Exception as err:
+      debugInfo err.msg
+      raise err
+    finally:
+      debugInfo "exit"
+      client.close()
+      client.isConnected = false
+      if waitForRecvFut:
+        await recvFut
 
 type
   Request* = ref object
