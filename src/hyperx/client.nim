@@ -308,19 +308,24 @@ proc connect(client: ClientContext) {.async.} =
 proc close(client: ClientContext) =
   client.sock.close()
 
+proc consumeMainStream(client: ClientContext, dptMsg: DptMsgData) {.async.} =
+  # XXX process settings, window updates, etc
+  discard
+
 proc responseDispatcherNaked(client: ClientContext) {.async.} =
   ## Dispatch messages to open streams. Note decoding
   ## headers must be done in message received order, so
   ## it needs to be done here. Same for processing the main
   ## stream messages.
-  # XXX call main stream processing here instead of
-  #     using another task
   while client.isConnected:
     let dptMsg = await client.dptMsgs.pop()
     if dptMsg.strmId notin client.streams:
       debugInfo "stream not found " & $dptMsg.strmId.int
       continue
     debugInfo "recv data on stream " & $dptMsg.strmId.int
+    if dptMsg.strmId == frmsidMain.StreamId:
+      await consumeMainStream(client, dptMsg)
+      continue
     let stream = client.streams[dptMsg.strmId]
     var strmMsg = initStrmMsgData(dptMsg.frmTyp)
     if dptMsg.frmTyp == frmtHeaders:
@@ -375,21 +380,6 @@ proc recvTask(client: ClientContext) {.async.} =
   finally:
     debugInfo "recvTask exited"
 
-proc consumeMainStreamNaked(client: ClientContext) {.async.} =
-  # XXX process settings, window updates, etc
-  doAssert client.isConnected
-  while client.isConnected:
-    discard await client.stream(frmsidMain.StreamId).read()
-
-proc consumeMainStream(client: ClientContext) {.async.} =
-  try:
-    await client.consumeMainStreamNaked()
-  except Exception as err:
-    debugInfo err.msg
-    raise err
-  finally:
-    debugInfo "consumeMainStream exited"
-
 template withConnection*(
   client: ClientContext,
   body: untyped
@@ -403,7 +393,6 @@ template withConnection*(
       debugInfo "connected"
       recvFut = client.recvTask()
       waitForRecvFut = true
-      asyncCheck client.consumeMainStream()
       asyncCheck client.responseDispatcher()
       block:
         body
