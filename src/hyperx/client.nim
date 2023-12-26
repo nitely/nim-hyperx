@@ -11,12 +11,11 @@ import ./lock
 
 type
   HyperxError* = object of CatchableError
-  # XXX rename to ConnError + use prefix Conn
-  ConnectionError = object of HyperxError
-  ConnectionClosedError = object of HyperxError
-  ProtocolError = object of ConnectionError
-  StreamClosedError = object of ConnectionError
-  CompressionError = object of ConnectionError
+  ConnError = object of HyperxError
+  ConnClosedError = object of ConnError
+  ConnProtocolError = object of ConnError
+  ConnStreamClosedError = object of ConnError
+  ConnCompressionError = object of ConnError
   FrameSizeError = object of HyperxError
   StrmError = object of HyperxError
   StrmProtocolError = object of StrmError
@@ -92,7 +91,7 @@ proc decode(payload: openArray[byte], ds: var DecodedStr, dh: var DynHeaders) =
   try:
     hdecodeAll(payload, dh, ds)
   except HpackError as err:
-    raiseError CompressionError, err.msg
+    raiseError ConnCompressionError, err.msg
 
 type
   Payload* = ref object
@@ -144,18 +143,18 @@ const connFrmAllowed = {
 
 proc doTransitionRecv(s: var Stream, frm: Frame) =
   if s.id == frmsidMain.StreamId:
-    check(frm.typ in connFrmAllowed, ProtocolError)
+    check(frm.typ in connFrmAllowed, ConnProtocolError)
     return
-  check(frm.typ in frmRecvAllowed, ProtocolError)
+  check(frm.typ in frmRecvAllowed, ConnProtocolError)
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
       raiseError StrmStreamClosedError
     else:
-      raiseError ProtocolError
+      raiseError ConnProtocolError
   let event = frm.toEventRecv()
   let oldState = s.state
   s.state = s.state.toNextStateRecv event
-  check(s.state != strmInvalid, ProtocolError)
+  check(s.state != strmInvalid, ConnProtocolError)
   if oldState == strmIdle:
     # XXX close streams < s.id in idle state
     discard
@@ -205,7 +204,7 @@ func stream(client: ClientContext, sid: StreamId): var Stream =
   try:
     result = client.streams[sid]
   except KeyError:
-    raiseError ProtocolError
+    raiseError ConnProtocolError
 
 func stream(client: ClientContext, sid: FrmSid): var Stream =
   client.stream sid.StreamId
@@ -217,17 +216,15 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
   var frm2 = newFrame()
   while frmfEndHeaders notin frm2.flags:
     frm2.setRawBytes await client.sock.recv(frmHeaderSize)
-    check(frm2.rawLen > 0, ConnectionClosedError)
-    check(frm2.rawLen == frmHeaderSize, ProtocolError)
+    check(frm2.rawLen == frmHeaderSize, ConnClosedError)
     debugInfo $frm2
-    check(frm2.sid == frm.sid, ProtocolError)
-    check(frm2.typ == frmtContinuation, ProtocolError)
+    check(frm2.sid == frm.sid, ConnProtocolError)
+    check(frm2.typ == frmtContinuation, ConnProtocolError)
     check frm2.payloadLen >= 0
     if frm2.payloadLen == 0:
       continue
     payload.s.add await client.sock.recv(frm2.payloadLen.int)
-    check(payload.s.len > 0, ConnectionClosedError)
-    check(payload.s.len == frm2.payloadLen.int, ProtocolError)
+    check(payload.s.len == frm2.payloadLen.int, ConnClosedError)
 
 proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
@@ -235,23 +232,22 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Frames cannot be interleaved here
   # XXX: use recvInto
   frm.setRawBytes await client.sock.recv(frmHeaderSize)
-  check(frm.rawLen > 0, ConnectionClosedError)
-  check(frm.rawLen == frmHeaderSize, ProtocolError)
+  check(frm.rawLen == frmHeaderSize, ConnClosedError)
   debugInfo $frm
   if frmfPadded in frm.flags:
-    check(frm.typ in {frmtHeaders, frmtPushPromise, frmtData}, ProtocolError)
+    check(frm.typ in {frmtHeaders, frmtPushPromise, frmtData}, ConnProtocolError)
     let padding = await client.sock.recv(1)
-    check(padding.len > 0, ConnectionClosedError)
+    check(padding.len == 1, ConnClosedError)
     frm.setPadding padding[0].uint8
   check frm.payloadLen >= 0
   if frm.payloadLen > 0:
     payload.s.setLen 0
     payload.s.add await client.sock.recv(frm.payloadLen.int)
-    check(payload.s.len > 0, ConnectionClosedError)
-    check(payload.s.len == frm.payloadLen.int, ProtocolError)
+    check(payload.s.len == frm.payloadLen.int, ConnClosedError)
     debugInfo toString(frm, payload.s)
   if frmfPadded in frm.flags:
-    discard await client.sock.recv(frm.padding.int)
+    let padding = await client.sock.recv(frm.padding.int)
+    check(padding.len == frm.padding.int, ConnClosedError)
   case frm.typ
   of frmtHeaders, frmtPushPromise:
     if frmfEndHeaders notin frm.flags:
@@ -340,7 +336,7 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       try:
         decode(dptMsg.payload.s, headers, client.dynHeaders)
         strmMsg.payload.s.add $headers
-      except CompressionError as err:
+      except ConnCompressionError as err:
         # XXX propagate error in strmMsg
         discard
     else:
