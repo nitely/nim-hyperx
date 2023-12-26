@@ -4,6 +4,7 @@ template ones(n: untyped): uint = (1.uint shl n) - 1
 
 const
   frmHeaderSize* = 9  # 9 bytes = 72 bits
+  frmHeaderMaxSize* = frmHeaderSize + 8  # + 64 bits
   # XXX: settings max frame size (payload) can be from 2^14 to 2^24-1
   frmMaxPayloadSize* = 1'u32 shl 14
   frmSettingsMaxFrameSize* = 1'u32 shl 14  # + frmHeaderSize
@@ -85,8 +86,9 @@ const
 
 type
   FrmPayloadLen* = uint32  # range[0 .. 24.ones.int]
+  FrmPadding* = uint8
   Frame* = ref object
-    s: array[frmHeaderSize, byte]
+    s: array[frmHeaderMaxSize, byte]
     rawL: int8  # XXX remove
 
 func newFrame*(): Frame {.inline.} =
@@ -102,9 +104,6 @@ func setRawBytes*(frm: Frame, data: string) =
 func rawLen*(frm: Frame): int {.inline.} =
   frm.rawL
 
-func len*(frm: Frame): int {.inline.} =
-  frmHeaderSize
-
 func rawBytesPtr*(frm: Frame): ptr byte =
   addr frm.s[0]
 
@@ -112,6 +111,35 @@ func clear*(frm: Frame) {.inline.} =
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0
   frm.rawL = 0
+
+func payloadLen*(frm: Frame): FrmPayloadLen {.inline.} =
+  # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
+  result += frm.s[0].uint32 shl 16
+  result += frm.s[1].uint32 shl 8
+  result += frm.s[2].uint32
+  doAssert result <= 24.ones.uint
+
+func typ*(frm: Frame): FrmTyp {.inline.} =
+  result = frm.s[3].FrmTyp
+
+func flags*(frm: Frame): var FrmFlags {.inline.} =
+  result = frm.s[4].FrmFlags
+
+func sid*(frm: Frame): FrmSid {.inline.} =
+  result += frm.s[5].uint shl 24
+  result += frm.s[6].uint shl 16
+  result += frm.s[7].uint shl 8
+  result += frm.s[8].uint
+
+func padding*(frm: Frame): FrmPadding {.inline.} =
+  doAssert frm.typ in {frmtData, frmtHeaders, frmtPushPromise}
+  result = frm.s[9].FrmPadding
+
+func len*(frm: Frame): int {.inline.} =
+  result = if frmfPadded in frm.flags:
+    frmHeaderSize + 1
+  else:
+    frmHeaderSize
 
 func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline.} =
   doAssert n <= 24.ones.uint
@@ -132,24 +160,10 @@ func setSid*(frm: Frame, sid: FrmSid) {.inline.} =
   frm.s[7] = ((sid.uint shr 8) and 8.ones).byte
   frm.s[8] = (sid.uint and 8.ones).byte
 
-func payloadLen*(frm: Frame): FrmPayloadLen {.inline.} =
-  # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
-  result += frm.s[0].uint32 shl 16
-  result += frm.s[1].uint32 shl 8
-  result += frm.s[2].uint32
-  doAssert result <= 24.ones.uint
-
-func typ*(frm: Frame): FrmTyp {.inline.} =
-  result = frm.s[3].FrmTyp
-
-func flags*(frm: Frame): var FrmFlags {.inline.} =
-  result = frm.s[4].FrmFlags
-
-func sid*(frm: Frame): FrmSid {.inline.} =
-  result += frm.s[5].uint shl 24
-  result += frm.s[6].uint shl 16
-  result += frm.s[7].uint shl 8
-  result += frm.s[8].uint
+func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =
+  ## Set padding
+  doAssert frm.typ in {frmtData, frmtHeaders, frmtPushPromise}
+  frm.s[9] = n.byte
 
 #func add*(frm: Frame, payload: openArray[byte]) {.inline.} =
 #  frm.s.add payload

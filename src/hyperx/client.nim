@@ -233,10 +233,16 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
   ## ``PushPromise``, read frames until ``END_HEADERS`` flag is set
   ## Frames cannot be interleaved here
+  # XXX: use recvInto
   frm.setRawBytes await client.sock.recv(frmHeaderSize)
   check(frm.rawLen > 0, ConnectionClosedError)
   check(frm.rawLen == frmHeaderSize, ProtocolError)
   debugInfo $frm
+  if frmfPadded in frm.flags:
+    check(frm.typ in {frmtHeaders, frmtPushPromise, frmtData}, ProtocolError)
+    let padding = await client.sock.recv(1)
+    check(padding.len > 0, ConnectionClosedError)
+    frm.setPadding padding[0].uint8
   check frm.payloadLen >= 0
   if frm.payloadLen > 0:
     payload.s.setLen 0
@@ -244,10 +250,10 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
     check(payload.s.len > 0, ConnectionClosedError)
     check(payload.s.len == frm.payloadLen.int, ProtocolError)
     debugInfo toString(frm, payload.s)
+  if frmfPadded in frm.flags:
+    discard await client.sock.recv(frm.padding.int)
   case frm.typ
   of frmtHeaders, frmtPushPromise:
-    if frmfPadded in frm.flags:
-      debugInfo "PADDED"  # XXX consume padding
     if frmfEndHeaders notin frm.flags:
       debugInfo "Continuation"
       await client.readUntilEnd(frm, payload)
