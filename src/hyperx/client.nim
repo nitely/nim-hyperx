@@ -466,19 +466,19 @@ proc get*(
 when isMainModule:
   when not defined(hyperxTest):
     {.error: "tests need -d:hyperxTest".}
-  block:
+
+  block "test sock default state":
     var client = newClient("google.com")
     doAssert not client.sock.isConnected
     doAssert client.sock.hostname == ""
     doAssert client.sock.port == Port 0
-  block:
+  block "test sock state":
     proc test() {.async.} =
       var client = newClient("google.com")
       withConnection(client):
         doAssert client.sock.isConnected
         doAssert client.sock.hostname == "google.com"
         doAssert client.sock.port == Port 443
-        await sleepAsync 100  # XXX remove
       doAssert not client.sock.isConnected
     waitFor test()
 

@@ -32,4 +32,7 @@ proc connect*(s: TestSocket, hostname: string, port: Port) {.async.} =
 
 proc close*(s: TestSocket) =
   s.isConnected = false
-  waitFor s.data.put("")
+  proc callback() =
+    waitFor s.data.put("")
+  callSoon callback
+  

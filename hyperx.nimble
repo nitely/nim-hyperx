@@ -7,7 +7,7 @@ license = "MIT"
 srcDir = "src"
 skipDirs = @["tests"]
 
-requires "nim >= 0.18.1"
+requires "nim >= 2.0.0"
 requires "hpack >= 0.1 & < 0.2"
 
 task test, "Test":
@@ -16,6 +16,7 @@ task test, "Test":
   exec "nim c -r src/hyperx/queue.nim"
   exec "nim c -r src/hyperx/stream.nim"
   exec "nim c -r src/hyperx/frame.nim"
+  exec "nim c -r src/hyperx/client.nim"
 
 task docs, "Docs":
-  exec "nim doc2 -o:./docs --project ./src/zeus.nim"
+  exec "nim doc2 -o:./docs --project ./src/hyperx.nim"
