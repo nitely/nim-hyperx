@@ -497,12 +497,34 @@ when isMainModule:
     frm.setPayloadLen pl
     result = frm.rawStr()
 
-  proc headers(dh: var DynHeaders, hs: seq[string]): string =
+  proc hencode(dh: var DynHeaders, hs: string): string =
     var resp = newSeq[byte]()
-    for h in hs:
+    for h in hs.splitLines:
+      if h.len == 0:
+        continue
       let parts = h.split(": ", 1)
       discard hencode(parts[0], parts[1], dh, resp)
     result = resp.toString
+
+  proc replyOne(
+    client: ClientContext,
+    headers: string,
+    text: string
+  ) {.async.} =
+    await client.putTestData frame(
+      frmtHeaders,
+      1.FrmSid,
+      headers.len.FrmPayloadLen,
+      @[frmfEndHeaders]
+    )
+    await client.putTestData headers
+    await client.putTestData frame(
+      frmtData,
+      1.FrmSid,
+      text.len.FrmPayloadLen,
+      @[frmfEndStream]
+    )
+    await client.putTestData text
 
   test "sock default state":
     var client = newClient("example.com")
@@ -520,40 +542,21 @@ when isMainModule:
     waitFor test()
   test "sanity req/resp":
     proc test() {.async.} =
-      var dh = initDynHeaders(1024, 16)
-
-      proc reply(client: ClientContext) {.async.} =
-        let rawHeaders = headers(dh, @[
-          ":method: foobar"
-        ])
-        await client.putTestData frame(
-          frmtHeaders,
-          1.FrmSid,
-          rawHeaders.len.FrmPayloadLen,
-          @[frmfEndHeaders]
-        )
-        await client.putTestData rawHeaders
-        let rawPayload = "foobar body"
-        await client.putTestData frame(
-          frmtData,
-          1.FrmSid,
-          rawPayload.len.FrmPayloadLen,
-          @[frmfEndStream]
-        )
-        await client.putTestData rawPayload
-
       var resps = newSeq[Response]()
       proc getOne(client: ClientContext, path: string) {.async.} =
         resps.add await client.get(path)
 
+      var dh = initDynHeaders(1024, 16)
       var client = newClient("example.com")
+      const headers = ":method: foobar\r\L"
+      const text = "foobar body"
       withConnection client:
         await (
           client.getOne("/") and
-          client.reply()
+          client.replyOne(hencode(dh, headers), text)
         )
-      doAssert resps[0].headers == ":method: foobar\r\L"
-      doAssert resps[0].text == "foobar body"
+      doAssert resps[0].headers == headers
+      doAssert resps[0].text == text
     waitFor test()
 
   echo "ok"
