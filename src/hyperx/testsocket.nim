@@ -31,7 +31,7 @@ proc recv*(s: TestSocket, i: int): Future[string] {.async.} =
       s.isConnected = false
       return ""
   result = s.buff[s.i .. s.i+i-1]
-  s.i = i
+  s.i += i
 
 proc send*(s: TestSocket, data: ptr byte, ln: int) {.async.} =
   discard

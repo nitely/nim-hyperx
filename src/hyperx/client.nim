@@ -264,10 +264,9 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
       await client.readUntilEnd(frm, payload)
   else:
     discard
-  # transition may raise a stream error, so do after processing
-  # all continuation frames. Code before this can only raise
-  # conn errors
-  client.stream(frm.sid).doTransitionRecv frm
+  # XXX maybe do not do this here
+  if frm.sid.StreamId in client.streams:
+    client.stream(frm.sid).doTransitionRecv frm
 
 proc openMainStream(client: ClientContext): StreamId =
   doAssert frmsidMain.StreamId notin client.streams
@@ -464,31 +463,97 @@ proc get*(
   result = await client.request req
 
 when defined(hyperxTest):
-  proc putTestData*(client: ClientContext, data: string) =
-    discard
+  proc putTestData*(client: ClientContext, data: string) {.async.} =
+    await client.sock.data.put data
 
 when isMainModule:
   when not defined(hyperxTest):
     {.error: "tests need -d:hyperxTest".}
+  
+  import std/strutils
   
   template test(name: string, body: untyped): untyped =
     block:
       echo "test " & name
       body
 
+  func toString(bytes: openArray[byte]): string =
+    let L = bytes.len
+    if L > 0:
+      result = newString(L)
+      copyMem(result.cstring, bytes[0].unsafeAddr, L)
+    
+  proc frame(
+    typ: FrmTyp,
+    sid: FrmSid,
+    pl: FrmPayloadLen,
+    flags: seq[FrmFlag] = @[]
+  ): string =
+    var frm = newFrame()
+    frm.setTyp typ
+    frm.setSid sid
+    for f in flags:
+      frm.flags.incl f
+    frm.setPayloadLen pl
+    result = frm.rawStr()
+
+  proc headers(dh: var DynHeaders, hs: seq[string]): string =
+    var resp = newSeq[byte]()
+    for h in hs:
+      let parts = h.split(": ", 1)
+      discard hencode(parts[0], parts[1], dh, resp)
+    result = resp.toString
+
   test "sock default state":
-    var client = newClient("google.com")
+    var client = newClient("example.com")
     doAssert not client.sock.isConnected
     doAssert client.sock.hostname == ""
     doAssert client.sock.port == Port 0
   test "sock state":
     proc test() {.async.} =
-      var client = newClient("google.com")
+      var client = newClient("example.com")
       withConnection client:
         doAssert client.sock.isConnected
-        doAssert client.sock.hostname == "google.com"
+        doAssert client.sock.hostname == "example.com"
         doAssert client.sock.port == Port 443
       doAssert not client.sock.isConnected
+    waitFor test()
+  test "sanity req/resp":
+    proc test() {.async.} =
+      var dh = initDynHeaders(1024, 16)
+
+      proc reply(client: ClientContext) {.async.} =
+        let rawHeaders = headers(dh, @[
+          ":method: foobar"
+        ])
+        await client.putTestData frame(
+          frmtHeaders,
+          1.FrmSid,
+          rawHeaders.len.FrmPayloadLen,
+          @[frmfEndHeaders]
+        )
+        await client.putTestData rawHeaders
+        let rawPayload = "foobar body"
+        await client.putTestData frame(
+          frmtData,
+          1.FrmSid,
+          rawPayload.len.FrmPayloadLen,
+          @[frmfEndStream]
+        )
+        await client.putTestData rawPayload
+
+      var resps = newSeq[Response]()
+      proc getOne(client: ClientContext, path: string) {.async.} =
+        resps.add await client.get(path)
+
+      var client = newClient("example.com")
+      withConnection client:
+        await (
+          client.getOne("/") and
+          client.reply()
+        )
+      doAssert resps[0].headers == ":method: foobar\r\L"
+      doAssert resps[0].text == "foobar body"
     waitFor test()
 
   echo "ok"

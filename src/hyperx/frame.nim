@@ -173,8 +173,9 @@ func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =
 #  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
 func rawStr*(frm: Frame): string =
-  for b in frm.s:
-    result.add b.char
+  result = ""
+  for i in 0 .. frm.len-1:
+    result.add frm.s[i].char
 
 func `$`*(frm: Frame): string =
   result = &"""
