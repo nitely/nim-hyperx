@@ -463,19 +463,28 @@ proc get*(
   debugInfo "REQUEST"
   result = await client.request req
 
+when defined(hyperxTest):
+  proc putTestData*(client: ClientContext, data: string) =
+    discard
+
 when isMainModule:
   when not defined(hyperxTest):
     {.error: "tests need -d:hyperxTest".}
+  
+  template test(name: string, body: untyped): untyped =
+    block:
+      echo "test " & name
+      body
 
-  block "test sock default state":
+  test "sock default state":
     var client = newClient("google.com")
     doAssert not client.sock.isConnected
     doAssert client.sock.hostname == ""
     doAssert client.sock.port == Port 0
-  block "test sock state":
+  test "sock state":
     proc test() {.async.} =
       var client = newClient("google.com")
-      withConnection(client):
+      withConnection client:
         doAssert client.sock.isConnected
         doAssert client.sock.hostname == "google.com"
         doAssert client.sock.port == Port 443
