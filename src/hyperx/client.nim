@@ -9,6 +9,9 @@ import ./stream
 import ./queue
 import ./lock
 
+when defined(hyperxTest):
+  import ./testsocket
+
 type
   HyperxError* = object of CatchableError
   ConnError = object of HyperxError
@@ -159,13 +162,18 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
     # XXX close streams < s.id in idle state
     discard
 
+when defined(hyperxTest):
+  type MyAsyncSocket = TestSocket
+else:
+  type MyAsyncSocket = AsyncSocket
+
 type
   DptMsgData = object
     strmId: StreamId
     frmTyp: FrmTyp
     payload: Payload
   ClientContext* = ref object
-    sock: AsyncSocket
+    sock: MyAsyncSocket
     hostname: string
     port: Port
     isConnected: bool
@@ -176,13 +184,14 @@ type
     dptMsgs: QueueAsync[DptMsgData]
     writeLock: LockAsync
 
-proc newSocket(): AsyncSocket =
-  result = newAsyncSocket()
-  wrapSocket(defaultSslContext(), result)
+when not defined(hyperxTest):
+  proc newMySocket(): MyAsyncSocket =
+    result = newAsyncSocket()
+    wrapSocket(defaultSslContext(), result)
 
 proc newClient*(hostname: string, port = Port 443): ClientContext =
   result = ClientContext(
-    sock: newSocket(),
+    sock: newMySocket(),
     hostname: hostname,
     port: port,
     dynHeaders: initDynHeaders(1024, 16),
@@ -405,8 +414,11 @@ template withConnection*(
       debugInfo "exit"
       client.close()
       client.isConnected = false
-      if waitForRecvFut:
-        await recvFut
+      try:
+        if waitForRecvFut:
+          await recvFut
+      except ConnClosedError:
+        discard
 
 type
   Request* = ref object
@@ -452,14 +464,22 @@ proc get*(
   result = await client.request req
 
 when isMainModule:
-  proc main() {.async.} =
+  when not defined(hyperxTest):
+    {.error: "tests need -d:hyperxTest".}
+  block:
     var client = newClient("google.com")
-    withConnection(client):
-      let r = await client.get("/")
-      echo r.headers
-      var dataStr = ""
-      dataStr.add r.data.s
-      echo dataStr
-      await sleepAsync 2000
-  waitFor main()
+    doAssert not client.sock.isConnected
+    doAssert client.sock.hostname == ""
+    doAssert client.sock.port == Port 0
+  block:
+    proc test() {.async.} =
+      var client = newClient("google.com")
+      withConnection(client):
+        doAssert client.sock.isConnected
+        doAssert client.sock.hostname == "google.com"
+        doAssert client.sock.port == Port 443
+        await sleepAsync 100  # XXX remove
+      doAssert not client.sock.isConnected
+    waitFor test()
+
   echo "ok"
