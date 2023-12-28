@@ -511,18 +511,13 @@ when isMainModule:
     headers: string,
     text: string
   ) {.async.} =
+    let sid = FrmSid(client.currStreamId.int - 2)
     await client.putTestData frame(
-      frmtHeaders,
-      1.FrmSid,
-      headers.len.FrmPayloadLen,
-      @[frmfEndHeaders]
+      frmtHeaders, sid, headers.len.FrmPayloadLen, @[frmfEndHeaders]
     )
     await client.putTestData headers
     await client.putTestData frame(
-      frmtData,
-      1.FrmSid,
-      text.len.FrmPayloadLen,
-      @[frmfEndStream]
+      frmtData, sid, text.len.FrmPayloadLen, @[frmfEndStream]
     )
     await client.putTestData text
 
@@ -546,10 +541,10 @@ when isMainModule:
       proc getOne(client: ClientContext, path: string) {.async.} =
         resps.add await client.get(path)
 
-      var dh = initDynHeaders(1024, 16)
-      var client = newClient("example.com")
       const headers = ":method: foobar\r\L"
       const text = "foobar body"
+      var dh = initDynHeaders(1024, 16)
+      var client = newClient("example.com")
       withConnection client:
         await (
           client.getOne("/") and
@@ -557,6 +552,31 @@ when isMainModule:
         )
       doAssert resps[0].headers == headers
       doAssert resps[0].text == text
+    waitFor test()
+  test "sanity multiple req/resp":
+    proc test() {.async.} =
+      var resps = newSeq[Response]()
+      proc getOne(client: ClientContext, path: string) {.async.} =
+        resps.add await client.get(path)
+
+      const
+        headers = ":method: foo\r\L"
+        text = "foo body"
+        headers2 = ":method: bar\r\L"
+        text2 = "bar body"
+      var dh = initDynHeaders(1024, 16)
+      var client = newClient("example.com")
+      withConnection client:
+        await (
+          client.getOne("/") and
+          client.replyOne(hencode(dh, headers), text) and
+          client.getOne("/") and
+          client.replyOne(hencode(dh, headers2), text2)
+        )
+      doAssert resps[0].headers == headers
+      doAssert resps[0].text == text
+      doAssert resps[1].headers == headers2
+      doAssert resps[1].text == text2
     waitFor test()
 
   echo "ok"
