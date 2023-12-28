@@ -469,64 +469,13 @@ when defined(hyperxTest):
 when isMainModule:
   when not defined(hyperxTest):
     {.error: "tests need -d:hyperxTest".}
-  
-  import std/strutils
-  
-  template test(name: string, body: untyped): untyped =
-    block:
-      echo "test " & name
-      body
 
-  func toString(bytes: openArray[byte]): string =
-    let L = bytes.len
-    if L > 0:
-      result = newString(L)
-      copyMem(result.cstring, bytes[0].unsafeAddr, L)
-    
-  proc frame(
-    typ: FrmTyp,
-    sid: FrmSid,
-    pl: FrmPayloadLen,
-    flags: seq[FrmFlag] = @[]
-  ): string =
-    var frm = newFrame()
-    frm.setTyp typ
-    frm.setSid sid
-    for f in flags:
-      frm.flags.incl f
-    frm.setPayloadLen pl
-    result = frm.rawStr()
-
-  proc hencode(dh: var DynHeaders, hs: string): string =
-    var resp = newSeq[byte]()
-    for h in hs.splitLines:
-      if h.len == 0:
-        continue
-      let parts = h.split(": ", 1)
-      discard hencode(parts[0], parts[1], dh, resp)
-    result = resp.toString
-
-  proc replyOne(
-    client: ClientContext,
-    headers: string,
-    text: string
-  ) {.async.} =
-    let sid = FrmSid(client.currStreamId.int - 2)
-    await client.putTestData frame(
-      frmtHeaders, sid, headers.len.FrmPayloadLen, @[frmfEndHeaders]
-    )
-    await client.putTestData headers
-    await client.putTestData frame(
-      frmtData, sid, text.len.FrmPayloadLen, @[frmfEndStream]
-    )
-    await client.putTestData text
-
-  test "sock default state":
+  block sock_default_state:
     var client = newClient("example.com")
     doAssert not client.sock.isConnected
     doAssert client.sock.hostname == ""
     doAssert client.sock.port == Port 0
-  test "sock state":
+  block sock_state:
     proc test() {.async.} =
       var client = newClient("example.com")
       withConnection client:
@@ -534,49 +483,6 @@ when isMainModule:
         doAssert client.sock.hostname == "example.com"
         doAssert client.sock.port == Port 443
       doAssert not client.sock.isConnected
-    waitFor test()
-  test "sanity req/resp":
-    proc test() {.async.} =
-      var resps = newSeq[Response]()
-      proc getOne(client: ClientContext, path: string) {.async.} =
-        resps.add await client.get(path)
-
-      const headers = ":method: foobar\r\L"
-      const text = "foobar body"
-      var dh = initDynHeaders(1024, 16)
-      var client = newClient("example.com")
-      withConnection client:
-        await (
-          client.getOne("/") and
-          client.replyOne(hencode(dh, headers), text)
-        )
-      doAssert resps[0].headers == headers
-      doAssert resps[0].text == text
-    waitFor test()
-  test "sanity multiple req/resp":
-    proc test() {.async.} =
-      var resps = newSeq[Response]()
-      proc getOne(client: ClientContext, path: string) {.async.} =
-        resps.add await client.get(path)
-
-      const
-        headers = ":method: foo\r\L"
-        text = "foo body"
-        headers2 = ":method: bar\r\L"
-        text2 = "bar body"
-      var dh = initDynHeaders(1024, 16)
-      var client = newClient("example.com")
-      withConnection client:
-        await (
-          client.getOne("/") and
-          client.replyOne(hencode(dh, headers), text) and
-          client.getOne("/") and
-          client.replyOne(hencode(dh, headers2), text2)
-        )
-      doAssert resps[0].headers == headers
-      doAssert resps[0].text == text
-      doAssert resps[1].headers == headers2
-      doAssert resps[1].text == text2
     waitFor test()
 
   echo "ok"

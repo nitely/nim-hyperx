@@ -1,5 +1,6 @@
 nimcache/
 tests/tests
+tests/testclient
 src/hyperx/client
 src/hyperx/server
 src/hyperx/queue
@@ -8,3 +9,4 @@ src/hyperx/untestable
 src/hyperx/frame
 src/hyperx/stream
 src/hyperx/utils
+src/hyperx/testutils

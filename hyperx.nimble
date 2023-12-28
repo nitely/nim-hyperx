@@ -16,7 +16,11 @@ task test, "Test":
   exec "nim c -r src/hyperx/queue.nim"
   exec "nim c -r src/hyperx/stream.nim"
   exec "nim c -r src/hyperx/frame.nim"
-  exec "nim c -r src/hyperx/client.nim"
+  exec "nim c -r -d:hyperxTest src/hyperx/client.nim"
+  exec "nim c -r -d:hyperxTest tests/testclient.nim"
+
+task testclient, "Test client only":
+  exec "nim c -r -d:hyperxTest tests/testclient.nim"
 
 task docs, "Docs":
   exec "nim doc2 -o:./docs --project ./src/hyperx.nim"
