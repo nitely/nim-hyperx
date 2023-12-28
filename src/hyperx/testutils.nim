@@ -9,10 +9,13 @@ import pkg/hpack/encoder
 import ./frame
 import ./client
 
-template test*(name: string, body: untyped): untyped =
-  block:
+template testAsync*(name: string, body: untyped): untyped =
+  (proc () = 
     echo "test " & name
-    body
+    proc test() {.async.} =
+      body
+    waitFor test()
+  )()
 
 func toString(bytes: openArray[byte]): string =
   let L = bytes.len
@@ -80,3 +83,18 @@ proc reply*(
   )
   await tc.c.putTestData text
   tc.sid += 2
+
+when isMainModule:
+  block:
+    testAsync "foobar":
+      doAssert true
+  block:
+    var asserted = false
+    try:
+      testAsync "foobar":
+        doAssert false
+    except AssertionDefect:
+      asserted = true
+    doAssert asserted
+
+  echo "ok"

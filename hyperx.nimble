@@ -16,6 +16,7 @@ task test, "Test":
   exec "nim c -r src/hyperx/queue.nim"
   exec "nim c -r src/hyperx/stream.nim"
   exec "nim c -r src/hyperx/frame.nim"
+  exec "nim c -r -d:hyperxTest src/hyperx/testutils.nim"
   exec "nim c -r -d:hyperxTest src/hyperx/client.nim"
   exec "nim c -r -d:hyperxTest tests/testclient.nim"
 
