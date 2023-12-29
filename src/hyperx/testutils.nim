@@ -5,7 +5,7 @@ when not defined(hyperxTest):
 
 import std/strutils
 import std/asyncdispatch
-import pkg/hpack/encoder
+import pkg/hpack
 import ./frame
 import ./client
 
@@ -83,6 +83,33 @@ proc reply*(
   )
   await tc.c.putTestData text
   tc.sid += 2
+
+type TestRequest = object
+  frm: Frame
+  payload: string
+
+proc sent*(tc: TestClientContext): seq[TestRequest] =
+  result = newSeq[TestRequest]()
+  let data = tc.c.testDataSent()
+  if data.len == 0:
+    return
+  var dh = initDynHeaders(1024, 16)
+  #doAssert tc.prefaceSent()
+  const prefaceLen = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".len
+  var i = prefaceLen
+  while i < data.len:
+    var frame = newFrame()
+    frame.setRawBytes data[i .. i+frmHeaderSize-1].toString
+    frame.setRawBytes data[i .. i+frame.len-1].toString
+    i += frame.len
+    let payload = data[i .. i+frame.payloadLen.int-1]
+    i += payload.len
+    if frame.typ == frmtHeaders:
+      var ds = initDecodedStr()
+      hdecodeAll(payload, dh, ds)
+      result.add TestRequest(frm: frame, payload: $ds)
+    else:
+      result.add TestRequest(frm: frame, payload: payload.toString)
 
 when isMainModule:
   block:

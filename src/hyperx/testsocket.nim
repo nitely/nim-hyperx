@@ -6,13 +6,14 @@ type
     data*: QueueAsync[string]
     buff: string
     i: int
+    sent*: seq[byte]
     isConnected*: bool
     hostname*: string
     port*: Port
 
 proc newMySocket*(): TestSocket =
   TestSocket(
-    data: newQueue[string](10),
+    data: newQueue[string](100),
     buff: "",
     i: 0,
     isConnected: false,
@@ -34,10 +35,14 @@ proc recv*(s: TestSocket, i: int): Future[string] {.async.} =
   s.i += i
 
 proc send*(s: TestSocket, data: ptr byte, ln: int) {.async.} =
-  discard
+  if ln > 0:
+    var bytes = newSeq[byte](ln)
+    copyMem(addr bytes[0], data, ln)
+    s.sent.add bytes
 
 proc send*(s: TestSocket, data: string) {.async.} =
-  discard
+  for c in data:
+    s.sent.add c.byte
 
 proc connect*(s: TestSocket, hostname: string, port: Port) {.async.} =
   doAssert not s.isConnected

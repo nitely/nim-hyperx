@@ -95,7 +95,7 @@ func newFrame*(): Frame {.inline.} =
   Frame()
 
 func setRawBytes*(frm: Frame, data: string) =
-  doAssert data.len <= frmHeaderSize
+  doAssert data.len <= frmHeaderMaxSize
   for i in 0 .. data.len-1:
     frm.s[i] = data[i].byte
   frm.rawL = data.len.int8

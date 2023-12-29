@@ -466,6 +466,9 @@ when defined(hyperxTest):
   proc putTestData*(client: ClientContext, data: string) {.async.} =
     await client.sock.data.put data
 
+  proc testDataSent*(client: ClientContext): seq[byte] =
+    result = client.sock.sent
+
 when isMainModule:
   when not defined(hyperxTest):
     {.error: "tests need -d:hyperxTest".}
