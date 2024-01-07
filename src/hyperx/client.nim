@@ -26,6 +26,8 @@ type
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
+  # https://httpwg.org/specs/rfc9113.html#SettingValues
+  headerTableSize = 4096
 
 template debugInfo(s: string): untyped =
   when defined(hyperxDebug):
@@ -177,7 +179,7 @@ type
     hostname: string
     port: Port
     isConnected: bool
-    dynHeaders: DynHeaders
+    dynEncHeaders, dynDecHeaders: DynHeaders
     streams: Table[StreamId, Stream]
     currStreamId: StreamId
     maxConcurrentStreams: int
@@ -194,7 +196,9 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     sock: newMySocket(),
     hostname: hostname,
     port: port,
-    dynHeaders: initDynHeaders(1024, 16),
+    # XXX remove max headers limit
+    dynEncHeaders: initDynHeaders(headerTableSize, 16),
+    dynDecHeaders: initDynHeaders(headerTableSize, 16),
     streams: initTable[StreamId, Stream](16),
     currStreamId: 1.StreamId,
     maxConcurrentStreams: 256,
@@ -342,7 +346,7 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
       try:
-        decode(dptMsg.payload.s, headers, client.dynHeaders)
+        decode(dptMsg.payload.s, headers, client.dynDecHeaders)
         strmMsg.payload.s.add $headers
       except ConnCompressionError as err:
         # XXX propagate error in strmMsg
@@ -427,7 +431,7 @@ func newRequest(): Request =
   Request()
 
 func addHeader(client: ClientContext, r: Request, n, v: string) =
-  discard hencode(n, v, client.dynHeaders, r.data, huffman = false)
+  discard hencode(n, v, client.dynEncHeaders, r.data, huffman = false)
 
 proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   result = newResponse()
