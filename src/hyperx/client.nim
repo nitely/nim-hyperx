@@ -249,9 +249,14 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   debugInfo $frm
   if frmfPadded in frm.flags:
     check(frm.typ in {frmtHeaders, frmtPushPromise, frmtData}, ConnProtocolError)
-    let padding = await client.sock.recv(1)
-    check(padding.len == 1, ConnClosedError)
+    let padding = await client.sock.recv(frmPaddingSize)
+    check(padding.len == frmPaddingSize, ConnClosedError)
     frm.setPadding padding[0].uint8
+  if frmfPriority in frm.flags or frm.typ == frmtPriority:
+    check(frm.typ in {frmtHeaders, frmtPriority}, ConnProtocolError)
+    let prio = await client.sock.recv(frmPrioritySize)
+    check(prio.len == frmPrioritySize, ConnClosedError)
+    frm.setPriority prio
   check frm.payloadLen >= 0
   if frm.payloadLen > 0:
     payload.s.setLen 0

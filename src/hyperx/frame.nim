@@ -5,6 +5,8 @@ template ones(n: untyped): uint = (1.uint shl n) - 1
 const
   frmHeaderSize* = 9  # 9 bytes = 72 bits
   frmHeaderMaxSize* = frmHeaderSize + 8  # + 64 bits
+  frmPrioritySize* = 5
+  frmPaddingSize* = 1
   # XXX: settings max frame size (payload) can be from 2^14 to 2^24-1
   frmMaxPayloadSize* = 1'u32 shl 14
   frmSettingsMaxFrameSize* = 1'u32 shl 14  # + frmHeaderSize
@@ -76,17 +78,20 @@ const
 type
   FrmSid* = distinct uint32  #range[0 .. 31.ones.int]
 
-proc `==` *(a, b: FrmSid): bool {.borrow.}
+proc `==`*(a, b: FrmSid): bool {.borrow.}
 
 func `+=`*(a: var FrmSid, b: uint) {.inline.} =
   a = (a.uint + b).FrmSid
+
+proc clearBit(v: var FrmSid, bit: int) {.inline.} =
+  v = FrmSid(v.uint and not (1'u32 shl bit))
 
 const
   frmsidMain* = 0x00'u32.FrmSid
 
 type
-  FrmPayloadLen* = uint32  # range[0 .. 24.ones.int]
   FrmPadding* = uint8
+  FrmPayloadLen* = uint32  # range[0 .. 24.ones.int]
   Frame* = ref object
     s: array[frmHeaderMaxSize, byte]
     rawL: int8  # XXX remove
@@ -130,16 +135,45 @@ func sid*(frm: Frame): FrmSid {.inline.} =
   result += frm.s[6].uint shl 16
   result += frm.s[7].uint shl 8
   result += frm.s[8].uint
+  result.clearBit 31  # clear reserved byte
 
 func padding*(frm: Frame): FrmPadding {.inline.} =
   doAssert frm.typ in {frmtData, frmtHeaders, frmtPushPromise}
-  result = frm.s[9].FrmPadding
+  result = frm.s[frmHeaderSize].FrmPadding
+
+func exclusive*(frm: Frame): bool {.inline.} =
+  doAssert frm.typ in {frmtHeaders, frmtPriority}
+  if frmfPadded in frm.flags and frm.typ == frmtHeaders:
+    result = frm.s[frmHeaderSize+1] shr 7 == 1
+  else:
+    result = frm.s[frmHeaderSize] shr 7 == 1
+
+func streamDependency*(frm: Frame): FrmSid {.inline.} =
+  doAssert frm.typ in {frmtHeaders, frmtPriority}
+  var i = frmHeaderSize
+  if frmfPadded in frm.flags and frm.typ == frmtHeaders:
+    inc i
+  result += frm.s[i].uint shl 24
+  result += frm.s[i+1].uint shl 16
+  result += frm.s[i+2].uint shl 8
+  result += frm.s[i+3].uint
+  result.clearBit 31  # clear exclusive byte
+
+func weight*(frm: Frame): int {.inline.} =
+  doAssert frm.typ in {frmtHeaders, frmtPriority}
+  var i = frmHeaderSize
+  if frmfPadded in frm.flags and frm.typ == frmtHeaders:
+    inc i
+  result = frm.s[i+4].int
 
 func len*(frm: Frame): int {.inline.} =
-  result = if frmfPadded in frm.flags:
-    frmHeaderSize + 1
-  else:
-    frmHeaderSize
+  result = frmHeaderSize
+  if frmfPadded in frm.flags and frm.typ in {frmtData, frmtHeaders, frmtPushPromise}:
+    result += frmPaddingSize
+  if frmfPriority in frm.flags and frm.typ == frmtHeaders:
+    result += frmPrioritySize
+  if frm.typ == frmtPriority:
+    result += frmPrioritySize
 
 func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline.} =
   doAssert n <= 24.ones.uint
@@ -163,7 +197,18 @@ func setSid*(frm: Frame, sid: FrmSid) {.inline.} =
 func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =
   ## Set padding
   doAssert frm.typ in {frmtData, frmtHeaders, frmtPushPromise}
+  doAssert frmfPadded in frm.flags
   frm.s[9] = n.byte
+
+func setPriority*(frm: Frame, data: string) {.inline.} =
+  doAssert frm.typ in {frmtHeaders, frmtPriority}
+  doAssert data.len == frmPrioritySize
+  var i = frmHeaderSize
+  if frmfPadded in frm.flags:
+    inc i
+  for bt in data:
+    frm.s[i] = bt.byte
+    inc i
 
 #func add*(frm: Frame, payload: openArray[byte]) {.inline.} =
 #  frm.s.add payload

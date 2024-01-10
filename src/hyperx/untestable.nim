@@ -5,13 +5,11 @@ import ./client
 
 when isMainModule:
   proc main() {.async.} =
-    var client = newClient("google.com")
+    var client = newClient("www.google.com")
     withConnection(client):
       let r = await client.get("/")
       echo r.headers
-      var dataStr = ""
-      dataStr.add r.data.s
-      echo dataStr
+      echo r.text[0 .. 10]
       await sleepAsync 2000
   waitFor main()
 
