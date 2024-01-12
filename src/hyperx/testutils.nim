@@ -28,37 +28,50 @@ proc frame(
   sid: FrmSid,
   pl: FrmPayloadLen,
   flags: seq[FrmFlag] = @[]
-): string =
-  var frm = newFrame()
-  frm.setTyp typ
-  frm.setSid sid
+): Frame =
+  result = newFrame()
+  result.setTyp typ
+  result.setSid sid
   for f in flags:
-    frm.flags.incl f
-  frm.setPayloadLen pl
-  result = frm.rawStr()
+    result.flags.incl f
+  result.setPayloadLen pl
+
+proc frameStr(
+  typ: FrmTyp,
+  sid: FrmSid,
+  pl: FrmPayloadLen,
+  flags: seq[FrmFlag] = @[]
+): string =
+  result = frame(typ, sid, pl, flags).rawStr()
+
+proc headerFrame*(sid: FrmSid, pl: FrmPayloadLen): Frame =
+  result = frame(frmtHeaders, sid, pl, @[frmfEndHeaders])
+
+proc dataFrame*(sid: FrmSid, pl: FrmPayloadLen): Frame =
+  result = frame(frmtData, sid, pl, @[frmfEndStream])
 
 type
   TestClientContext* = ref object
     c: ClientContext
     sid: int
     resps*: seq[Response]
-    dh: DynHeaders
+    encDh: DynHeaders
 
 func newTestClient*(hostname: string): TestClientContext =
   result = TestClientContext(
     c: newClient(hostname, Port 443),
     sid: 1,
     resps: newSeq[Response](),
-    dh: initDynHeaders(1024, 16)
+    encDh: initDynHeaders(4096, 16)
   )
 
-proc hencode(tc: TestClientContext, hs: string): string =
+proc hencode*(tc: TestClientContext, hs: string): string =
   var resp = newSeq[byte]()
   for h in hs.splitLines:
     if h.len == 0:
       continue
     let parts = h.split(": ", 1)
-    discard hencode(parts[0], parts[1], tc.dh, resp)
+    discard hencode(parts[0], parts[1], tc.encDh, resp)
   result = resp.toString
 
 template withConnection*(tc: TestClientContext, body: untyped): untyped =
@@ -74,15 +87,23 @@ proc reply*(
   text: string
 ) {.async.} =
   let encHeaders = hencode(tc, headers)
-  await tc.c.putTestData frame(
+  await tc.c.putTestData frameStr(
     frmtHeaders, tc.sid.FrmSid, encHeaders.len.FrmPayloadLen, @[frmfEndHeaders]
   )
   await tc.c.putTestData encHeaders
-  await tc.c.putTestData frame(
+  await tc.c.putTestData frameStr(
     frmtData, tc.sid.FrmSid, text.len.FrmPayloadLen, @[frmfEndStream]
   )
   await tc.c.putTestData text
   tc.sid += 2
+
+proc reply*(
+  tc: TestClientContext,
+  frm: Frame,
+  data: string
+) {.async.} =
+  await tc.c.putTestData frm.rawStr()
+  await tc.c.putTestData data
 
 type TestRequest = object
   frm: Frame
@@ -93,7 +114,7 @@ proc sent*(tc: TestClientContext): seq[TestRequest] =
   let data = tc.c.testDataSent()
   if data.len == 0:
     return
-  var dh = initDynHeaders(1024, 16)
+  var dh = initDynHeaders(4096, 16)
   #doAssert tc.prefaceSent()
   const prefaceLen = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".len
   var i = prefaceLen
