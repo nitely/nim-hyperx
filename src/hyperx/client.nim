@@ -244,27 +244,38 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
   ## ``PushPromise``, read frames until ``END_HEADERS`` flag is set
   ## Frames cannot be interleaved here
+  ##
+  ## Unused flags MUST be ignored on receipt
   # XXX: use recvInto
   let header = await client.sock.recv(frmHeaderSize)
-  check(header.len == frmHeaderSize, ConnClosedError)
+  check header.len == frmHeaderSize, ConnClosedError
   frm.setHeader header
   debugInfo $frm
-  # maybe just ignore bad flags?
-  #check validateFlags(frm), ConnProtocolError
-  let tailL = frm.tailLen
-  if tailL > 0:
-    let tail = await client.sock.recv(tailL)
-    check(tail.len == tailL, ConnClosedError)
-    frm.setTail tail
-  check frm.payloadLen >= 0
-  if frm.payloadLen > 0:
+  var payloadLen = frm.payloadLen.int
+  var paddingLen = 0
+  if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
+    check payloadLen >= frmPaddingSize, ConnProtocolError
+    let padding = await client.sock.recv(frmPaddingSize)
+    check padding.len == frmPaddingSize, ConnClosedError
+    paddingLen = padding[0].int * 8
+    payloadLen -= frmPaddingSize
+  # prio is deprecated so do nothing with it
+  if frmfPriority in frm.flags and frm.typ == frmtHeaders:
+    check payloadLen >= frmPrioritySize, ConnProtocolError
+    let prio = await client.sock.recv(frmPrioritySize)
+    check prio.len == frmPrioritySize, ConnClosedError
+    payloadLen -= frmPrioritySize
+  # padding can be equal at this point, because we don't count frmPaddingSize
+  check payloadLen >= paddingLen, ConnProtocolError
+  payloadLen -= paddingLen
+  if payloadLen > 0:
     payload.s.setLen 0
-    payload.s.add await client.sock.recv(frm.payloadLen.int)
-    check(payload.s.len == frm.payloadLen.int, ConnClosedError)
+    payload.s.add await client.sock.recv(payloadLen)
+    check payload.s.len == payloadLen, ConnClosedError
     debugInfo toString(frm, payload.s)
-  if frmfPadded in frm.flags:
-    let padding = await client.sock.recv(frm.padding.int)
-    check(padding.len == frm.padding.int, ConnClosedError)
+  if paddingLen > 0:
+    let padding = await client.sock.recv(paddingLen)
+    check padding.len == paddingLen, ConnClosedError
   case frm.typ
   of frmtHeaders, frmtPushPromise:
     if frmfEndHeaders notin frm.flags:

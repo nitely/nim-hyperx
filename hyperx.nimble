@@ -23,5 +23,8 @@ task test, "Test":
 task testclient, "Test client only":
   exec "nim c -r -d:hyperxTest tests/testclient.nim"
 
+task untestable, "Test untesteable":
+  exec "nim c -r src/hyperx/untestable.nim"
+
 task docs, "Docs":
   exec "nim doc2 -o:./docs --project ./src/hyperx.nim"

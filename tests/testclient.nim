@@ -109,7 +109,6 @@ testAsync "response with headers prio":
       tc.sid.FrmSid,
       encHeaders.len.FrmPayloadLen
     )
-    frm1.setPriority("12345")
     await tc.reply(frm1, encHeaders)
     var frm2 = dataFrame(
       tc.sid.FrmSid,

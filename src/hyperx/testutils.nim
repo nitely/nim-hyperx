@@ -121,9 +121,7 @@ proc sent*(tc: TestClientContext): seq[TestRequest] =
   while i < data.len:
     var frame = newFrame()
     frame.setHeader data[i .. i+frmHeaderSize-1].toString
-    i += frmHeaderSize
-    frame.setTail data[i .. i+frame.tailLen-1].toString
-    i += frame.tailLen
+    i += frame.len
     let payload = data[i .. i+frame.payloadLen.int-1]
     i += payload.len
     if frame.typ == frmtHeaders:
