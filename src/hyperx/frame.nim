@@ -7,6 +7,7 @@ const
   frmHeaderMaxSize* = frmHeaderSize + 8  # + 64 bits
   frmPrioritySize* = 5
   frmPaddingSize* = 1
+  frmErrorCodeSize* = 4
   # XXX: settings max frame size (payload) can be from 2^14 to 2^24-1
   frmMaxPayloadSize* = 1'u32 shl 14
   frmSettingsMaxFrameSize* = 1'u32 shl 14  # + frmHeaderSize
@@ -94,20 +95,19 @@ type
   FrmPayloadLen* = uint32  # range[0 .. 24.ones.int]
   Frame* = ref object
     s: array[frmHeaderMaxSize, byte]
-    rawL: int8  # XXX remove
 
 func newFrame*(): Frame {.inline.} =
   Frame()
 
-func setRawBytes*(frm: Frame, data: string) =
-  doAssert data.len <= frmHeaderMaxSize
+func setHeader*(frm: Frame, data: string) =
+  doAssert data.len == frmHeaderSize
   for i in 0 .. data.len-1:
     frm.s[i] = data[i].byte
-  frm.rawL = data.len.int8
 
-# XXX remove
-func rawLen*(frm: Frame): int {.inline.} =
-  frm.rawL
+func setTail*(frm: Frame, data: string) =
+  #doAssert frm.len == frmHeaderSize+data.len
+  for i in frmHeaderSize .. frmHeaderSize + data.len-1:
+    frm.s[i] = data[i].byte
 
 func rawBytesPtr*(frm: Frame): ptr byte =
   addr frm.s[0]
@@ -115,7 +115,6 @@ func rawBytesPtr*(frm: Frame): ptr byte =
 func clear*(frm: Frame) {.inline.} =
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0
-  frm.rawL = 0
 
 func payloadLen*(frm: Frame): FrmPayloadLen {.inline.} =
   # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
@@ -168,12 +167,24 @@ func weight*(frm: Frame): int {.inline.} =
 
 func len*(frm: Frame): int {.inline.} =
   result = frmHeaderSize
-  if frmfPadded in frm.flags and frm.typ in {frmtData, frmtHeaders, frmtPushPromise}:
-    result += frmPaddingSize
-  if frmfPriority in frm.flags and frm.typ == frmtHeaders:
+  case frm.typ
+  of frmtHeaders:
+    if frmfPadded in frm.flags:
+      result += frmPaddingSize
+    if frmfPriority in frm.flags:
+      result += frmPrioritySize
+  of frmtData, frmtPushPromise:
+    if frmfPadded in frm.flags:
+      result += frmPaddingSize
+  of frmtPriority:
     result += frmPrioritySize
-  if frm.typ == frmtPriority:
-    result += frmPrioritySize
+  of frmtRstStream:
+    result += frmErrorCodeSize
+  else:
+    discard
+
+func tailLen*(frm: Frame): int =
+  frm.len-frmHeaderSize
 
 func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline.} =
   doAssert n <= 24.ones.uint
@@ -209,6 +220,13 @@ func setPriority*(frm: Frame, data: string) {.inline.} =
   for bt in data:
     frm.s[i] = bt.byte
     inc i
+
+func validateFlags*(frm: Frame): bool =
+  result = true
+  if frmfPadded in frm.flags:
+    return frm.typ in {frmtHeaders, frmtPushPromise, frmtData}
+  if frmfPriority in frm.flags:
+    return frm.typ in {frmtHeaders, frmtPriority}
 
 #func add*(frm: Frame, payload: openArray[byte]) {.inline.} =
 #  frm.s.add payload

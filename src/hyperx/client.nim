@@ -228,8 +228,9 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
   assert frmfEndHeaders notin frm.flags
   var frm2 = newFrame()
   while frmfEndHeaders notin frm2.flags:
-    frm2.setRawBytes await client.sock.recv(frmHeaderSize)
-    check(frm2.rawLen == frmHeaderSize, ConnClosedError)
+    let header = await client.sock.recv(frmHeaderSize)
+    check(header.len == frmHeaderSize, ConnClosedError)
+    frm2.setHeader header
     debugInfo $frm2
     check(frm2.sid == frm.sid, ConnProtocolError)
     check(frm2.typ == frmtContinuation, ConnProtocolError)
@@ -244,19 +245,17 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## ``PushPromise``, read frames until ``END_HEADERS`` flag is set
   ## Frames cannot be interleaved here
   # XXX: use recvInto
-  frm.setRawBytes await client.sock.recv(frmHeaderSize)
-  check(frm.rawLen == frmHeaderSize, ConnClosedError)
+  let header = await client.sock.recv(frmHeaderSize)
+  check(header.len == frmHeaderSize, ConnClosedError)
+  frm.setHeader header
   debugInfo $frm
-  if frmfPadded in frm.flags:
-    check(frm.typ in {frmtHeaders, frmtPushPromise, frmtData}, ConnProtocolError)
-    let padding = await client.sock.recv(frmPaddingSize)
-    check(padding.len == frmPaddingSize, ConnClosedError)
-    frm.setPadding padding[0].uint8
-  if frmfPriority in frm.flags or frm.typ == frmtPriority:
-    check(frm.typ in {frmtHeaders, frmtPriority}, ConnProtocolError)
-    let prio = await client.sock.recv(frmPrioritySize)
-    check(prio.len == frmPrioritySize, ConnClosedError)
-    frm.setPriority prio
+  # maybe just ignore bad flags?
+  #check validateFlags(frm), ConnProtocolError
+  let tailL = frm.tailLen
+  if tailL > 0:
+    let tail = await client.sock.recv(tailL)
+    check(tail.len == tailL, ConnClosedError)
+    frm.setTail tail
   check frm.payloadLen >= 0
   if frm.payloadLen > 0:
     payload.s.setLen 0

@@ -120,9 +120,10 @@ proc sent*(tc: TestClientContext): seq[TestRequest] =
   var i = prefaceLen
   while i < data.len:
     var frame = newFrame()
-    frame.setRawBytes data[i .. i+frmHeaderSize-1].toString
-    frame.setRawBytes data[i .. i+frame.len-1].toString
-    i += frame.len
+    frame.setHeader data[i .. i+frmHeaderSize-1].toString
+    i += frmHeaderSize
+    frame.setTail data[i .. i+frame.tailLen-1].toString
+    i += frame.tailLen
     let payload = data[i .. i+frame.payloadLen.int-1]
     i += payload.len
     if frame.typ == frmtHeaders:
