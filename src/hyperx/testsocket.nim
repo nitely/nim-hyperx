@@ -21,18 +21,19 @@ proc newMySocket*(): TestSocket =
     port: Port 0
   )
 
-proc recv*(s: TestSocket, i: int): Future[string] {.async.} =
+proc recvInto*(s: TestSocket, buff: pointer, size: int): Future[int] {.async.} =
   ## Simulates socket recv
   if not s.isConnected:
-    return ""
-  while s.i+i > s.buff.len:
+    return 0
+  while s.i+size > s.buff.len:
     let L = s.buff.len
     s.buff.add await s.data.pop()
     if s.buff.len == L:
       s.isConnected = false
-      return ""
-  result = s.buff[s.i .. s.i+i-1]
-  s.i += i
+      return 0
+  copyMem(buff, addr s.buff[s.i], size)
+  s.i += size
+  return size
 
 proc send*(s: TestSocket, data: ptr byte, ln: int) {.async.} =
   if ln > 0:
