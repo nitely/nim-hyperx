@@ -229,17 +229,20 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
   assert frmfEndHeaders notin frm.flags
   var frm2 = newFrame()
   while frmfEndHeaders notin frm2.flags:
-    let header = await client.sock.recv(frmHeaderSize)
-    check(header.len == frmHeaderSize, ConnClosedError)
-    frm2.setHeader header
+    let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm.len)
+    check(headerRln == frmHeaderSize, ConnClosedError)
     debugInfo $frm2
     check(frm2.sid == frm.sid, ConnProtocolError)
     check(frm2.typ == frmtContinuation, ConnProtocolError)
     check frm2.payloadLen >= 0
     if frm2.payloadLen == 0:
       continue
-    payload.s.add await client.sock.recv(frm2.payloadLen.int)
-    check(payload.s.len == frm2.payloadLen.int, ConnClosedError)
+    let payloadOldLen = payload.s.len
+    payload.s.setLen payloadOldLen+frm2.payloadLen.int
+    let payloadRln = await client.sock.recvInto(
+      addr payload.s[payloadOldLen], frm2.payloadLen.int
+    )
+    check(payloadRln == frm2.payloadLen.int, ConnClosedError)
 
 proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
@@ -247,39 +250,44 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Frames cannot be interleaved here
   ##
   ## Unused flags MUST be ignored on receipt
-  # XXX: use recvInto
-  let header = await client.sock.recv(frmHeaderSize)
-  check header.len == frmHeaderSize, ConnClosedError
-  frm.setHeader header
+  let headerRln = await client.sock.recvInto(frm.rawBytesPtr, frm.len)
+  check headerRln == frmHeaderSize, ConnClosedError
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
   var paddingLen = 0
   if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
     debugInfo "Padding"
     check payloadLen >= frmPaddingSize, ConnProtocolError
-    let padding = await client.sock.recv(frmPaddingSize)
-    check padding.len == frmPaddingSize, ConnClosedError
-    paddingLen = padding[0].int * 8
+    let paddingRln = await client.sock.recvInto(addr paddingLen, frmPaddingSize)
+    check paddingRln == frmPaddingSize, ConnClosedError
+    paddingLen *= 8
     payloadLen -= frmPaddingSize
   # prio is deprecated so do nothing with it
   if frmfPriority in frm.flags and frm.typ == frmtHeaders:
     debugInfo "Priority"
     check payloadLen >= frmPrioritySize, ConnProtocolError
-    let prio = await client.sock.recv(frmPrioritySize)
-    check prio.len == frmPrioritySize, ConnClosedError
+    var prio = 0
+    let prioRln = await client.sock.recvInto(addr prio, frmPrioritySize)
+    check prioRln == frmPrioritySize, ConnClosedError
     payloadLen -= frmPrioritySize
   # padding can be equal at this point, because we don't count frmPaddingSize
   check payloadLen >= paddingLen, ConnProtocolError
   payloadLen -= paddingLen
   check isValidSize(frm, payloadLen), ConnFrameSizeError
   if payloadLen > 0:
-    payload.s.setLen 0
-    payload.s.add await client.sock.recv(payloadLen)
-    check payload.s.len == payloadLen, ConnClosedError
+    payload.s.setLen payloadLen
+    let payloadRln = await client.sock.recvInto(
+      addr payload.s[0], payload.s.len
+    )
+    check payloadRln == payloadLen, ConnClosedError
     debugInfo toString(frm, payload.s)
   if paddingLen > 0:
-    let padding = await client.sock.recv(paddingLen)
-    check padding.len == paddingLen, ConnClosedError
+    payload.s.setLen payloadLen+paddingLen
+    let paddingRln = await client.sock.recvInto(
+      addr payload.s[payloadLen], paddingLen
+    )
+    check paddingRln == paddingLen, ConnClosedError
+    payload.s.setLen payloadLen
   case frm.typ
   of frmtHeaders, frmtPushPromise:
     if frmfEndHeaders notin frm.flags:
@@ -336,7 +344,6 @@ proc connect(client: ClientContext) {.async.} =
   await client.sock.connect(client.hostname, client.port)
   # Assume server supports http2
   await client.startHandshake()
-  # await handshake()
 
 proc close(client: ClientContext) =
   client.sock.close()
