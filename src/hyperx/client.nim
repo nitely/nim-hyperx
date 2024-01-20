@@ -229,7 +229,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
   assert frmfEndHeaders notin frm.flags
   var frm2 = newFrame()
   while frmfEndHeaders notin frm2.flags:
-    let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm.len)
+    let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm2.len)
     check(headerRln == frmHeaderSize, ConnClosedError)
     debugInfo $frm2
     check(frm2.sid == frm.sid, ConnProtocolError)
@@ -266,7 +266,7 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   if frmfPriority in frm.flags and frm.typ == frmtHeaders:
     debugInfo "Priority"
     check payloadLen >= frmPrioritySize, ConnProtocolError
-    var prio = 0
+    var prio = 0'i64
     let prioRln = await client.sock.recvInto(addr prio, frmPrioritySize)
     check prioRln == frmPrioritySize, ConnClosedError
     payloadLen -= frmPrioritySize
