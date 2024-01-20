@@ -6,6 +6,11 @@ const
   frmHeaderSize* = 9  # 9 bytes = 72 bits
   frmPrioritySize* = 5
   frmPaddingSize* = 1
+  frmRstStreamSize = 4
+  frmSettingsAckSize = 0
+  frmSettingsSize = 6
+  frmPingSize = 8
+  frmWindowUpdateSize = 4
   # XXX: settings max frame size (payload) can be from 2^14 to 2^24-1
   frmMaxPayloadSize* = 1'u32 shl 14
   frmSettingsMaxFrameSize* = 1'u32 shl 14  # + frmHeaderSize
@@ -153,6 +158,24 @@ func setSid*(frm: Frame, sid: FrmSid) {.inline.} =
   frm.s[7] = ((sid.uint shr 8) and 8.ones).byte
   frm.s[8] = (sid.uint and 8.ones).byte
 
+func isValidSize*(frm: Frame, size: int): bool =
+  result = case frm.typ
+  of frmtRstStream:
+    size == frmRstStreamSize
+  of frmtPriority:
+    size == frmPrioritySize
+  of frmtSettings:
+    if frmfAck in frm.flags:
+      size == frmSettingsAckSize
+    else:
+      size mod frmSettingsSize == 0
+  of frmtPing:
+    size == frmPingSize
+  of frmtWindowUpdate:
+    size == frmWindowUpdateSize
+  else:
+    true
+
 # XXX add padding field and padding as payload
 #func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =
 #  doAssert frm.typ in {frmtData, frmtHeaders, frmtPushPromise}
@@ -221,3 +244,46 @@ func toString*(frm: Frame, payload: seq[byte]): string =
   else:
     result.add "\nUnimplemented debug"
   result.add "\n============="
+
+when isMainModule:
+  block:
+    var frm = newFrame()
+    frm.setTyp frmtData
+    doAssert isValidSize(frm, 123)
+    frm.setTyp frmtHeaders
+    doAssert isValidSize(frm, 123)
+    frm.setTyp frmtGoAway
+    doAssert isValidSize(frm, 123)
+    frm.setTyp frmtRstStream
+    doAssert isValidSize(frm, 4)
+    doAssert not isValidSize(frm, 3)
+    doAssert not isValidSize(frm, 5)
+    frm.setTyp frmtPriority
+    doAssert isValidSize(frm, 5)
+    doAssert not isValidSize(frm, 4)
+    doAssert not isValidSize(frm, 6)
+    frm.setTyp frmtPing
+    doAssert isValidSize(frm, 8)
+    doAssert not isValidSize(frm, 7)
+    doAssert not isValidSize(frm, 9)
+    frm.setTyp frmtWindowUpdate
+    doAssert isValidSize(frm, 4)
+    doAssert not isValidSize(frm, 3)
+    doAssert not isValidSize(frm, 5)
+  block:
+    var frm = newFrame()
+    frm.setTyp frmtSettings
+    doAssert isValidSize(frm, 0)
+    doAssert isValidSize(frm, 6)
+    doAssert isValidSize(frm, 12)
+    doAssert isValidSize(frm, 18)
+    doAssert not isValidSize(frm, 1)
+    doAssert not isValidSize(frm, 5)
+    doAssert not isValidSize(frm, 7)
+    frm.setFlags frmfAck.FrmFlags
+    doAssert isValidSize(frm, 0)
+    doAssert not isValidSize(frm, 1)
+    doAssert not isValidSize(frm, 6)
+    doAssert not isValidSize(frm, 12)
+
+  echo "ok"

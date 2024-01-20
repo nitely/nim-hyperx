@@ -19,6 +19,7 @@ type
   ConnProtocolError = object of ConnError
   ConnStreamClosedError = object of ConnError
   ConnCompressionError = object of ConnError
+  ConnFrameSizeError = object of ConnError
   FrameSizeError = object of HyperxError
   StrmError = object of HyperxError
   StrmProtocolError = object of StrmError
@@ -254,6 +255,7 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   var payloadLen = frm.payloadLen.int
   var paddingLen = 0
   if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
+    debugInfo "Padding"
     check payloadLen >= frmPaddingSize, ConnProtocolError
     let padding = await client.sock.recv(frmPaddingSize)
     check padding.len == frmPaddingSize, ConnClosedError
@@ -261,6 +263,7 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
     payloadLen -= frmPaddingSize
   # prio is deprecated so do nothing with it
   if frmfPriority in frm.flags and frm.typ == frmtHeaders:
+    debugInfo "Priority"
     check payloadLen >= frmPrioritySize, ConnProtocolError
     let prio = await client.sock.recv(frmPrioritySize)
     check prio.len == frmPrioritySize, ConnClosedError
@@ -268,6 +271,7 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   # padding can be equal at this point, because we don't count frmPaddingSize
   check payloadLen >= paddingLen, ConnProtocolError
   payloadLen -= paddingLen
+  check isValidSize(frm, payloadLen), ConnFrameSizeError
   if payloadLen > 0:
     payload.s.setLen 0
     payload.s.add await client.sock.recv(payloadLen)
