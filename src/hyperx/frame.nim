@@ -11,6 +11,7 @@ const
   frmSettingsSize = 6
   frmPingSize = 8
   frmWindowUpdateSize = 4
+  frmGoAwaySize = 8
   # XXX: settings max frame size (payload) can be from 2^14 to 2^24-1
   frmMaxPayloadSize* = 1'u32 shl 14
   frmSettingsMaxFrameSize* = 1'u32 shl 14  # + frmHeaderSize
@@ -175,6 +176,24 @@ func isValidSize*(frm: Frame, size: int): bool =
     size == frmWindowUpdateSize
   else:
     true
+
+func newGoAwayFrame*(
+  payload: var seq[byte],
+  lastSid: int,
+  errorCode: int
+): Frame =
+  result = newFrame()
+  result.setTyp frmtGoAway
+  result.setPayloadLen frmGoAwaySize.FrmPayloadLen
+  payload.setLen frmGoAwaySize
+  payload[0] = ((lastSid.uint shr 24) and 8.ones).byte
+  payload[1] = ((lastSid.uint shr 16) and 8.ones).byte
+  payload[2] = ((lastSid.uint shr 8) and 8.ones).byte
+  payload[3] = (lastSid.uint and 8.ones).byte
+  payload[4] = ((errorCode.uint shr 24) and 8.ones).byte
+  payload[5] = ((errorCode.uint shr 16) and 8.ones).byte
+  payload[6] = ((errorCode.uint shr 8) and 8.ones).byte
+  payload[7] = (errorCode.uint and 8.ones).byte
 
 # XXX add padding field and padding as payload
 #func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =

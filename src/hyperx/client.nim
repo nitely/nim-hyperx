@@ -12,18 +12,40 @@ import ./lock
 when defined(hyperxTest):
   import ./testsocket
 
+# https://httpwg.org/specs/rfc9113.html#ErrorCodes
+type
+  ErrorCode = distinct uint8
+const
+  errNoError = 0x00.ErrorCode
+  errProtocolError = 0x01.ErrorCode
+  errInternalError = 0x02.ErrorCode
+  errFlowControlError = 0x03.ErrorCode
+  errSettingsTimeout = 0x04.ErrorCode
+  errStreamClosed = 0x05.ErrorCode
+  errFrameSizeError = 0x06.ErrorCode
+  errRefusedStream = 0x07.ErrorCode
+  errCancel = 0x08.ErrorCode
+  errCompressionError = 0x09.ErrorCode
+  errConnectError = 0x0a.ErrorCode
+  errEnhanceYourCalm = 0x0b.ErrorCode
+  errInadequateSecurity = 0x0c.ErrorCode
+  errHttp11Required = 0x0d.ErrorCode
+
 type
   HyperxError* = object of CatchableError
   ConnError = object of HyperxError
-  ConnClosedError = object of ConnError
-  ConnProtocolError = object of ConnError
-  ConnStreamClosedError = object of ConnError
-  ConnCompressionError = object of ConnError
-  ConnFrameSizeError = object of ConnError
+    code: ErrorCode
   FrameSizeError = object of HyperxError
   StrmError = object of HyperxError
   StrmProtocolError = object of StrmError
   StrmStreamClosedError = object of StrmError
+  ConnectionClosedError = object of OSError
+
+func newConnError(errCode: ErrorCode): ref ConnError =
+  result = (ref ConnError)(code: errCode)
+
+func newConnClosedError(): ref ConnectionClosedError =
+  result = (ref ConnectionClosedError)()
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
@@ -37,18 +59,18 @@ template debugInfo(s: string): untyped =
     discard
 
 template raiseError(err, msg) =
-  raise newException(err, msg)
+  raise (ref err)(msg: msg)
 
 template raiseError(err) =
-  raise newException(err, "Error")
+  raise (ref err)()
 
 template check(cond: bool): untyped =
   if not cond:
-    raiseError(HyperxError, "Error")
+    raise (ref HyperxError)()
 
 template check(cond: bool, errObj: untyped): untyped =
   if not cond:
-    raiseError(errObj, "Error")
+    raise errObj
 
 func add(s: var seq[byte], ss: string) =
   # XXX x_x
@@ -97,7 +119,8 @@ proc decode(payload: openArray[byte], ds: var DecodedStr, dh: var DynHeaders) =
   try:
     hdecodeAll(payload, dh, ds)
   except HpackError as err:
-    raiseError ConnCompressionError, err.msg
+    debugInfo err.msg
+    raise newConnError(errCompressionError)
 
 type
   Payload* = ref object
@@ -149,18 +172,18 @@ const connFrmAllowed = {
 
 proc doTransitionRecv(s: var Stream, frm: Frame) =
   if s.id == frmsidMain.StreamId:
-    check(frm.typ in connFrmAllowed, ConnProtocolError)
+    check frm.typ in connFrmAllowed, newConnError(errProtocolError)
     return
-  check(frm.typ in frmRecvAllowed, ConnProtocolError)
+  check frm.typ in frmRecvAllowed, newConnError(errProtocolError)
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
       raiseError StrmStreamClosedError
     else:
-      raiseError ConnProtocolError
+      raise newConnError(errProtocolError)
   let event = frm.toEventRecv()
   let oldState = s.state
   s.state = s.state.toNextStateRecv event
-  check(s.state != strmInvalid, ConnProtocolError)
+  check s.state != strmInvalid, newConnError(errProtocolError)
   if oldState == strmIdle:
     # XXX close streams < s.id in idle state
     discard
@@ -186,6 +209,7 @@ type
     maxConcurrentStreams: int
     dptMsgs: QueueAsync[DptMsgData]
     writeLock: LockAsync
+    maxPeerStreamIdSeen: StreamId
 
 when not defined(hyperxTest):
   proc newMySocket(): MyAsyncSocket =
@@ -204,7 +228,8 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     currStreamId: 1.StreamId,
     maxConcurrentStreams: 256,
     dptMsgs: newQueue[DptMsgData](10),
-    writeLock: newLock()
+    writeLock: newLock(),
+    maxPeerStreamIdSeen: 0.StreamId
   )
 
 proc initStream(id: StreamId): Stream =
@@ -218,7 +243,7 @@ func stream(client: ClientContext, sid: StreamId): var Stream =
   try:
     result = client.streams[sid]
   except KeyError:
-    raiseError ConnProtocolError
+    raise newConnError(errProtocolError)
 
 func stream(client: ClientContext, sid: FrmSid): var Stream =
   client.stream sid.StreamId
@@ -230,10 +255,10 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
   var frm2 = newFrame()
   while frmfEndHeaders notin frm2.flags:
     let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm2.len)
-    check(headerRln == frmHeaderSize, ConnClosedError)
+    check headerRln == frmHeaderSize, newConnClosedError()
     debugInfo $frm2
-    check(frm2.sid == frm.sid, ConnProtocolError)
-    check(frm2.typ == frmtContinuation, ConnProtocolError)
+    check frm2.sid == frm.sid, newConnError(errProtocolError)
+    check frm2.typ == frmtContinuation, newConnError(errProtocolError)
     check frm2.payloadLen >= 0
     if frm2.payloadLen == 0:
       continue
@@ -242,7 +267,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
     let payloadRln = await client.sock.recvInto(
       addr payload.s[payloadOldLen], frm2.payloadLen.int
     )
-    check(payloadRln == frm2.payloadLen.int, ConnClosedError)
+    check payloadRln == frm2.payloadLen.int, newConnClosedError()
 
 proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
@@ -251,42 +276,42 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ##
   ## Unused flags MUST be ignored on receipt
   let headerRln = await client.sock.recvInto(frm.rawBytesPtr, frm.len)
-  check headerRln == frmHeaderSize, ConnClosedError
+  check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
   var paddingLen = 0
   if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
     debugInfo "Padding"
-    check payloadLen >= frmPaddingSize, ConnProtocolError
+    check payloadLen >= frmPaddingSize, newConnError(errProtocolError)
     let paddingRln = await client.sock.recvInto(addr paddingLen, frmPaddingSize)
-    check paddingRln == frmPaddingSize, ConnClosedError
+    check paddingRln == frmPaddingSize, newConnClosedError()
     paddingLen *= 8
     payloadLen -= frmPaddingSize
   # prio is deprecated so do nothing with it
   if frmfPriority in frm.flags and frm.typ == frmtHeaders:
     debugInfo "Priority"
-    check payloadLen >= frmPrioritySize, ConnProtocolError
+    check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
     var prio = 0'i64
     let prioRln = await client.sock.recvInto(addr prio, frmPrioritySize)
-    check prioRln == frmPrioritySize, ConnClosedError
+    check prioRln == frmPrioritySize, newConnClosedError()
     payloadLen -= frmPrioritySize
   # padding can be equal at this point, because we don't count frmPaddingSize
-  check payloadLen >= paddingLen, ConnProtocolError
+  check payloadLen >= paddingLen, newConnError(errProtocolError)
   payloadLen -= paddingLen
-  check isValidSize(frm, payloadLen), ConnFrameSizeError
+  check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
   if payloadLen > 0:
     payload.s.setLen payloadLen
     let payloadRln = await client.sock.recvInto(
       addr payload.s[0], payload.s.len
     )
-    check payloadRln == payloadLen, ConnClosedError
+    check payloadRln == payloadLen, newConnClosedError()
     debugInfo toString(frm, payload.s)
   if paddingLen > 0:
     payload.s.setLen payloadLen+paddingLen
     let paddingRln = await client.sock.recvInto(
       addr payload.s[payloadLen], paddingLen
     )
-    check paddingRln == paddingLen, ConnClosedError
+    check paddingRln == paddingLen, newConnClosedError()
     payload.s.setLen payloadLen
   case frm.typ
   of frmtHeaders, frmtPushPromise:
@@ -352,6 +377,18 @@ proc consumeMainStream(client: ClientContext, dptMsg: DptMsgData) {.async.} =
   # XXX process settings, window updates, etc
   discard
 
+proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
+  # do not send any debug information for security reasons
+  var payload = newPayload()
+  var frm = newGoAwayFrame(
+    payload.s, client.maxPeerStreamIdSeen.int, errCode.int
+  )
+  try:
+    await client.write(frm, payload)
+  except Exception as err:
+    debugInfo err.msg
+    raise err
+
 proc responseDispatcherNaked(client: ClientContext) {.async.} =
   ## Dispatch messages to open streams. Note decoding
   ## headers must be done in message received order, so
@@ -366,17 +403,18 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
     if dptMsg.strmId == frmsidMain.StreamId:
       await consumeMainStream(client, dptMsg)
       continue
+    if dptMsg.strmId.int mod 2 == 0:
+      client.maxPeerStreamIdSeen = max(
+        client.maxPeerStreamIdSeen.int, dptMsg.strmId.int
+      ).StreamId
     let stream = client.streams[dptMsg.strmId]
     var strmMsg = initStrmMsgData(dptMsg.frmTyp)
     if dptMsg.frmTyp == frmtHeaders:
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
-      try:
-        decode(dptMsg.payload.s, headers, client.dynDecHeaders)
-        strmMsg.payload.s.add $headers
-      except ConnCompressionError as err:
-        # XXX propagate error in strmMsg
-        discard
+      # can raise a connError
+      decode(dptMsg.payload.s, headers, client.dynDecHeaders)
+      strmMsg.payload.s.add $headers
     else:
       strmMsg.payload = dptMsg.payload
     await stream.strmMsgs.put strmMsg
@@ -384,6 +422,10 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
 proc responseDispatcher(client: ClientContext) {.async.} =
   try:
     await client.responseDispatcherNaked()
+  except ConnError as err:
+    if client.isConnected:
+      await client.sendGoAway(err.code)
+    raise err
   except Exception as err:
     debugInfo err.msg
     raise err
@@ -414,6 +456,10 @@ proc recvTaskNaked(client: ClientContext) {.async.} =
 proc recvTask(client: ClientContext) {.async.} =
   try:
     await client.recvTaskNaked()
+  except ConnError as err:
+    if client.isConnected:
+      await client.sendGoAway(err.code)
+    raise err
   except Exception as err:
     debugInfo err.msg
     raise err
@@ -446,7 +492,7 @@ template withConnection*(
       try:
         if waitForRecvFut:
           await recvFut
-      except ConnClosedError:
+      except ConnectionClosedError:
         discard
 
 type
