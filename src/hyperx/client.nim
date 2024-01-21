@@ -54,11 +54,11 @@ type
   HyperxConnectionError* = object of HyperxError
   ConnError = object of HyperxConnectionError
     code: ErrorCode
-  FrameSizeError = object of HyperxError
+  ConnectionClosedError = object of HyperxConnectionError
+  InternalOSError = object of HyperxConnectionError
   StrmError = object of HyperxError
   StrmProtocolError = object of StrmError
   StrmStreamClosedError = object of StrmError
-  ConnectionClosedError = object of OSError
 
 func newConnError(errCode: ErrorCode): ref ConnError =
   result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
@@ -393,12 +393,16 @@ proc close(client: ClientContext) =
   if not client.isConnected:
     return
   client.isConnected = false
-  client.sock.close()
-  client.dptMsgs.close()
-  # XXX race con may create stream but
-  #     client is closed
-  for stream in values client.streams:
-    stream.strmMsgs.close()
+  try:
+    client.sock.close()
+  except OSError as err:
+    raise (ref InternalOSError)(msg: err.msg)
+  finally:
+    client.dptMsgs.close()
+    # XXX race con may create stream but
+    #     client is closed
+    for stream in values client.streams:
+      stream.strmMsgs.close()
 
 proc consumeMainStream(client: ClientContext, dptMsg: DptMsgData) {.async.} =
   # XXX process settings, window updates, etc
@@ -468,13 +472,7 @@ proc recvTaskNaked(client: ClientContext) {.async.} =
   while client.isConnected:
     frm.clear()
     var payload = newPayload()  # XXX remove
-    try:
-      await client.read(frm, payload)
-    except OSError as err:
-      if not client.isConnected:
-        debugInfo "not connected"
-        break
-      raise err
+    await client.read(frm, payload)
     await client.dptMsgs.put DptMsgData(
       strmId: frm.sid.StreamId,
       frmTyp: frm.typ,
@@ -488,6 +486,11 @@ proc recvTask(client: ClientContext) {.async.} =
     if client.isConnected:
       await client.sendGoAway(err.code)
     raise err
+  except OSError as err:
+    if client.isConnected:
+      raise (ref InternalOSError)(msg: err.msg)
+    else:
+      debugInfo "not connected"
   except Exception as err:
     debugInfo err.msg
     raise err

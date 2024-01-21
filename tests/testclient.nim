@@ -138,7 +138,6 @@ testAsync "response with headers prio":
   doAssert tc.resps[1].text == text2
 
 testAsync "response with bad prio length":
-  var tc = newTestClient("foo.bar")
   proc replyPrio(tc: TestClientContext) {.async.} =
     let prio = "1"
     var frm1 = headerFrame(
@@ -148,6 +147,7 @@ testAsync "response with bad prio length":
     )
     await tc.reply(frm1, prio)
   var errorMsg = ""
+  var tc = newTestClient("foo.bar")
   try:
     withConnection tc:
       await (
