@@ -53,8 +53,9 @@ proc connect*(s: TestSocket, hostname: string, port: Port) {.async.} =
 
 proc close*(s: TestSocket) =
   s.isConnected = false
-  s.data.close()
-  #proc terminateRecv() =
-  #  asyncCheck s.data.put("")
-  #callSoon terminateRecv
+  #XXX SIGSEGV in orc
+  #s.data.close()
+  proc terminateRecv() =
+    asyncCheck s.data.put("")
+  callSoon terminateRecv
   
