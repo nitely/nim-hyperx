@@ -23,7 +23,7 @@ func toString(bytes: openArray[byte]): string =
     result = newString(L)
     copyMem(result.cstring, bytes[0].unsafeAddr, L)
   
-proc frame(
+proc frame*(
   typ: FrmTyp,
   sid: FrmSid,
   pl: FrmPayloadLen,
@@ -44,8 +44,12 @@ proc frameStr(
 ): string =
   result = frame(typ, sid, pl, flags).rawStr()
 
-proc headerFrame*(sid: FrmSid, pl: FrmPayloadLen): Frame =
-  result = frame(frmtHeaders, sid, pl, @[frmfEndHeaders])
+proc headerFrame*(
+  sid: FrmSid,
+  pl: FrmPayloadLen,
+  flags = @[frmfEndHeaders]
+): Frame =
+  result = frame(frmtHeaders, sid, pl, flags)
 
 proc dataFrame*(sid: FrmSid, pl: FrmPayloadLen): Frame =
   result = frame(frmtData, sid, pl, @[frmfEndStream])

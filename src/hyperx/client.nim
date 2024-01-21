@@ -31,9 +31,28 @@ const
   errInadequateSecurity = 0x0c.ErrorCode
   errHttp11Required = 0x0d.ErrorCode
 
+func `$`(errCode: ErrorCode): string =
+  case errCode
+  of errNoError: "NO_ERROR"
+  of errProtocolError: "PROTOCOL_ERROR"
+  of errInternalError: "INTERNAL_ERROR"
+  of errFlowControlError: "FLOW_CONTROL_ERROR"
+  of errSettingsTimeout: "SETTINGS_TIMEOUT"
+  of errStreamClosed: "STREAM_CLOSED"
+  of errFrameSizeError: "FRAME_SIZE_ERROR"
+  of errRefusedStream: "REFUSED_STREAM"
+  of errCancel: "CANCEL"
+  of errCompressionError: "COMPRESSION_ERROR"
+  of errConnectError: "CONNECT_ERROR"
+  of errEnhanceYourCalm: "ENHANCE_YOUR_CALM"
+  of errInadequateSecurity: "INADEQUATE_SECURITY"
+  of errHttp11Required: "HTTP_1_1_REQUIRED"
+  else: "UNKNOWN ERROR CODE"
+
 type
   HyperxError* = object of CatchableError
-  ConnError = object of HyperxError
+  HyperxConnectionError* = object of HyperxError
+  ConnError = object of HyperxConnectionError
     code: ErrorCode
   FrameSizeError = object of HyperxError
   StrmError = object of HyperxError
@@ -42,7 +61,7 @@ type
   ConnectionClosedError = object of OSError
 
 func newConnError(errCode: ErrorCode): ref ConnError =
-  result = (ref ConnError)(code: errCode)
+  result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
 
 func newConnClosedError(): ref ConnectionClosedError =
   result = (ref ConnectionClosedError)()
@@ -371,7 +390,15 @@ proc connect(client: ClientContext) {.async.} =
   await client.startHandshake()
 
 proc close(client: ClientContext) =
+  if not client.isConnected:
+    return
+  client.isConnected = false
   client.sock.close()
+  client.dptMsgs.close()
+  # XXX race con may create stream but
+  #     client is closed
+  for stream in values client.streams:
+    stream.strmMsgs.close()
 
 proc consumeMainStream(client: ClientContext, dptMsg: DptMsgData) {.async.} =
   # XXX process settings, window updates, etc
@@ -431,6 +458,7 @@ proc responseDispatcher(client: ClientContext) {.async.} =
     raise err
   finally:
     debugInfo "responseDispatcher exited"
+    client.close()
 
 proc recvTaskNaked(client: ClientContext) {.async.} =
   ## Receive frames and dispatch to opened streams
@@ -465,6 +493,7 @@ proc recvTask(client: ClientContext) {.async.} =
     raise err
   finally:
     debugInfo "recvTask exited"
+    client.close()
 
 template withConnection*(
   client: ClientContext,
@@ -473,13 +502,16 @@ template withConnection*(
   block:
     var recvFut: Future[void]
     var waitForRecvFut = false
+    var respFut: Future[void]
+    var waitForRespFut = false
     try:
       debugInfo "connecting"
       await client.connect()
       debugInfo "connected"
       recvFut = client.recvTask()
       waitForRecvFut = true
-      asyncCheck client.responseDispatcher()
+      respFut = client.responseDispatcher()
+      waitForRespFut = true
       block:
         body
     except Exception as err:
@@ -488,11 +520,15 @@ template withConnection*(
     finally:
       debugInfo "exit"
       client.close()
-      client.isConnected = false
       try:
         if waitForRecvFut:
           await recvFut
-      except ConnectionClosedError:
+      except ConnectionClosedError, QueueClosedError:
+        discard
+      try:
+        if waitForRespFut:
+          await respFut
+      except ConnectionClosedError, QueueClosedError:
         discard
 
 type

@@ -2,11 +2,19 @@ import std/asyncdispatch
 import std/deques
 
 type
+  QueueError* = object of CatchableError
+  QueueClosedError* = object of QueueError
+
+func newQueueClosedError(): ref QueueClosedError =
+  result = (ref QueueClosedError)(msg: "Queue is closed")
+
+type
   QueueAsync*[T] = ref object
     s: Deque[T]
     size, used: int
     # XXX use/reuse FutureVars
     putEv, popEv: Deque[Future[void]]
+    isClosed: bool
 
 proc newQueue*[T](size: int): QueueAsync[T] =
   doAssert size > 0
@@ -16,7 +24,8 @@ proc newQueue*[T](size: int): QueueAsync[T] =
     size: size,
     used: 0,
     putEv: initDeque[Future[void]](2),
-    popEv: initDeque[Future[void]](2)
+    popEv: initDeque[Future[void]](2),
+    isClosed: false
   )
 
 proc popEvent[T](q: QueueAsync[T]): Future[void] =
@@ -37,6 +46,8 @@ proc putDone[T](q: QueueAsync[T]) =
 
 proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   doAssert q.used <= q.size
+  if q.isClosed:
+    raise newQueueClosedError()
   if q.used == q.size:
     await q.popEvent()
   q.s.addFirst v
@@ -46,12 +57,23 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
 
 proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
+  if q.isClosed:
+    raise newQueueClosedError()
   if q.used == 0:
     await q.putEvent()
   result = q.s.popLast()
   dec q.used
   doAssert q.used >= 0
   q.popDone()
+
+proc close*[T](q: QueueAsync[T]) =
+  doAssert not q.isClosed
+  q.isClosed = true
+  let closedError = newQueueClosedError()
+  for ev in items q.putEv:
+    ev.fail(closedError)
+  for ev in items q.popEv:
+    ev.fail(closedError)
 
 when isMainModule:
   block:

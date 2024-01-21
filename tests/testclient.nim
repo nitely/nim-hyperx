@@ -1,5 +1,6 @@
 {.define: ssl.}
 
+import std/strutils
 import std/asyncdispatch
 import ../src/hyperx/client
 import ../src/hyperx/testutils
@@ -107,9 +108,11 @@ testAsync "response with headers prio":
     let encHeaders = hencode(tc, headers)
     var frm1 = headerFrame(
       tc.sid.FrmSid,
-      encHeaders.len.FrmPayloadLen
+      (encHeaders.len + frmPrioritySize).FrmPayloadLen,
+      @[frmfPriority, frmfEndHeaders]
     )
-    await tc.reply(frm1, encHeaders)
+    let prio = "12345"
+    await tc.reply(frm1, prio & encHeaders)
     var frm2 = dataFrame(
       tc.sid.FrmSid,
       text.len.FrmPayloadLen
@@ -133,3 +136,24 @@ testAsync "response with headers prio":
   doAssert tc.resps[0].text == text
   doAssert tc.resps[1].headers == headers2
   doAssert tc.resps[1].text == text2
+
+testAsync "response with bad prio length":
+  var tc = newTestClient("foo.bar")
+  proc replyPrio(tc: TestClientContext) {.async.} =
+    let prio = "1"
+    var frm1 = headerFrame(
+      tc.sid.FrmSid,
+      prio.len.FrmPayloadLen,
+      @[frmfPriority, frmfEndHeaders]
+    )
+    await tc.reply(frm1, prio)
+  var errorMsg = ""
+  try:
+    withConnection tc:
+      await (
+        tc.get("/") and
+        tc.replyPrio()
+      )
+  except HyperxConnectionError as err:
+    errorMsg = err.msg
+  doAssert "PROTOCOL_ERROR" in errorMsg
