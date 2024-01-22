@@ -1,4 +1,5 @@
 {.define: ssl.}
+{.define: hyperxTest.}
 
 import std/strutils
 import std/asyncdispatch
@@ -103,20 +104,33 @@ testAsync "multiple requests":
     ":path: /2\r\L" &
     ":authority: foo.bar\r\L"
 
+testAsync "response with bad header compression":
+  proc replyBadHeaders(tc: TestClientContext) {.async.} =
+    let headerPl = "abc"
+    let frm1 = tc.frame(
+      frmtHeaders, headerPl.len, @[frmfEndHeaders]
+    )
+    await tc.reply(frm1, headerPl)
+  var errorMsg = ""
+  var tc = newTestClient("foo.bar")
+  try:
+    withConnection tc:
+      await (
+        tc.get("/") and
+        tc.replyBadHeaders()
+      )
+  except HyperxConnectionError as err:
+    errorMsg = err.msg
+  doAssert "COMPRESSION_ERROR" in errorMsg
+
 testAsync "response with headers prio":
   proc replyPrio(tc: TestClientContext; headers, text: string) {.async.} =
-    let encHeaders = hencode(tc, headers)
-    var frm1 = headerFrame(
-      tc.sid.FrmSid,
-      (encHeaders.len + frmPrioritySize).FrmPayloadLen,
-      @[frmfPriority, frmfEndHeaders]
+    let headerPl = "12345" & hencode(tc, headers)
+    let frm1 = tc.frame(
+      frmtHeaders, headerPl.len, @[frmfPriority, frmfEndHeaders]
     )
-    let prio = "12345"
-    await tc.reply(frm1, prio & encHeaders)
-    var frm2 = dataFrame(
-      tc.sid.FrmSid,
-      text.len.FrmPayloadLen
-    )
+    await tc.reply(frm1, headerPl)
+    let frm2 = tc.frame(frmtData, text.len, @[frmfEndStream])
     await tc.reply(frm2, text)
     tc.sid += 2
   const
@@ -140,10 +154,8 @@ testAsync "response with headers prio":
 testAsync "response with bad prio length":
   proc replyPrio(tc: TestClientContext) {.async.} =
     let prio = "1"
-    var frm1 = headerFrame(
-      tc.sid.FrmSid,
-      prio.len.FrmPayloadLen,
-      @[frmfPriority, frmfEndHeaders]
+    let frm1 = tc.frame(
+      frmtHeaders, prio.len, @[frmfPriority, frmfEndHeaders]
     )
     await tc.reply(frm1, prio)
   var errorMsg = ""
@@ -153,6 +165,72 @@ testAsync "response with bad prio length":
       await (
         tc.get("/") and
         tc.replyPrio()
+      )
+  except HyperxConnectionError as err:
+    errorMsg = err.msg
+  doAssert "PROTOCOL_ERROR" in errorMsg
+
+testAsync "response with headers padding":
+  proc replyPadding(tc: TestClientContext; headers, text: string) {.async.} =
+    let headerPl = "\x01" & hencode(tc, headers) & "12345678"
+    let frm1 = tc.frame(
+      frmtHeaders, headerPl.len, @[frmfPadded, frmfEndHeaders]
+    )
+    await tc.reply(frm1, headerPl)
+    let frm2 = tc.frame(frmtData, text.len, @[frmfEndStream])
+    await tc.reply(frm2, text)
+    tc.sid += 2
+  const
+    headers = ":method: foo\r\L"
+    text = "foo body"
+    headers2 = ":method: bar\r\L"
+    text2 = "bar body"
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await (
+      tc.get("/") and
+      tc.replyPadding(headers, text) and
+      tc.get("/") and
+      tc.reply(headers2, text2)
+    )
+  doAssert tc.resps[0].headers == headers
+  doAssert tc.resps[0].text == text
+  doAssert tc.resps[1].headers == headers2
+  doAssert tc.resps[1].text == text2
+
+testAsync "response with bad over padding length":
+  proc replyPadding(tc: TestClientContext) {.async.} =
+    let headerPl = "\xfd" & hencode(tc, ":me: foo\r\L")
+    let frm1 = tc.frame(
+      frmtHeaders, headerPl.len, @[frmfPadded, frmfEndHeaders]
+    )
+    await tc.reply(frm1, headerPl)
+  var errorMsg = ""
+  var tc = newTestClient("foo.bar")
+  try:
+    withConnection tc:
+      await (
+        tc.get("/") and
+        tc.replyPadding()
+      )
+  except HyperxConnectionError as err:
+    errorMsg = err.msg
+  doAssert "PROTOCOL_ERROR" in errorMsg
+
+testAsync "response with bad missing padding length":
+  proc replyPadding(tc: TestClientContext) {.async.} =
+    let headerPl = ""
+    let frm1 = tc.frame(
+      frmtHeaders, headerPl.len, @[frmfPadded, frmfEndHeaders]
+    )
+    await tc.reply(frm1, headerPl)
+  var errorMsg = ""
+  var tc = newTestClient("foo.bar")
+  try:
+    withConnection tc:
+      await (
+        tc.get("/") and
+        tc.replyPadding()
       )
   except HyperxConnectionError as err:
     errorMsg = err.msg

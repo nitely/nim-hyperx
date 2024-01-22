@@ -22,7 +22,7 @@ func toString(bytes: openArray[byte]): string =
   if L > 0:
     result = newString(L)
     copyMem(result.cstring, bytes[0].unsafeAddr, L)
-  
+
 proc frame*(
   typ: FrmTyp,
   sid: FrmSid,
@@ -68,6 +68,14 @@ func newTestClient*(hostname: string): TestClientContext =
     resps: newSeq[Response](),
     encDh: initDynHeaders(4096, 16)
   )
+
+proc frame*(
+  tc: TestClientContext,
+  typ: FrmTyp,
+  plSize: int,
+  flags: seq[FrmFlag] = @[]
+): Frame =
+  result = frame(typ, tc.sid.FrmSid, plSize.FrmPayloadLen, flags)
 
 proc hencode*(tc: TestClientContext, hs: string): string =
   var resp = newSeq[byte]()

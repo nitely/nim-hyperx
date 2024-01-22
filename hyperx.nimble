@@ -18,10 +18,10 @@ task test, "Test":
   exec "nim c -r src/hyperx/frame.nim"
   exec "nim c -r -d:hyperxTest src/hyperx/testutils.nim"
   exec "nim c -r -d:hyperxTest src/hyperx/client.nim"
-  exec "nim c -r -d:hyperxTest tests/testclient.nim"
+  exec "nim c -r tests/testclient.nim"
 
 task testclient, "Test client only":
-  exec "nim c -r -d:hyperxTest tests/testclient.nim"
+  exec "nim c -r tests/testclient.nim"
 
 task untestable, "Test untesteable":
   exec "nim c -r src/hyperx/untestable.nim"

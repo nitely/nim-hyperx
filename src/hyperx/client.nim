@@ -64,7 +64,7 @@ func newConnError(errCode: ErrorCode): ref ConnError =
   result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
 
 func newConnClosedError(): ref ConnectionClosedError =
-  result = (ref ConnectionClosedError)()
+  result = (ref ConnectionClosedError)(msg: "Connection Closed")
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
@@ -457,6 +457,11 @@ proc responseDispatcher(client: ClientContext) {.async.} =
     if client.isConnected:
       await client.sendGoAway(err.code)
     raise err
+  except ConnectionClosedError, QueueClosedError:
+    if client.isConnected:
+      raise getCurrentException()
+    else:
+      debugInfo "not connected"
   except Exception as err:
     debugInfo err.msg
     raise err
@@ -491,6 +496,11 @@ proc recvTask(client: ClientContext) {.async.} =
       raise (ref InternalOSError)(msg: err.msg)
     else:
       debugInfo "not connected"
+  except ConnectionClosedError, QueueClosedError:
+    if client.isConnected:
+      raise getCurrentException()
+    else:
+      debugInfo "not connected"
   except Exception as err:
     debugInfo err.msg
     raise err
@@ -517,22 +527,19 @@ template withConnection*(
       waitForRespFut = true
       block:
         body
+    except QueueClosedError:
+      doAssert not client.isConnected
     except Exception as err:
       debugInfo err.msg
       raise err
     finally:
       debugInfo "exit"
       client.close()
-      try:
-        if waitForRecvFut:
-          await recvFut
-      except ConnectionClosedError, QueueClosedError:
-        discard
-      try:
-        if waitForRespFut:
-          await respFut
-      except ConnectionClosedError, QueueClosedError:
-        discard
+      # XXX wait both even if one errors out
+      if waitForRecvFut:
+        await recvFut
+      if waitForRespFut:
+        await respFut
 
 type
   Request* = ref object
