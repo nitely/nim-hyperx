@@ -457,11 +457,13 @@ proc responseDispatcher(client: ClientContext) {.async.} =
     if client.isConnected:
       await client.sendGoAway(err.code)
     raise err
-  except ConnectionClosedError, QueueClosedError:
+  except ConnectionClosedError as err:
     if client.isConnected:
-      raise getCurrentException()
+      raise err
     else:
       debugInfo "not connected"
+  except QueueClosedError:
+    doAssert not client.isConnected
   except Exception as err:
     debugInfo err.msg
     raise err
@@ -496,11 +498,13 @@ proc recvTask(client: ClientContext) {.async.} =
       raise (ref InternalOSError)(msg: err.msg)
     else:
       debugInfo "not connected"
-  except ConnectionClosedError, QueueClosedError:
+  except ConnectionClosedError as err:
     if client.isConnected:
-      raise getCurrentException()
+      raise err
     else:
       debugInfo "not connected"
+  except QueueClosedError:
+    doAssert not client.isConnected
   except Exception as err:
     debugInfo err.msg
     raise err
