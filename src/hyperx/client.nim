@@ -144,21 +144,12 @@ proc decode(payload: openArray[byte], ds: var DecodedStr, dh: var DynHeaders) =
 type
   Payload* = ref object
     s: seq[byte]
-  StrmMsgData = object
-    frmTyp: FrmTyp
-    payload: Payload
   Response* = ref object
     headers*: string
     data*: Payload
 
 func newPayload(): Payload =
   Payload()
-
-func initStrmMsgData(frmTyp: FrmTyp): StrmMsgData =
-  StrmMsgData(
-    frmTyp: frmTyp,
-    payload: newPayload()
-  )
 
 func newResponse*(): Response =
   Response(
@@ -170,43 +161,6 @@ func text*(r: Response): string =
   result = ""
   result.add r.data.s
 
-type
-  Stream = object
-    id: StreamId
-    state: StreamState
-    strmMsgs: QueueAsync[StrmMsgData]
-
-proc read(s: Stream): Future[StrmMsgData] {.async.} =
-  result = await s.strmMsgs.pop()
-
-proc doTransitionSend(s: var Stream, frm: Frame) =
-  discard
-
-const connFrmAllowed = {
-  frmtSettings,
-  frmtPing,
-  frmtGoAway,
-  frmtWindowUpdate
-}
-
-proc doTransitionRecv(s: var Stream, frm: Frame) =
-  if s.id == frmsidMain.StreamId:
-    check frm.typ in connFrmAllowed, newConnError(errProtocolError)
-    return
-  check frm.typ in frmRecvAllowed, newConnError(errProtocolError)
-  if not s.state.isAllowedToRecv frm:
-    if s.state == strmHalfClosedRemote:
-      raiseError StrmStreamClosedError
-    else:
-      raise newConnError(errProtocolError)
-  let event = frm.toEventRecv()
-  let oldState = s.state
-  s.state = s.state.toNextStateRecv event
-  check s.state != strmInvalid, newConnError(errProtocolError)
-  if oldState == strmIdle:
-    # XXX close streams < s.id in idle state
-    discard
-
 when defined(hyperxTest):
   type MyAsyncSocket = TestSocket
 else:
@@ -216,6 +170,22 @@ type
   MsgData = object
     frm: Frame
     payload: Payload
+  Stream = object
+    id: StreamId
+    state: StreamState
+    msgs: QueueAsync[MsgData]
+
+proc initStream(id: StreamId): Stream =
+  result = Stream(
+    id: id,
+    state: strmIdle,
+    msgs: newQueue[MsgData](1)
+  )
+
+proc read(s: Stream): Future[MsgData] {.async.} =
+  result = await s.msgs.pop()
+
+type
   ClientContext* = ref object
     sock: MyAsyncSocket
     hostname: string
@@ -249,13 +219,6 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     maxPeerStrmIdSeen: 0.StreamId
   )
 
-proc initStream(id: StreamId): Stream =
-  result = Stream(
-    id: id,
-    state: strmIdle,
-    strmMsgs: newQueue[StrmMsgData](1)
-  )
-
 func stream(client: ClientContext, sid: StreamId): var Stream =
   try:
     result = client.streams[sid]
@@ -264,6 +227,34 @@ func stream(client: ClientContext, sid: StreamId): var Stream =
 
 func stream(client: ClientContext, sid: FrmSid): var Stream =
   client.stream sid.StreamId
+
+proc doTransitionSend(s: var Stream, frm: Frame) =
+  discard
+
+const connFrmAllowed = {
+  frmtSettings,
+  frmtPing,
+  frmtGoAway,
+  frmtWindowUpdate
+}
+
+proc doTransitionRecv(s: var Stream, frm: Frame) =
+  if s.id == frmsidMain.StreamId:
+    check frm.typ in connFrmAllowed, newConnError(errProtocolError)
+    return
+  check frm.typ in frmRecvAllowed, newConnError(errProtocolError)
+  if not s.state.isAllowedToRecv frm:
+    if s.state == strmHalfClosedRemote:
+      raiseError StrmStreamClosedError
+    else:
+      raise newConnError(errProtocolError)
+  let event = frm.toEventRecv()
+  let oldState = s.state
+  s.state = s.state.toNextStateRecv event
+  check s.state != strmInvalid, newConnError(errProtocolError)
+  if oldState == strmIdle:
+    # XXX close streams < s.id in idle state
+    discard
 
 proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
@@ -330,13 +321,9 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
     )
     check paddingRln == paddingLen, newConnClosedError()
     payload.s.setLen payloadLen
-  case frm.typ
-  of frmtHeaders, frmtPushPromise:
-    if frmfEndHeaders notin frm.flags:
-      debugInfo "Continuation"
-      await client.readUntilEnd(frm, payload)
-  else:
-    discard
+  if frmfEndHeaders notin frm.flags and frm.typ in {frmtHeaders, frmtPushPromise}:
+    debugInfo "Continuation"
+    await client.readUntilEnd(frm, payload)
   # XXX maybe do not do this here
   if frm.sid.StreamId in client.streams:
     client.stream(frm.sid).doTransitionRecv frm
@@ -387,7 +374,7 @@ proc close(client: ClientContext) =
     # XXX race con may create stream but
     #     client is closed
     for stream in values client.streams:
-      stream.strmMsgs.close()
+      stream.msgs.close()
 
 proc sendTaskNaked(client: ClientContext) {.async.} =
   ## Send frames
@@ -421,9 +408,12 @@ proc sendTask(client: ClientContext) {.async.} =
 proc write(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   await client.sendMsgs.put MsgData(frm: frm, payload: payload)
 
-proc consumeMainStream(client: ClientContext, dptMsg: MsgData) {.async.} =
+proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
   # XXX process settings, window updates, etc
-  discard
+  template frm: untyped = msg.frm
+  template payload: untyped = msg.payload
+  if frm.typ == frmtWindowUpdate:
+    check payload.s.len > 0, newConnError(errProtocolError)
 
 proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
   # do not send any debug information for security reasons
@@ -442,30 +432,29 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
   ## headers must be done in message received order, so
   ## it needs to be done here. Same for processing the main
   ## stream messages.
+  template frm: untyped = msg.frm
   while client.isConnected:
     let msg = await client.recvMsgs.pop()
-    if msg.frm.sid.StreamId notin client.streams:
-      debugInfo "stream not found " & $msg.frm.sid.int
+    if frm.sid.StreamId notin client.streams:
+      debugInfo "stream not found " & $frm.sid.int
       continue
-    debugInfo "recv data on stream " & $msg.frm.sid.int
-    if msg.frm.sid == frmsidMain:
+    debugInfo "recv data on stream " & $frm.sid.int
+    if frm.sid == frmsidMain:
       await consumeMainStream(client, msg)
       continue
-    if msg.frm.sid.int mod 2 == 0:
+    if frm.sid.int mod 2 == 0:
       client.maxPeerStrmIdSeen = max(
-        client.maxPeerStrmIdSeen.int, msg.frm.sid.int
+        client.maxPeerStrmIdSeen.int, frm.sid.int
       ).StreamId
-    let stream = client.streams[msg.frm.sid.StreamId]
-    var strmMsg = initStrmMsgData(msg.frm.typ)
-    if msg.frm.typ == frmtHeaders:
+    let stream = client.streams[frm.sid.StreamId]
+    if frm.typ == frmtHeaders:
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
       # can raise a connError
       decode(msg.payload.s, headers, client.dynDecHeaders)
-      strmMsg.payload.s.add $headers
-    else:
-      strmMsg.payload = msg.payload  # XXX remove
-    await stream.strmMsgs.put strmMsg
+      msg.payload.s.setLen 0
+      msg.payload.s.add $headers
+    await stream.msgs.put msg
 
 proc responseDispatcher(client: ClientContext) {.async.} =
   try:
@@ -590,12 +579,12 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   frm.setPayloadLen payload.s.len.FrmPayloadLen
   await client.write(frm, payload)
   # XXX read in loop, discard other frames
-  let strmMsg = await client.stream(sid).read()
-  doAssert strmMsg.frmTyp == frmtHeaders
-  result.headers.add strmMsg.payload.s
-  let strmMsg2 = await client.stream(sid).read()
-  doAssert strmMsg2.frmTyp == frmtData
-  result.data = strmMsg2.payload
+  let msg = await client.stream(sid).read()
+  doAssert msg.frm.typ == frmtHeaders
+  result.headers.add msg.payload.s
+  let msg2 = await client.stream(sid).read()
+  doAssert msg2.frm.typ == frmtData
+  result.data = msg2.payload
   client.streams.del sid  # XXX need to reply as closed stream
 
 proc get*(
