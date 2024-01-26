@@ -213,9 +213,8 @@ else:
   type MyAsyncSocket = AsyncSocket
 
 type
-  DptMsgData = object
-    strmId: StreamId
-    frmTyp: FrmTyp
+  MsgData = object
+    frm: Frame
     payload: Payload
   ClientContext* = ref object
     sock: MyAsyncSocket
@@ -226,9 +225,8 @@ type
     streams: Table[StreamId, Stream]
     currStreamId: StreamId
     maxConcurrentStreams: int
-    dptMsgs: QueueAsync[DptMsgData]
-    writeLock: LockAsync
-    maxPeerStreamIdSeen: StreamId
+    sendMsgs, recvMsgs: QueueAsync[MsgData]
+    maxPeerStrmIdSeen: StreamId
 
 when not defined(hyperxTest):
   proc newMySocket(): MyAsyncSocket =
@@ -246,9 +244,9 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     streams: initTable[StreamId, Stream](16),
     currStreamId: 1.StreamId,
     maxConcurrentStreams: 256,
-    dptMsgs: newQueue[DptMsgData](10),
-    writeLock: newLock(),
-    maxPeerStreamIdSeen: 0.StreamId
+    recvMsgs: newQueue[MsgData](10),
+    sendMsgs: newQueue[MsgData](10),
+    maxPeerStrmIdSeen: 0.StreamId
   )
 
 proc initStream(id: StreamId): Stream =
@@ -356,20 +354,6 @@ proc openStream(client: ClientContext): StreamId =
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
 
-# XXX writing should be a task + queue like read
-proc write(client: ClientContext, frm: Frame) {.async.} =
-  client.stream(frm.sid).doTransitionSend frm
-  withLock(client.writeLock):
-    await client.sock.send(frm.rawBytesPtr, frm.len)
-
-proc write(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
-  doAssert frm.payloadLen.int == payload.s.len
-  client.stream(frm.sid).doTransitionSend frm
-  withLock(client.writeLock):
-    await client.sock.send(frm.rawBytesPtr, frm.len)
-    if payload.s.len > 0:
-      await client.sock.send(addr payload.s[0], payload.s.len)
-
 proc startHandshake(client: ClientContext) {.async.} =
   debugInfo "startHandshake"
   # we need to do this before sending any other frame
@@ -380,7 +364,7 @@ proc startHandshake(client: ClientContext) {.async.} =
   var frm = newFrame()
   frm.setTyp frmtSettings
   frm.setSid frmsidMain
-  await client.write frm
+  await client.sock.send(frm.rawBytesPtr, frm.len)
 
 proc connect(client: ClientContext) {.async.} =
   doAssert(not client.isConnected)
@@ -398,13 +382,46 @@ proc close(client: ClientContext) =
   except OSError as err:
     raise (ref InternalOSError)(msg: err.msg)
   finally:
-    client.dptMsgs.close()
+    client.sendMsgs.close()
+    client.recvMsgs.close()
     # XXX race con may create stream but
     #     client is closed
     for stream in values client.streams:
       stream.strmMsgs.close()
 
-proc consumeMainStream(client: ClientContext, dptMsg: DptMsgData) {.async.} =
+proc sendTaskNaked(client: ClientContext) {.async.} =
+  ## Send frames
+  ## Meant to be asyncCheck'ed
+  doAssert client.isConnected
+  while client.isConnected:
+    let msg = await client.sendMsgs.pop()
+    doAssert msg.frm.payloadLen.int == msg.payload.s.len
+    client.stream(msg.frm.sid).doTransitionSend msg.frm
+    await client.sock.send(msg.frm.rawBytesPtr, msg.frm.len)
+    if msg.payload.s.len > 0:
+      await client.sock.send(addr msg.payload.s[0], msg.payload.s.len)
+
+proc sendTask(client: ClientContext) {.async.} =
+  try:
+    await client.sendTaskNaked()
+  except OSError as err:
+    if client.isConnected:
+      raise (ref InternalOSError)(msg: err.msg)
+    else:
+      debugInfo "not connected"
+  except QueueClosedError:
+    doAssert not client.isConnected
+  except Exception as err:
+    debugInfo err.msg
+    raise err
+  finally:
+    debugInfo "sendTask exited"
+    client.close()
+
+proc write(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
+  await client.sendMsgs.put MsgData(frm: frm, payload: payload)
+
+proc consumeMainStream(client: ClientContext, dptMsg: MsgData) {.async.} =
   # XXX process settings, window updates, etc
   discard
 
@@ -412,7 +429,7 @@ proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
   # do not send any debug information for security reasons
   var payload = newPayload()
   var frm = newGoAwayFrame(
-    payload.s, client.maxPeerStreamIdSeen.int, errCode.int
+    payload.s, client.maxPeerStrmIdSeen.int, errCode.int
   )
   try:
     await client.write(frm, payload)
@@ -426,28 +443,28 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
   ## it needs to be done here. Same for processing the main
   ## stream messages.
   while client.isConnected:
-    let dptMsg = await client.dptMsgs.pop()
-    if dptMsg.strmId notin client.streams:
-      debugInfo "stream not found " & $dptMsg.strmId.int
+    let msg = await client.recvMsgs.pop()
+    if msg.frm.sid.StreamId notin client.streams:
+      debugInfo "stream not found " & $msg.frm.sid.int
       continue
-    debugInfo "recv data on stream " & $dptMsg.strmId.int
-    if dptMsg.strmId == frmsidMain.StreamId:
-      await consumeMainStream(client, dptMsg)
+    debugInfo "recv data on stream " & $msg.frm.sid.int
+    if msg.frm.sid == frmsidMain:
+      await consumeMainStream(client, msg)
       continue
-    if dptMsg.strmId.int mod 2 == 0:
-      client.maxPeerStreamIdSeen = max(
-        client.maxPeerStreamIdSeen.int, dptMsg.strmId.int
+    if msg.frm.sid.int mod 2 == 0:
+      client.maxPeerStrmIdSeen = max(
+        client.maxPeerStrmIdSeen.int, msg.frm.sid.int
       ).StreamId
-    let stream = client.streams[dptMsg.strmId]
-    var strmMsg = initStrmMsgData(dptMsg.frmTyp)
-    if dptMsg.frmTyp == frmtHeaders:
+    let stream = client.streams[msg.frm.sid.StreamId]
+    var strmMsg = initStrmMsgData(msg.frm.typ)
+    if msg.frm.typ == frmtHeaders:
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
       # can raise a connError
-      decode(dptMsg.payload.s, headers, client.dynDecHeaders)
+      decode(msg.payload.s, headers, client.dynDecHeaders)
       strmMsg.payload.s.add $headers
     else:
-      strmMsg.payload = dptMsg.payload
+      strmMsg.payload = msg.payload  # XXX remove
     await stream.strmMsgs.put strmMsg
 
 proc responseDispatcher(client: ClientContext) {.async.} =
@@ -475,14 +492,12 @@ proc recvTaskNaked(client: ClientContext) {.async.} =
   ## Receive frames and dispatch to opened streams
   ## Meant to be asyncCheck'ed
   doAssert client.isConnected
-  var frm = newFrame()
   while client.isConnected:
-    frm.clear()
+    var frm = newFrame()
     var payload = newPayload()  # XXX remove
     await client.read(frm, payload)
-    await client.dptMsgs.put DptMsgData(
-      strmId: frm.sid.StreamId,
-      frmTyp: frm.typ,
+    await client.recvMsgs.put MsgData(
+      frm: frm,
       payload: payload
     )
 
@@ -517,14 +532,16 @@ template withConnection*(
   body: untyped
 ) =
   block:
-    var recvFut: Future[void]
+    var sendFut, recvFut, respFut: Future[void]
+    var waitForSendFut = false
     var waitForRecvFut = false
-    var respFut: Future[void]
     var waitForRespFut = false
     try:
       debugInfo "connecting"
       await client.connect()
       debugInfo "connected"
+      sendFut = client.sendTask()
+      waitForSendFut = true
       recvFut = client.recvTask()
       waitForRecvFut = true
       respFut = client.responseDispatcher()
@@ -539,7 +556,12 @@ template withConnection*(
     finally:
       debugInfo "exit"
       client.close()
+      # XXX do gracefull shutdown with timeout,
+      #     wait for send/recv to drain the queue
+      #     before closing
       # XXX wait both even if one errors out
+      if waitForSendFut:
+        await sendFut
       if waitForRecvFut:
         await recvFut
       if waitForRespFut:
