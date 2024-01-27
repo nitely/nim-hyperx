@@ -57,14 +57,16 @@ type
   ConnectionClosedError = object of HyperxConnectionError
   InternalOSError = object of HyperxConnectionError
   StrmError = object of HyperxError
-  StrmProtocolError = object of StrmError
-  StrmStreamClosedError = object of StrmError
+    code: ErrorCode
 
 func newConnError(errCode: ErrorCode): ref ConnError =
   result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
 
 func newConnClosedError(): ref ConnectionClosedError =
   result = (ref ConnectionClosedError)(msg: "Connection Closed")
+
+func newStrmError(errCode: ErrorCode): ref StrmError =
+  result = (ref StrmError)(code: errCode, msg: "Stream Error: " & $errCode)
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
@@ -183,7 +185,20 @@ proc initStream(id: StreamId): Stream =
   )
 
 proc read(s: Stream): Future[MsgData] {.async.} =
+  template frm: untyped = result.frm
+  template payload: untyped = result.payload
   result = await s.msgs.pop()
+  # XXX move somewhere else
+  try:
+    if frm.typ == frmtWindowUpdate:
+      check payload.s.len > 0, newStrmError(errProtocolError)
+  except StrmError as err:
+    # This needs to be done here, it cannot be
+    # sent by the dispatcher or receiver
+    # since it may block
+    #if client.isConnected:
+    #  await client.sendRstStream(err.code)
+    raise err
 
 type
   ClientContext* = ref object
@@ -245,7 +260,7 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
   check frm.typ in frmRecvAllowed, newConnError(errProtocolError)
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
-      raiseError StrmStreamClosedError
+      raise newStrmError(errStreamClosed)  # XXX this probably cannot be done here
     else:
       raise newConnError(errProtocolError)
   let event = frm.toEventRecv()
@@ -435,9 +450,6 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
   template frm: untyped = msg.frm
   while client.isConnected:
     let msg = await client.recvMsgs.pop()
-    if frm.sid.StreamId notin client.streams:
-      debugInfo "stream not found " & $frm.sid.int
-      continue
     debugInfo "recv data on stream " & $frm.sid.int
     if frm.sid == frmsidMain:
       await consumeMainStream(client, msg)
@@ -446,7 +458,6 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       client.maxPeerStrmIdSeen = max(
         client.maxPeerStrmIdSeen.int, frm.sid.int
       ).StreamId
-    let stream = client.streams[frm.sid.StreamId]
     if frm.typ == frmtHeaders:
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
@@ -454,6 +465,12 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       decode(msg.payload.s, headers, client.dynDecHeaders)
       msg.payload.s.setLen 0
       msg.payload.s.add $headers
+    # Process headers even if the stream
+    # does not exist
+    if frm.sid.StreamId notin client.streams:
+      debugInfo "stream not found " & $frm.sid.int
+      continue
+    let stream = client.streams[frm.sid.StreamId]
     await stream.msgs.put msg
 
 proc responseDispatcher(client: ClientContext) {.async.} =
