@@ -79,12 +79,6 @@ template debugInfo(s: string): untyped =
   else:
     discard
 
-template raiseError(err, msg) =
-  raise (ref err)(msg: msg)
-
-template raiseError(err) =
-  raise (ref err)()
-
 template check(cond: bool): untyped =
   if not cond:
     raise (ref HyperxError)()
@@ -184,22 +178,6 @@ proc initStream(id: StreamId): Stream =
     msgs: newQueue[MsgData](1)
   )
 
-proc read(s: Stream): Future[MsgData] {.async.} =
-  template frm: untyped = result.frm
-  template payload: untyped = result.payload
-  result = await s.msgs.pop()
-  # XXX move somewhere else
-  try:
-    if frm.typ == frmtWindowUpdate:
-      check payload.s.len > 0, newStrmError(errProtocolError)
-  except StrmError as err:
-    # This needs to be done here, it cannot be
-    # sent by the dispatcher or receiver
-    # since it may block
-    #if client.isConnected:
-    #  await client.sendRstStream(err.code)
-    raise err
-
 type
   ClientContext* = ref object
     sock: MyAsyncSocket
@@ -270,6 +248,43 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
   if oldState == strmIdle:
     # XXX close streams < s.id in idle state
     discard
+
+proc write(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
+  await client.sendMsgs.put MsgData(frm: frm, payload: payload)
+
+proc sendRstStream(
+  client: ClientContext, frmSid: FrmSid, errCode: ErrorCode
+) {.async.} =
+  var payload = newPayload()
+  var frm = newRstStreamFrame(
+    payload.s, frmSid, errCode.int
+  )
+  try:
+    await client.write(frm, payload)
+  except Exception as err:
+    debugInfo err.msg
+    raise err
+
+proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
+  template frm: untyped = result.frm
+  template payload: untyped = result.payload
+  result = await client.stream(sid).msgs.pop()
+  doAssert sid == frm.sid.StreamId
+  if frm.typ == frmtWindowUpdate:
+    check payload.s.len > 0, newStrmError(errProtocolError)
+
+proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
+  template frm: untyped = result.frm
+  template payload: untyped = result.payload
+  try:
+    result = await client.readNaked(sid)
+  except StrmError as err:
+    # This needs to be done here, it cannot be
+    # sent by the dispatcher or receiver
+    # since it may block
+    if client.isConnected:
+      await client.sendRstStream(frm.sid, err.code)
+    raise err
 
 proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
@@ -420,9 +435,6 @@ proc sendTask(client: ClientContext) {.async.} =
     debugInfo "sendTask exited"
     client.close()
 
-proc write(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
-  await client.sendMsgs.put MsgData(frm: frm, payload: payload)
-
 proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
   # XXX process settings, window updates, etc
   template frm: untyped = msg.frm
@@ -443,15 +455,16 @@ proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
     raise err
 
 proc responseDispatcherNaked(client: ClientContext) {.async.} =
-  ## Dispatch messages to open streams. Note decoding
-  ## headers must be done in message received order, so
-  ## it needs to be done here. Same for processing the main
+  ## Dispatch messages to open streams.
+  ## Note decoding headers must be done in message received order,
+  ## so it needs to be done here. Same for processing the main
   ## stream messages.
   template frm: untyped = msg.frm
   while client.isConnected:
     let msg = await client.recvMsgs.pop()
     debugInfo "recv data on stream " & $frm.sid.int
     if frm.sid == frmsidMain:
+      # XXX can we make this a task?
       await consumeMainStream(client, msg)
       continue
     if frm.sid.int mod 2 == 0:
@@ -596,13 +609,15 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   frm.setPayloadLen payload.s.len.FrmPayloadLen
   await client.write(frm, payload)
   # XXX read in loop, discard other frames
-  let msg = await client.stream(sid).read()
+  let msg = await client.read(sid)
   doAssert msg.frm.typ == frmtHeaders
   result.headers.add msg.payload.s
-  let msg2 = await client.stream(sid).read()
+  let msg2 = await client.read(sid)
   doAssert msg2.frm.typ == frmtData
   result.data = msg2.payload
-  client.streams.del sid  # XXX need to reply as closed stream
+  # XXX need to reply as closed stream
+  # XXX deref closing
+  client.streams.del sid
 
 proc get*(
   client: ClientContext,

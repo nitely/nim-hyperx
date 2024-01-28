@@ -179,8 +179,7 @@ func isValidSize*(frm: Frame, size: int): bool =
 
 func newGoAwayFrame*(
   payload: var seq[byte],
-  lastSid: int,
-  errorCode: int
+  lastSid, errorCode: int
 ): Frame =
   result = newFrame()
   result.setTyp frmtGoAway
@@ -194,6 +193,20 @@ func newGoAwayFrame*(
   payload[5] = ((errorCode.uint shr 16) and 8.ones).byte
   payload[6] = ((errorCode.uint shr 8) and 8.ones).byte
   payload[7] = (errorCode.uint and 8.ones).byte
+
+func newRstStreamFrame*(
+  payload: var seq[byte],
+  sid: FrmSid,
+  errorCode: int
+): Frame =
+  result = newFrame()
+  result.setTyp frmtRstStream
+  result.setSid sid
+  result.setPayloadLen frmRstStreamSize.FrmPayloadLen
+  payload[0] = ((errorCode.uint shr 24) and 8.ones).byte
+  payload[1] = ((errorCode.uint shr 16) and 8.ones).byte
+  payload[2] = ((errorCode.uint shr 8) and 8.ones).byte
+  payload[3] = (errorCode.uint and 8.ones).byte
 
 # XXX add padding field and padding as payload
 #func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =
