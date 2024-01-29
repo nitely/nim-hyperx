@@ -66,6 +66,9 @@ proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
   q.popDone()
 
+func isClosed*[T](q: QueueAsync[T]): bool =
+  q.isClosed
+
 proc close*[T](q: QueueAsync[T]) =
   doAssert not q.isClosed
   q.isClosed = true

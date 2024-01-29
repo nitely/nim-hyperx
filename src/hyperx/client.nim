@@ -221,6 +221,17 @@ func stream(client: ClientContext, sid: StreamId): var Stream =
 func stream(client: ClientContext, sid: FrmSid): var Stream =
   client.stream sid.StreamId
 
+proc close(client: ClientContext, sid: StreamId) =
+  # Close stream messages queue and delete stream from
+  # the client.
+  # This does nothing if the stream is already close
+  if sid notin client.streams:
+    return
+  let stream = client.streams[sid]
+  if not stream.msgs.isClosed:
+    stream.msgs.close()
+  client.streams.del stream.id
+
 proc doTransitionSend(s: var Stream, frm: Frame) =
   discard
 
@@ -279,6 +290,7 @@ proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
   try:
     result = await client.readNaked(sid)
   except StrmError as err:
+    client.close(sid)
     # This needs to be done here, it cannot be
     # sent by the dispatcher or receiver
     # since it may block
@@ -409,14 +421,16 @@ proc close(client: ClientContext) =
 proc sendTaskNaked(client: ClientContext) {.async.} =
   ## Send frames
   ## Meant to be asyncCheck'ed
+  template frm: untyped = msg.frm
+  template payload: untyped = msg.payload
   doAssert client.isConnected
   while client.isConnected:
     let msg = await client.sendMsgs.pop()
-    doAssert msg.frm.payloadLen.int == msg.payload.s.len
-    client.stream(msg.frm.sid).doTransitionSend msg.frm
-    await client.sock.send(msg.frm.rawBytesPtr, msg.frm.len)
-    if msg.payload.s.len > 0:
-      await client.sock.send(addr msg.payload.s[0], msg.payload.s.len)
+    doAssert frm.payloadLen.int == payload.s.len
+    client.stream(frm.sid).doTransitionSend frm
+    await client.sock.send(frm.rawBytesPtr, frm.len)
+    if payload.s.len > 0:
+      await client.sock.send(addr payload.s[0], payload.s.len)
 
 proc sendTask(client: ClientContext) {.async.} =
   try:
@@ -481,10 +495,14 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
+      # XXX need to reply as closed stream ?
       debugInfo "stream not found " & $frm.sid.int
       continue
     let stream = client.streams[frm.sid.StreamId]
-    await stream.msgs.put msg
+    try:
+      await stream.msgs.put msg
+    except QueueClosedError:
+      debugInfo "stream is closed " & $frm.sid.int
 
 proc responseDispatcher(client: ClientContext) {.async.} =
   try:
@@ -597,8 +615,11 @@ func addHeader(client: ClientContext, r: Request, n, v: string) =
   discard hencode(n, v, client.dynEncHeaders, r.data, huffman = false)
 
 proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
+  if not client.isConnected:
+    raise newConnClosedError()
   result = newResponse()
   let sid = client.openStream()
+  defer: client.close(sid)
   doAssert sid.FrmSid != frmsidMain
   var frm = newFrame()
   frm.setTyp frmtHeaders
@@ -615,9 +636,6 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   let msg2 = await client.read(sid)
   doAssert msg2.frm.typ == frmtData
   result.data = msg2.payload
-  # XXX need to reply as closed stream
-  # XXX deref closing
-  client.streams.del sid
 
 proc get*(
   client: ClientContext,
