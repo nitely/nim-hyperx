@@ -2,13 +2,14 @@
 
 version = "0.1.0"
 author = "Esteban Castro Borsani (@nitely)"
-description = "HTTP/1, HTTP/2 and websockets server"
+description = "Pure Nim Http2 client and server"
 license = "MIT"
 srcDir = "src"
 skipDirs = @["tests"]
 
 requires "nim >= 2.0.0"
-requires "hpack >= 0.1 & < 0.2"
+#requires "hpack >= 0.2.0"
+requires "https://github.com/nitely/nim-hpack#update_size"
 
 task test, "Test":
   exec "nim c -r src/hyperx/utils.nim"

@@ -1,4 +1,5 @@
 nimcache/
+nimble.develop
 tests/tests
 tests/testclient
 src/hyperx/client

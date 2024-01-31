@@ -3,7 +3,6 @@
 
 {.define: ssl.}
 
-import pkg/hpack/decoder
 import ./frame
 import ./stream
 import ./queue
@@ -184,7 +183,7 @@ type
     hostname: string
     port: Port
     isConnected: bool
-    dynEncHeaders, dynDecHeaders: DynHeaders
+    headersEnc, headersDec: DynHeaders
     streams: Table[StreamId, Stream]
     currStreamId: StreamId
     maxConcurrentStreams: int
@@ -202,8 +201,8 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     hostname: hostname,
     port: port,
     # XXX remove max headers limit
-    dynEncHeaders: initDynHeaders(headerTableSize, 16),
-    dynDecHeaders: initDynHeaders(headerTableSize, 16),
+    headersEnc: initDynHeaders(headerTableSize, 16),
+    headersDec: initDynHeaders(headerTableSize, 16),
     streams: initTable[StreamId, Stream](16),
     currStreamId: 1.StreamId,
     maxConcurrentStreams: 256,
@@ -261,6 +260,14 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
     discard
 
 proc write(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
+  # This is done in the next headers after settings ACK put
+  if frm.typ == frmtHeaders and client.headersEnc.hasResized():
+    # XXX avoid copy?
+    var payloadTmp = newPayload()
+    client.headersEnc.encodeLastResize(payloadTmp.s)
+    client.headersEnc.clearLastResize()
+    payloadTmp.s.add payload.s
+    swap payload.s, payloadTmp.s
   await client.sendMsgs.put MsgData(frm: frm, payload: payload)
 
 proc sendRstStream(
@@ -453,8 +460,22 @@ proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
   # XXX process settings, window updates, etc
   template frm: untyped = msg.frm
   template payload: untyped = msg.payload
-  if frm.typ == frmtWindowUpdate:
+  case frm.typ
+  of frmtWindowUpdate:
     check payload.s.len > 0, newConnError(errProtocolError)
+  of frmtSettings:
+    for (setting, value) in settings(payload.s):
+      # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
+      case setting
+      of frmsHeaderTableSize:
+        client.headersEnc.maxSize = value.int
+        # maybe max table size should be a setting instead of 4096
+        client.headersEnc.resize(min(value.int, headerTableSize))
+      else:
+        discard
+    # XXX send ack
+  else:
+    discard
 
 proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
   # do not send any debug information for security reasons
@@ -478,7 +499,7 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
     let msg = await client.recvMsgs.pop()
     debugInfo "recv data on stream " & $frm.sid.int
     if frm.sid == frmsidMain:
-      # XXX can we make this a task?
+      # Settings need to be applied before consuming following messages
       await consumeMainStream(client, msg)
       continue
     if frm.sid.int mod 2 == 0:
@@ -489,7 +510,7 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
       # can raise a connError
-      decode(msg.payload.s, headers, client.dynDecHeaders)
+      decode(msg.payload.s, headers, client.headersDec)
       msg.payload.s.setLen 0
       msg.payload.s.add $headers
     # Process headers even if the stream
@@ -612,7 +633,9 @@ func newRequest(): Request =
   Request()
 
 func addHeader(client: ClientContext, r: Request, n, v: string) =
-  discard hencode(n, v, client.dynEncHeaders, r.data, huffman = false)
+  ## headers must be added synchronously, no await in between,
+  ## or else a table resize could occur in the meantime
+  discard hencode(n, v, client.headersEnc, r.data, huffman = false)
 
 proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   if not client.isConnected:

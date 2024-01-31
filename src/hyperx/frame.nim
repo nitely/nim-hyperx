@@ -82,6 +82,14 @@ const
   frmsInitialWindowSize* = 0x04'u8.FrmSetting
   frmsMaxFrameSize* = 0x05'u8.FrmSetting
   frmsMaxHeaderListSize* = 0x06'u8.FrmSetting
+  frmsAllSettings = {
+    frmsHeaderTableSize,
+    frmsEnablePush,
+    frmsMaxConcurrentStreams,
+    frmsInitialWindowSize,
+    frmsMaxFrameSize,
+    frmsMaxHeaderListSize
+  }
 
 type
   FrmSid* = distinct uint32  #range[0 .. 31.ones.int]
@@ -207,6 +215,39 @@ func newRstStreamFrame*(
   payload[1] = ((errorCode.uint shr 16) and 8.ones).byte
   payload[2] = ((errorCode.uint shr 8) and 8.ones).byte
   payload[3] = (errorCode.uint and 8.ones).byte
+
+iterator settings*(payload: seq[byte]): (FrmSetting, uint32) {.inline.} =
+  # https://httpwg.org/specs/rfc9113.html#SettingFormat
+  doAssert payload.len mod frmSettingsSize == 0
+  var i = 0
+  var id = 0'u16
+  # need to return last value for each ID
+  var skip: array[7, int32]
+  while i < payload.len:
+    id = 0'u16
+    id += payload[i].uint16 shl 8
+    id += payload[i+1].uint16
+    if id.FrmSetting in frmsAllSettings:
+      skip[id.int] += 1
+    i += frmSettingsSize
+  i = 0
+  var value = 0'u32
+  while i < payload.len:
+    id = 0'u16
+    id += payload[i].uint16 shl 8
+    id += payload[i+1].uint16
+    if id.FrmSetting in frmsAllSettings:
+      if skip[id.int] == 0:
+        value = 0'u32
+        value += payload[i+2].uint32 shl 24
+        value += payload[i+3].uint32 shl 16
+        value += payload[i+4].uint32 shl 8
+        value += payload[i+5].uint32
+        yield (id.FrmSetting, value)
+      else:
+        dec skip[id.int]
+    # else skip
+    i += frmSettingsSize
 
 # XXX add padding field and padding as payload
 #func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =
