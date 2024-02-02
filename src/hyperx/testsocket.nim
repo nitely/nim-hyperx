@@ -58,4 +58,3 @@ proc close*(s: TestSocket) =
   proc terminateRecv() =
     asyncCheck s.data.put("")
   callSoon terminateRecv
-  

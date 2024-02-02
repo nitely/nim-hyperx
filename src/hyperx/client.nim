@@ -415,7 +415,7 @@ proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
       case setting
       of frmsHeaderTableSize:
         # maybe max table size should be a setting instead of 4096
-        client.headersEnc.setLen min(value.int, headerTableSize)
+        client.headersEnc.setSize min(value.int, headerTableSize)
       else:
         discard
     # XXX send ack

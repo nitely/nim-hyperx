@@ -1,10 +1,7 @@
 # HyperX
 
-> Warning: Do not use. This lib is in pre-alpha state.
-  It's likely broken. Only a few parts of the spec are
-  implemented. I'm focusing on coding the client ATM.
-  If you want to join the effort, you are welcome.
-  Just read the spec and fix whatever is broken :)
+> [!WARNING]
+> Do not use. This lib is in pre-alpha state.
 
 Pure Nim Http2 client/server implementation.
 

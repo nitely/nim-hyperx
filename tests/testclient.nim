@@ -238,7 +238,27 @@ testAsync "response with bad missing padding length":
     errorMsg = err.msg
   doAssert "PROTOCOL_ERROR" in errorMsg
 
-testAsync "reset header table":
+testAsync "header table is populated":
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await (
+      tc.get("/foo") and
+      tc.reply("foo: foo\r\L", "bar")
+    )
+  let reqs = tc.sent()
+  doAssert tc.headersDec.len == 2
+  doAssert $tc.headersDec ==
+    ":authority: foo.bar\r\L" &
+    ":path: /foo\r\L"
+  doAssert reqs[1].frm.sid.int == 1
+  doAssert reqs[1].frm.typ == frmtHeaders
+  doAssert reqs[1].payload ==
+    ":method: GET\r\L" &
+    ":scheme: https\r\L" &
+    ":path: /foo\r\L" &
+    ":authority: foo.bar\r\L"
+
+testAsync "header table size setting is applied":
   proc recvTableSizeSetting(tc: TestClientContext, tableSize: int) {.async.} =
     var payload = "\x00"
     payload.add frmsHeaderTableSize.char
@@ -252,9 +272,7 @@ testAsync "reset header table":
     await tc.reply(frm1, payload)
   var tc = newTestClient("foo.bar")
   withConnection tc:
-    # XXX need to wait for main consumer to drain
-    #     doing two get makes sure that occurs but
-    #     it's hacky
+    # XXX wait for sent ACK, and do one single request
     await tc.recvTableSizeSetting(0)
     await (
       tc.get("/foo") and
