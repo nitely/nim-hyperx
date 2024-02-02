@@ -3,9 +3,11 @@
 
 import std/strutils
 import std/asyncdispatch
+import pkg/hpack
 import ../src/hyperx/client
 import ../src/hyperx/testutils
 import ../src/hyperx/frame
+import ../src/hyperx/errors
 
 testAsync "simple response":
   const headers = ":method: foobar\r\L"
@@ -235,3 +237,46 @@ testAsync "response with bad missing padding length":
   except HyperxConnectionError as err:
     errorMsg = err.msg
   doAssert "PROTOCOL_ERROR" in errorMsg
+
+testAsync "reset header table":
+  proc recvTableSizeSetting(tc: TestClientContext, tableSize: int) {.async.} =
+    var payload = "\x00"
+    payload.add frmsHeaderTableSize.char
+    payload.add "\x00\x00\x00"
+    payload.add tableSize.char
+    let frm1 = frame(
+      frmtSettings,
+      frmsidMain,
+      payload.len.FrmPayloadLen
+    )
+    await tc.reply(frm1, payload)
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    # XXX need to wait for main consumer to drain
+    #     doing two get makes sure that occurs but
+    #     it's hacky
+    await tc.recvTableSizeSetting(0)
+    await (
+      tc.get("/foo") and
+      tc.reply("foo: foo\r\L", "bar")
+    )
+    await (
+      tc.get("/bar") and
+      tc.reply("foo2: foo2\r\L", "bar2")
+    )
+  let reqs = tc.sent()
+  doAssert tc.headersDec.len == 0
+  doAssert reqs[1].frm.sid.int == 1
+  doAssert reqs[1].frm.typ == frmtHeaders
+  doAssert reqs[1].payload ==
+    ":method: GET\r\L" &
+    ":scheme: https\r\L" &
+    ":path: /foo\r\L" &
+    ":authority: foo.bar\r\L"
+  doAssert reqs[2].frm.sid.int == 3
+  doAssert reqs[2].frm.typ == frmtHeaders
+  doAssert reqs[2].payload ==
+    ":method: GET\r\L" &
+    ":scheme: https\r\L" &
+    ":path: /bar\r\L" &
+    ":authority: foo.bar\r\L"

@@ -22,7 +22,7 @@ task test, "Test":
   exec "nim c -r tests/testclient.nim"
 
 task testclient, "Test client only":
-  exec "nim c -r tests/testclient.nim"
+  exec "nim c -r -f tests/testclient.nim"
 
 task untestable, "Test untesteable":
   exec "nim c -r src/hyperx/untestable.nim"

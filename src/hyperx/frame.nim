@@ -237,6 +237,7 @@ iterator settings*(payload: seq[byte]): (FrmSetting, uint32) {.inline.} =
     id += payload[i].uint16 shl 8
     id += payload[i+1].uint16
     if id.FrmSetting in frmsAllSettings:
+      dec skip[id.int]
       if skip[id.int] == 0:
         value = 0'u32
         value += payload[i+2].uint32 shl 24
@@ -244,8 +245,6 @@ iterator settings*(payload: seq[byte]): (FrmSetting, uint32) {.inline.} =
         value += payload[i+4].uint32 shl 8
         value += payload[i+5].uint32
         yield (id.FrmSetting, value)
-      else:
-        dec skip[id.int]
     # else skip
     i += frmSettingsSize
 

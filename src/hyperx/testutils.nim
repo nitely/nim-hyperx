@@ -59,14 +59,15 @@ type
     c: ClientContext
     sid: int
     resps*: seq[Response]
-    encDh: DynHeaders
+    headersEnc*, headersDec*: DynHeaders
 
 func newTestClient*(hostname: string): TestClientContext =
   result = TestClientContext(
     c: newClient(hostname, Port 443),
     sid: 1,
     resps: newSeq[Response](),
-    encDh: initDynHeaders(4096, 16)
+    headersEnc: initDynHeaders(4096),
+    headersDec: initDynHeaders(4096)
   )
 
 proc frame*(
@@ -83,7 +84,7 @@ proc hencode*(tc: TestClientContext, hs: string): string =
     if h.len == 0:
       continue
     let parts = h.split(": ", 1)
-    discard hencode(parts[0], parts[1], tc.encDh, resp)
+    discard hencode(parts[0], parts[1], tc.headersEnc, resp)
   result = resp.toString
 
 template withConnection*(tc: TestClientContext, body: untyped): untyped =
@@ -126,7 +127,6 @@ proc sent*(tc: TestClientContext): seq[TestRequest] =
   let data = tc.c.testDataSent()
   if data.len == 0:
     return
-  var dh = initDynHeaders(4096, 16)
   #doAssert tc.prefaceSent()
   const prefaceLen = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".len
   var i = prefaceLen
@@ -138,7 +138,7 @@ proc sent*(tc: TestClientContext): seq[TestRequest] =
     i += payload.len
     if frame.typ == frmtHeaders:
       var ds = initDecodedStr()
-      hdecodeAll(payload, dh, ds)
+      hdecodeAll(payload, tc.headersDec, ds)
       result.add TestRequest(frm: frame, payload: $ds)
     else:
       result.add TestRequest(frm: frame, payload: payload.toString)
