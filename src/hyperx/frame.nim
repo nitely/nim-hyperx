@@ -116,6 +116,9 @@ func newFrame*(): Frame {.inline.} =
 func rawBytesPtr*(frm: Frame): ptr byte =
   addr frm.s[0]
 
+func bytes*(frm: Frame): array[frmHeaderSize, byte] =
+  frm.s
+
 func clear*(frm: Frame) {.inline.} =
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0

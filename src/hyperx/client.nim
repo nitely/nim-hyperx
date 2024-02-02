@@ -339,18 +339,20 @@ proc openStream(client: ClientContext): StreamId =
 proc startHandshake(client: ClientContext) {.async.} =
   debugInfo "startHandshake"
   # we need to do this before sending any other frame
-  await client.sock.send preface
+  # XXX: allow sending some params
   let sid = client.openMainStream()
   doAssert sid == frmsidMain.StreamId
-  # XXX: allow sending some params
   var payload = newPayload()
   payload.s.addSetting frmsEnablePush, 0'u32
   var frm = newFrame()
   frm.setTyp frmtSettings
   frm.setSid frmsidMain
   frm.setPayloadLen payload.s.len.FrmPayloadLen
-  await client.sock.send(frm.rawBytesPtr, frm.len)
-  await client.sock.send(addr payload.s[0], payload.s.len)
+  var blob = newSeqOfCap[byte](preface.len+frm.len+payload.s.len)
+  blob.add preface
+  blob.add frm.bytes
+  blob.add payload.s
+  await client.sock.send(addr blob[0], blob.len)
 
 proc connect(client: ClientContext) {.async.} =
   doAssert(not client.isConnected)
