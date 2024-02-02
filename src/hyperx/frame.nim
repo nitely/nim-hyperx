@@ -211,10 +211,25 @@ func newRstStreamFrame*(
   result.setTyp frmtRstStream
   result.setSid sid
   result.setPayloadLen frmRstStreamSize.FrmPayloadLen
+  payload.setLen frmRstStreamSize
   payload[0] = ((errorCode.uint shr 24) and 8.ones).byte
   payload[1] = ((errorCode.uint shr 16) and 8.ones).byte
   payload[2] = ((errorCode.uint shr 8) and 8.ones).byte
   payload[3] = (errorCode.uint and 8.ones).byte
+
+func addSetting*(
+  payload: var seq[byte],
+  id: FrmSetting,
+  value: uint32
+) =
+  let i = payload.len
+  payload.setLen i+frmSettingsSize
+  payload[i] = 0.byte
+  payload[i+1] = id.byte
+  payload[i+2] = ((value shr 24) and 8.ones).byte
+  payload[i+3] = ((value shr 16) and 8.ones).byte
+  payload[i+4] = ((value shr 8) and 8.ones).byte
+  payload[i+5] = (value and 8.ones).byte
 
 iterator settings*(payload: seq[byte]): (FrmSetting, uint32) {.inline.} =
   # https://httpwg.org/specs/rfc9113.html#SettingFormat

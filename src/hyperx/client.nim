@@ -343,10 +343,14 @@ proc startHandshake(client: ClientContext) {.async.} =
   let sid = client.openMainStream()
   doAssert sid == frmsidMain.StreamId
   # XXX: allow sending some params
+  var payload = newPayload()
+  payload.s.addSetting frmsEnablePush, 0'u32
   var frm = newFrame()
   frm.setTyp frmtSettings
   frm.setSid frmsidMain
+  frm.setPayloadLen payload.s.len.FrmPayloadLen
   await client.sock.send(frm.rawBytesPtr, frm.len)
+  await client.sock.send(addr payload.s[0], payload.s.len)
 
 proc connect(client: ClientContext) {.async.} =
   doAssert(not client.isConnected)
@@ -416,6 +420,8 @@ proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
       of frmsHeaderTableSize:
         # maybe max table size should be a setting instead of 4096
         client.headersEnc.setSize min(value.int, headerTableSize)
+      of frmsEnablePush:
+        check value.int == 0, newConnError(errProtocolError)
       else:
         discard
     # XXX send ack

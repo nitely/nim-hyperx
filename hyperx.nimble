@@ -17,9 +17,9 @@ task test, "Test":
   exec "nim c -r src/hyperx/queue.nim"
   exec "nim c -r src/hyperx/stream.nim"
   exec "nim c -r src/hyperx/frame.nim"
-  exec "nim c -r -d:hyperxTest src/hyperx/testutils.nim"
-  exec "nim c -r -d:hyperxTest src/hyperx/client.nim"
-  exec "nim c -r tests/testclient.nim"
+  exec "nim c -r -f -d:hyperxTest src/hyperx/testutils.nim"
+  exec "nim c -r -f -d:hyperxTest src/hyperx/client.nim"
+  exec "nim c -r -f tests/testclient.nim"
 
 task testclient, "Test client only":
   exec "nim c -r -f tests/testclient.nim"
