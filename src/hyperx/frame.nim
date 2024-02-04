@@ -12,9 +12,6 @@ const
   frmPingSize = 8
   frmWindowUpdateSize = 4
   frmGoAwaySize = 8
-  # XXX: settings max frame size (payload) can be from 2^14 to 2^24-1
-  frmMaxPayloadSize* = 1'u32 shl 14
-  frmSettingsMaxFrameSize* = 1'u32 shl 14  # + frmHeaderSize
 
 type
   FrmTyp* = distinct uint8

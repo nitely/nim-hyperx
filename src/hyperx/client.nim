@@ -15,7 +15,12 @@ when defined(hyperxTest):
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
   # https://httpwg.org/specs/rfc9113.html#SettingValues
-  headerTableSize = 4096
+  stgHeaderTableSize = 4096
+  stgMaxConcurrentStreams = int.high
+  stgInitialWindowSize = (1 shl 15) - 1
+  stgMaxWindowSize = (1 shl 30) - 1
+  stgInitialMaxFrameSize = 1 shl 13
+  stgMaxFrameSize = (1 shl 23) - 1
 
 template debugInfo(s: string): untyped =
   when defined(hyperxDebug):
@@ -131,9 +136,11 @@ type
     headersEnc, headersDec: DynHeaders
     streams: Table[StreamId, Stream]
     currStreamId: StreamId
-    maxConcurrentStreams: int
     sendMsgs, recvMsgs: QueueAsync[MsgData]
     maxPeerStrmIdSeen: StreamId
+    maxConcurrentStreams: int
+    initialWindowSize: int
+    maxFrameSize: int
 
 when not defined(hyperxTest):
   proc newMySocket(): MyAsyncSocket =
@@ -146,14 +153,16 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     hostname: hostname,
     port: port,
     # XXX remove max headers limit
-    headersEnc: initDynHeaders(headerTableSize),
-    headersDec: initDynHeaders(headerTableSize),
+    headersEnc: initDynHeaders(stgHeaderTableSize),
+    headersDec: initDynHeaders(stgHeaderTableSize),
     streams: initTable[StreamId, Stream](16),
     currStreamId: 1.StreamId,
-    maxConcurrentStreams: 256,
     recvMsgs: newQueue[MsgData](10),
     sendMsgs: newQueue[MsgData](10),
-    maxPeerStrmIdSeen: 0.StreamId
+    maxPeerStrmIdSeen: 0.StreamId,
+    maxConcurrentStreams: stgMaxConcurrentStreams,
+    initialWindowSize: stgInitialWindowSize,
+    maxFrameSize: stgInitialMaxFrameSize
   )
 
 func stream(client: ClientContext, sid: StreamId): var Stream =
@@ -336,8 +345,8 @@ proc openStream(client: ClientContext): StreamId =
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
 
-proc startHandshake(client: ClientContext) {.async.} =
-  debugInfo "startHandshake"
+proc handshake(client: ClientContext) {.async.} =
+  debugInfo "handshake"
   # we need to do this before sending any other frame
   # XXX: allow sending some params
   let sid = client.openMainStream()
@@ -359,7 +368,7 @@ proc connect(client: ClientContext) {.async.} =
   client.isConnected = true
   await client.sock.connect(client.hostname, client.port)
   # Assume server supports http2
-  await client.startHandshake()
+  await client.handshake()
 
 proc close(client: ClientContext) =
   if not client.isConnected:
@@ -421,11 +430,26 @@ proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
       case setting
       of frmsHeaderTableSize:
         # maybe max table size should be a setting instead of 4096
-        client.headersEnc.setSize min(value.int, headerTableSize)
+        client.headersEnc.setSize min(value.int, stgHeaderTableSize)
       of frmsEnablePush:
         check value.int == 0, newConnError(errProtocolError)
-      else:
+      of frmsMaxConcurrentStreams:
+        client.maxConcurrentStreams = value.int
+      of frmsInitialWindowSize:
+        check value.int <= stgMaxWindowSize, newConnError(errFlowControlError)
+        # XXX update all open streams windows
+        client.initialWindowSize = value.int
+      of frmsMaxFrameSize:
+        check value.int >= stgInitialMaxFrameSize, newConnError(errProtocolError)
+        check value.int <= stgMaxFrameSize, newConnError(errProtocolError)
+        client.maxFrameSize = value.int
+      of frmsMaxHeaderListSize:
+        # this is only advisory, do nothing for now.
+        # server may reply a 431 status (request header fields too large)
         discard
+      else:
+        # ignore unknown setting
+        debugInfo "unknown setting recived"
     # XXX send ack
   else:
     discard
