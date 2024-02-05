@@ -291,9 +291,10 @@ testAsync "header table size setting is applied":
     ":scheme: https\r\L" &
     ":path: /foo\r\L" &
     ":authority: foo.bar\r\L"
-  doAssert reqs[2].frm.sid.int == 3
-  doAssert reqs[2].frm.typ == frmtHeaders
-  doAssert reqs[2].payload ==
+  # XXX reqs[2] window size update
+  doAssert reqs[3].frm.sid.int == 3
+  doAssert reqs[3].frm.typ == frmtHeaders
+  doAssert reqs[3].payload ==
     ":method: GET\r\L" &
     ":scheme: https\r\L" &
     ":path: /bar\r\L" &

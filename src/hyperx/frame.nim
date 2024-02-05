@@ -217,6 +217,25 @@ func newRstStreamFrame*(
   payload[2] = ((errorCode.uint shr 8) and 8.ones).byte
   payload[3] = (errorCode.uint and 8.ones).byte
 
+func setWindowSizeInc*(
+  payload: var seq[byte],
+  increment: int
+) =
+  if payload.len != frmWindowUpdateSize:
+    payload.setLen frmWindowUpdateSize
+  payload[0] = ((increment.uint shr 24) and 8.ones).byte
+  payload[1] = ((increment.uint shr 16) and 8.ones).byte
+  payload[2] = ((increment.uint shr 8) and 8.ones).byte
+  payload[3] = (increment.uint and 8.ones).byte
+
+func newWindowSizeFrame*(
+  sid: FrmSid
+): Frame =
+  result = newFrame()
+  result.setTyp frmtWindowUpdate
+  result.setSid sid
+  result.setPayloadLen frmWindowUpdateSize.FrmPayloadLen
+
 func addSetting*(
   payload: var seq[byte],
   id: FrmSetting,

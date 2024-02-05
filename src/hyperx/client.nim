@@ -239,15 +239,13 @@ proc sendRstStream(
 
 proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
   template frm: untyped = result.frm
-  template payload: untyped = result.payload
+  template payload: untyped = result.payload.s
   result = await client.stream(sid).msgs.pop()
   doAssert sid == frm.sid.StreamId
   if frm.typ == frmtWindowUpdate:
-    check payload.s.len > 0, newStrmError(errProtocolError)
+    check payload.len > 0, newStrmError(errProtocolError)
 
 proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
-  template frm: untyped = result.frm
-  template payload: untyped = result.payload
   try:
     result = await client.readNaked(sid)
   except StrmError as err:
@@ -256,7 +254,7 @@ proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
     # sent by the dispatcher or receiver
     # since it may block
     if client.isConnected:
-      await client.sendRstStream(frm.sid, err.code)
+      await client.sendRstStream(sid.FrmSid, err.code)
     raise err
 
 proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
@@ -390,15 +388,15 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   ## Send frames
   ## Meant to be asyncCheck'ed
   template frm: untyped = msg.frm
-  template payload: untyped = msg.payload
+  template payload: untyped = msg.payload.s
   doAssert client.isConnected
   while client.isConnected:
     let msg = await client.sendMsgs.pop()
-    doAssert frm.payloadLen.int == payload.s.len
+    doAssert frm.payloadLen.int == payload.len
     client.stream(frm.sid).doTransitionSend frm
     await client.sock.send(frm.rawBytesPtr, frm.len)
-    if payload.s.len > 0:
-      await client.sock.send(addr payload.s[0], payload.s.len)
+    if payload.len > 0:
+      await client.sock.send(addr payload[0], payload.len)
 
 proc sendTask(client: ClientContext) {.async.} =
   try:
@@ -420,12 +418,12 @@ proc sendTask(client: ClientContext) {.async.} =
 proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
   # XXX process settings, window updates, etc
   template frm: untyped = msg.frm
-  template payload: untyped = msg.payload
+  template payload: untyped = msg.payload.s
   case frm.typ
   of frmtWindowUpdate:
-    check payload.s.len > 0, newConnError(errProtocolError)
+    check payload.len > 0, newConnError(errProtocolError)
   of frmtSettings:
-    for (setting, value) in settings(payload.s):
+    for (setting, value) in settings(payload):
       # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
       case setting
       of frmsHeaderTableSize:
@@ -438,7 +436,7 @@ proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
       of frmsInitialWindowSize:
         check value <= stgMaxWindowSize, newConnError(errFlowControlError)
         # XXX update all open streams windows
-        client.windowSize = value
+        #client.windowSize = value
       of frmsMaxFrameSize:
         check value >= stgInitialMaxFrameSize, newConnError(errProtocolError)
         check value <= stgMaxFrameSize, newConnError(errProtocolError)
@@ -472,6 +470,9 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
   ## so it needs to be done here. Same for processing the main
   ## stream messages.
   template frm: untyped = msg.frm
+  template payload: untyped = msg.payload.s
+  let frmWs = newWindowSizeFrame frmsidMain
+  var payloadWs = newPayload()
   while client.isConnected:
     let msg = await client.recvMsgs.pop()
     debugInfo "recv data on stream " & $frm.sid.int
@@ -487,9 +488,13 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
       # can raise a connError
-      decode(msg.payload.s, headers, client.headersDec)
-      msg.payload.s.setLen 0
-      msg.payload.s.add $headers
+      decode(payload, headers, client.headersDec)
+      payload.setLen 0
+      payload.add $headers
+    if frm.typ == frmtData and payload.len > 0:
+      # XXX send stream update too, frm did not close it
+      payloadWs.s.setWindowSizeInc payload.len
+      await client.write(frmWs, payloadWs)
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
