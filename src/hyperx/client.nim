@@ -15,12 +15,13 @@ when defined(hyperxTest):
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
   # https://httpwg.org/specs/rfc9113.html#SettingValues
-  stgHeaderTableSize = 4096
-  stgMaxConcurrentStreams = int.high
-  stgInitialWindowSize = (1 shl 15) - 1
-  stgMaxWindowSize = (1 shl 30) - 1
-  stgInitialMaxFrameSize = 1 shl 13
-  stgMaxFrameSize = (1 shl 23) - 1
+  stgHeaderTableSize = 4096'u32
+  stgMaxConcurrentStreams = uint32.high
+  stgInitialWindowSize = (1'u32 shl 15) - 1'u32
+  stgMaxWindowSize = (1'u32 shl 30) - 1'u32
+  stgInitialMaxFrameSize = 1'u32 shl 13
+  stgMaxFrameSize = (1'u32 shl 23) - 1'u32
+  stgDisablePush = 0'u32
 
 template debugInfo(s: string): untyped =
   when defined(hyperxDebug):
@@ -138,9 +139,7 @@ type
     currStreamId: StreamId
     sendMsgs, recvMsgs: QueueAsync[MsgData]
     maxPeerStrmIdSeen: StreamId
-    maxConcurrentStreams: int
-    initialWindowSize: int
-    maxFrameSize: int
+    maxConcurrentStreams, windowSize, maxFrameSize: uint32
 
 when not defined(hyperxTest):
   proc newMySocket(): MyAsyncSocket =
@@ -153,15 +152,15 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     hostname: hostname,
     port: port,
     # XXX remove max headers limit
-    headersEnc: initDynHeaders(stgHeaderTableSize),
-    headersDec: initDynHeaders(stgHeaderTableSize),
+    headersEnc: initDynHeaders(stgHeaderTableSize.int),
+    headersDec: initDynHeaders(stgHeaderTableSize.int),
     streams: initTable[StreamId, Stream](16),
     currStreamId: 1.StreamId,
     recvMsgs: newQueue[MsgData](10),
     sendMsgs: newQueue[MsgData](10),
     maxPeerStrmIdSeen: 0.StreamId,
     maxConcurrentStreams: stgMaxConcurrentStreams,
-    initialWindowSize: stgInitialWindowSize,
+    windowSize: stgInitialWindowSize,
     maxFrameSize: stgInitialMaxFrameSize
   )
 
@@ -352,7 +351,8 @@ proc handshake(client: ClientContext) {.async.} =
   let sid = client.openMainStream()
   doAssert sid == frmsidMain.StreamId
   var payload = newPayload()
-  payload.s.addSetting frmsEnablePush, 0'u32
+  payload.s.addSetting frmsEnablePush, stgDisablePush
+  payload.s.addSetting frmsInitialWindowSize, stgMaxWindowSize
   var frm = newFrame()
   frm.setTyp frmtSettings
   frm.setSid frmsidMain
@@ -430,19 +430,19 @@ proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
       case setting
       of frmsHeaderTableSize:
         # maybe max table size should be a setting instead of 4096
-        client.headersEnc.setSize min(value.int, stgHeaderTableSize)
+        client.headersEnc.setSize min(value.int, stgHeaderTableSize.int)
       of frmsEnablePush:
-        check value.int == 0, newConnError(errProtocolError)
+        check value == 0, newConnError(errProtocolError)
       of frmsMaxConcurrentStreams:
-        client.maxConcurrentStreams = value.int
+        client.maxConcurrentStreams = value
       of frmsInitialWindowSize:
-        check value.int <= stgMaxWindowSize, newConnError(errFlowControlError)
+        check value <= stgMaxWindowSize, newConnError(errFlowControlError)
         # XXX update all open streams windows
-        client.initialWindowSize = value.int
+        client.windowSize = value
       of frmsMaxFrameSize:
-        check value.int >= stgInitialMaxFrameSize, newConnError(errProtocolError)
-        check value.int <= stgMaxFrameSize, newConnError(errProtocolError)
-        client.maxFrameSize = value.int
+        check value >= stgInitialMaxFrameSize, newConnError(errProtocolError)
+        check value <= stgMaxFrameSize, newConnError(errProtocolError)
+        client.maxFrameSize = value
       of frmsMaxHeaderListSize:
         # this is only advisory, do nothing for now.
         # server may reply a 431 status (request header fields too large)
