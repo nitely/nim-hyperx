@@ -42,7 +42,7 @@ func add(s: var seq[byte], ss: string) =
   for c in ss:
     s.add c.byte
 
-func add(s: var string, ss: seq[byte]) =
+func add(s: var string, ss: openArray[byte]) =
   # XXX x_x
   for c in ss:
     s.add c.char
@@ -115,7 +115,6 @@ else:
 type
   MsgData = object
     frm: Frame
-    payload: Payload
   Stream = object
     id: StreamId
     state: StreamState
@@ -195,7 +194,7 @@ const connFrmAllowed = {
 }
 
 proc doTransitionRecv(s: var Stream, frm: Frame) =
-  if s.id == frmsidMain.StreamId:
+  if s.id == frmSidMain.StreamId:
     check frm.typ in connFrmAllowed, newConnError(errProtocolError)
     return
   check frm.typ in frmRecvAllowed, newConnError(errProtocolError)
@@ -212,38 +211,36 @@ proc doTransitionRecv(s: var Stream, frm: Frame) =
     # XXX close streams < s.id in idle state
     discard
 
-proc write(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
+proc write(client: ClientContext, frm: Frame) {.async.} =
+  ## Frames passed cannot be reused because they are references
+  ## added to a queue, and may not have been consumed yet
   # This is done in the next headers after settings ACK put
   if frm.typ == frmtHeaders and client.headersEnc.hasResized():
     # XXX avoid copy?
-    var payloadTmp = newPayload()
-    client.headersEnc.encodeLastResize(payloadTmp.s)
+    var payload = newSeq[byte]()
+    client.headersEnc.encodeLastResize(payload)
     client.headersEnc.clearLastResize()
-    payloadTmp.s.add payload.s
-    swap payload.s, payloadTmp.s
-    frm.setPayloadLen payload.s.len.FrmPayloadLen
-  await client.sendMsgs.put MsgData(frm: frm, payload: payload)
+    payload.add frm.payload
+    frm.shrink frm.payload.len
+    frm.add payload
+  await client.sendMsgs.put MsgData(frm: frm)
 
 proc sendRstStream(
   client: ClientContext, frmSid: FrmSid, errCode: ErrorCode
 ) {.async.} =
-  var payload = newPayload()
-  var frm = newRstStreamFrame(
-    payload.s, frmSid, errCode.int
-  )
+  let frm = newRstStreamFrame(frmSid, errCode.int)
   try:
-    await client.write(frm, payload)
+    await client.write(frm)
   except Exception as err:
     debugInfo err.msg
     raise err
 
 proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
   template frm: untyped = result.frm
-  template payload: untyped = result.payload.s
   result = await client.stream(sid).msgs.pop()
   doAssert sid == frm.sid.StreamId
   if frm.typ == frmtWindowUpdate:
-    check payload.len > 0, newStrmError(errProtocolError)
+    check frm.payload.len > 0, newStrmError(errProtocolError)
 
 proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
   try:
@@ -257,7 +254,7 @@ proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
       await client.sendRstStream(sid.FrmSid, err.code)
     raise err
 
-proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
+proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
   assert frm.typ in {frmtHeaders, frmtPushPromise}
   assert frmfEndHeaders notin frm.flags
@@ -271,14 +268,15 @@ proc readUntilEnd(client: ClientContext, frm: Frame, payload: Payload) {.async.}
     check frm2.payloadLen >= 0
     if frm2.payloadLen == 0:
       continue
-    let payloadOldLen = payload.s.len
-    payload.s.setLen payloadOldLen+frm2.payloadLen.int
+    let oldFrmLen = frm.len
+    frm.grow frm2.payloadLen.int
     let payloadRln = await client.sock.recvInto(
-      addr payload.s[payloadOldLen], frm2.payloadLen.int
+      addr frm.s[oldFrmLen], frm2.payloadLen.int
     )
     check payloadRln == frm2.payloadLen.int, newConnClosedError()
+  frm.setPayloadLen frm.payload.len.FrmPayloadLen
 
-proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
+proc read(client: ClientContext, frm: Frame) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
   ## ``PushPromise``, read frames until ``END_HEADERS`` flag is set
   ## Frames cannot be interleaved here
@@ -309,29 +307,30 @@ proc read(client: ClientContext, frm: Frame, payload: Payload) {.async.} =
   payloadLen -= paddingLen
   check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
   if payloadLen > 0:
-    payload.s.setLen payloadLen
+    frm.grow payloadLen
     let payloadRln = await client.sock.recvInto(
-      addr payload.s[0], payload.s.len
+      frm.rawPayloadBytesPtr, payloadLen
     )
     check payloadRln == payloadLen, newConnClosedError()
-    debugInfo toString(frm, payload.s)
+    debugInfo $frm
   if paddingLen > 0:
-    payload.s.setLen payloadLen+paddingLen
+    let oldFrmLen = frm.len
+    frm.grow paddingLen
     let paddingRln = await client.sock.recvInto(
-      addr payload.s[payloadLen], paddingLen
+      addr frm.s[oldFrmLen], paddingLen
     )
     check paddingRln == paddingLen, newConnClosedError()
-    payload.s.setLen payloadLen
+    frm.shrink paddingLen
   if frmfEndHeaders notin frm.flags and frm.typ in {frmtHeaders, frmtPushPromise}:
     debugInfo "Continuation"
-    await client.readUntilEnd(frm, payload)
+    await client.readUntilEnd(frm)
   # XXX maybe do not do this here
   if frm.sid.StreamId in client.streams:
     client.stream(frm.sid).doTransitionRecv frm
 
 proc openMainStream(client: ClientContext): StreamId =
-  doAssert frmsidMain.StreamId notin client.streams
-  result = frmsidMain.StreamId
+  doAssert frmSidMain.StreamId notin client.streams
+  result = frmSidMain.StreamId
   client.streams[result] = initStream result
 
 proc openStream(client: ClientContext): StreamId =
@@ -347,18 +346,16 @@ proc handshake(client: ClientContext) {.async.} =
   # we need to do this before sending any other frame
   # XXX: allow sending some params
   let sid = client.openMainStream()
-  doAssert sid == frmsidMain.StreamId
-  var payload = newPayload()
-  payload.s.addSetting frmsEnablePush, stgDisablePush
-  payload.s.addSetting frmsInitialWindowSize, stgMaxWindowSize
+  doAssert sid == frmSidMain.StreamId
   var frm = newFrame()
   frm.setTyp frmtSettings
-  frm.setSid frmsidMain
-  frm.setPayloadLen payload.s.len.FrmPayloadLen
-  var blob = newSeqOfCap[byte](preface.len+frm.len+payload.s.len)
+  frm.setSid frmSidMain
+  frm.addSetting frmsEnablePush, stgDisablePush
+  frm.addSetting frmsInitialWindowSize, stgMaxWindowSize
+  frm.setPayloadLen frm.payload.len.FrmPayloadLen
+  var blob = newSeqOfCap[byte](preface.len+frm.len)
   blob.add preface
-  blob.add frm.bytes
-  blob.add payload.s
+  blob.add frm.s
   await client.sock.send(addr blob[0], blob.len)
 
 proc connect(client: ClientContext) {.async.} =
@@ -388,15 +385,12 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   ## Send frames
   ## Meant to be asyncCheck'ed
   template frm: untyped = msg.frm
-  template payload: untyped = msg.payload.s
   doAssert client.isConnected
   while client.isConnected:
     let msg = await client.sendMsgs.pop()
-    doAssert frm.payloadLen.int == payload.len
+    doAssert frm.payloadLen.int == frm.payload.len
     client.stream(frm.sid).doTransitionSend frm
     await client.sock.send(frm.rawBytesPtr, frm.len)
-    if payload.len > 0:
-      await client.sock.send(addr payload[0], payload.len)
 
 proc sendTask(client: ClientContext) {.async.} =
   try:
@@ -415,15 +409,13 @@ proc sendTask(client: ClientContext) {.async.} =
     debugInfo "sendTask exited"
     client.close()
 
-proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
+proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   # XXX process settings, window updates, etc
-  template frm: untyped = msg.frm
-  template payload: untyped = msg.payload.s
   case frm.typ
   of frmtWindowUpdate:
-    check payload.len > 0, newConnError(errProtocolError)
+    check frm.payload.len > 0, newConnError(errProtocolError)
   of frmtSettings:
-    for (setting, value) in settings(payload):
+    for (setting, value) in frm.settings:
       # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
       case setting
       of frmsHeaderTableSize:
@@ -454,12 +446,11 @@ proc consumeMainStream(client: ClientContext, msg: MsgData) {.async.} =
 
 proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
   # do not send any debug information for security reasons
-  var payload = newPayload()
   var frm = newGoAwayFrame(
-    payload.s, client.maxPeerStrmIdSeen.int, errCode.int
+    client.maxPeerStrmIdSeen.int, errCode.int
   )
   try:
-    await client.write(frm, payload)
+    await client.write(frm)
   except Exception as err:
     debugInfo err.msg
     raise err
@@ -470,15 +461,12 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
   ## so it needs to be done here. Same for processing the main
   ## stream messages.
   template frm: untyped = msg.frm
-  template payload: untyped = msg.payload.s
-  let frmWs = newWindowSizeFrame frmsidMain
-  var payloadWs = newPayload()
   while client.isConnected:
     let msg = await client.recvMsgs.pop()
     debugInfo "recv data on stream " & $frm.sid.int
-    if frm.sid == frmsidMain:
+    if frm.sid == frmSidMain:
       # Settings need to be applied before consuming following messages
-      await consumeMainStream(client, msg)
+      await consumeMainStream(client, frm)
       continue
     if frm.sid.int mod 2 == 0:
       client.maxPeerStrmIdSeen = max(
@@ -488,13 +476,13 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
       # can raise a connError
-      decode(payload, headers, client.headersDec)
-      payload.setLen 0
-      payload.add $headers
-    if frm.typ == frmtData and payload.len > 0:
+      decode(frm.payload, headers, client.headersDec)
+      frm.shrink frm.payload.len
+      frm.s.add $headers
+    if frm.typ == frmtData and frm.payload.len > 0:
       # XXX send stream update too, frm did not close it
-      payloadWs.s.setWindowSizeInc payload.len
-      await client.write(frmWs, payloadWs)
+      let frmWs = newWindowSizeFrame(frmSidMain, frm.payload.len)
+      await client.write(frmWs)
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
@@ -534,12 +522,8 @@ proc recvTaskNaked(client: ClientContext) {.async.} =
   doAssert client.isConnected
   while client.isConnected:
     var frm = newFrame()
-    var payload = newPayload()  # XXX remove
-    await client.read(frm, payload)
-    await client.recvMsgs.put MsgData(
-      frm: frm,
-      payload: payload
-    )
+    await client.read(frm)
+    await client.recvMsgs.put MsgData(frm: frm)
 
 proc recvTask(client: ClientContext) {.async.} =
   try:
@@ -625,22 +609,20 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   result = newResponse()
   let sid = client.openStream()
   defer: client.close(sid)
-  doAssert sid.FrmSid != frmsidMain
+  doAssert sid.FrmSid != frmSidMain
   var frm = newFrame()
   frm.setTyp frmtHeaders
   frm.setSid sid.FrmSid
   frm.flags.incl frmfEndHeaders
-  var payload = newPayload()
-  payload.s.add req.data
-  frm.setPayloadLen payload.s.len.FrmPayloadLen
-  await client.write(frm, payload)
+  frm.add req.data
+  await client.write(frm)
   # XXX read in loop, discard other frames
   let msg = await client.read(sid)
   doAssert msg.frm.typ == frmtHeaders
-  result.headers.add msg.payload.s
+  result.headers.add msg.frm.payload
   let msg2 = await client.read(sid)
   doAssert msg2.frm.typ == frmtData
-  result.data = msg2.payload
+  result.data.s.add msg2.frm.payload
 
 proc get*(
   client: ClientContext,

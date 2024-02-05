@@ -9,6 +9,11 @@ import ../src/hyperx/testutils
 import ../src/hyperx/frame
 import ../src/hyperx/errors
 
+func toBytes(s: string): seq[byte] =
+  result = newSeq[byte]()
+  for c in s:
+    result.add c.byte
+
 testAsync "simple response":
   const headers = ":method: foobar\r\L"
   const text = "foobar body"
@@ -108,11 +113,9 @@ testAsync "multiple requests":
 
 testAsync "response with bad header compression":
   proc replyBadHeaders(tc: TestClientContext) {.async.} =
-    let headerPl = "abc"
-    let frm1 = tc.frame(
-      frmtHeaders, headerPl.len, @[frmfEndHeaders]
-    )
-    await tc.reply(frm1, headerPl)
+    var frm1 = tc.frame(frmtHeaders, @[frmfEndHeaders])
+    frm1.add "abc".toBytes
+    await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
   try:
@@ -127,13 +130,14 @@ testAsync "response with bad header compression":
 
 testAsync "response with headers prio":
   proc replyPrio(tc: TestClientContext; headers, text: string) {.async.} =
-    let headerPl = "12345" & hencode(tc, headers)
-    let frm1 = tc.frame(
-      frmtHeaders, headerPl.len, @[frmfPriority, frmfEndHeaders]
+    var frm1 = tc.frame(
+      frmtHeaders, @[frmfPriority, frmfEndHeaders]
     )
-    await tc.reply(frm1, headerPl)
-    let frm2 = tc.frame(frmtData, text.len, @[frmfEndStream])
-    await tc.reply(frm2, text)
+    frm1.add ("12345" & hencode(tc, headers)).toBytes
+    await tc.reply(frm1)
+    var frm2 = tc.frame(frmtData, @[frmfEndStream])
+    frm2.add text.toBytes
+    await tc.reply(frm2)
     tc.sid += 2
   const
     headers = ":method: foo\r\L"
@@ -155,11 +159,11 @@ testAsync "response with headers prio":
 
 testAsync "response with bad prio length":
   proc replyPrio(tc: TestClientContext) {.async.} =
-    let prio = "1"
     let frm1 = tc.frame(
-      frmtHeaders, prio.len, @[frmfPriority, frmfEndHeaders]
+      frmtHeaders, @[frmfPriority, frmfEndHeaders]
     )
-    await tc.reply(frm1, prio)
+    frm1.add "1".toBytes
+    await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
   try:
@@ -174,13 +178,14 @@ testAsync "response with bad prio length":
 
 testAsync "response with headers padding":
   proc replyPadding(tc: TestClientContext; headers, text: string) {.async.} =
-    let headerPl = "\x01" & hencode(tc, headers) & "12345678"
-    let frm1 = tc.frame(
-      frmtHeaders, headerPl.len, @[frmfPadded, frmfEndHeaders]
+    var frm1 = tc.frame(
+      frmtHeaders, @[frmfPadded, frmfEndHeaders]
     )
-    await tc.reply(frm1, headerPl)
-    let frm2 = tc.frame(frmtData, text.len, @[frmfEndStream])
-    await tc.reply(frm2, text)
+    frm1.add ("\x01" & hencode(tc, headers) & "12345678").toBytes
+    await tc.reply(frm1)
+    var frm2 = tc.frame(frmtData, @[frmfEndStream])
+    frm2.add text.toBytes
+    await tc.reply(frm2)
     tc.sid += 2
   const
     headers = ":method: foo\r\L"
@@ -202,11 +207,11 @@ testAsync "response with headers padding":
 
 testAsync "response with bad over padding length":
   proc replyPadding(tc: TestClientContext) {.async.} =
-    let headerPl = "\xfd" & hencode(tc, ":me: foo\r\L")
-    let frm1 = tc.frame(
-      frmtHeaders, headerPl.len, @[frmfPadded, frmfEndHeaders]
+    var frm1 = tc.frame(
+      frmtHeaders, @[frmfPadded, frmfEndHeaders]
     )
-    await tc.reply(frm1, headerPl)
+    frm1.add ("\xfd" & hencode(tc, ":me: foo\r\L")).toBytes
+    await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
   try:
@@ -221,11 +226,10 @@ testAsync "response with bad over padding length":
 
 testAsync "response with bad missing padding length":
   proc replyPadding(tc: TestClientContext) {.async.} =
-    let headerPl = ""
     let frm1 = tc.frame(
-      frmtHeaders, headerPl.len, @[frmfPadded, frmfEndHeaders]
+      frmtHeaders, @[frmfPadded, frmfEndHeaders]
     )
-    await tc.reply(frm1, headerPl)
+    await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
   try:
@@ -259,17 +263,10 @@ testAsync "header table is populated":
     ":authority: foo.bar\r\L"
 
 testAsync "header table size setting is applied":
-  proc recvTableSizeSetting(tc: TestClientContext, tableSize: int) {.async.} =
-    var payload = "\x00"
-    payload.add frmsHeaderTableSize.char
-    payload.add "\x00\x00\x00"
-    payload.add tableSize.char
-    let frm1 = frame(
-      frmtSettings,
-      frmsidMain,
-      payload.len.FrmPayloadLen
-    )
-    await tc.reply(frm1, payload)
+  proc recvTableSizeSetting(tc: TestClientContext, tableSize: uint32) {.async.} =
+    var frm1 = frame(frmtSettings, frmsidMain)
+    frm1.addSetting(frmsHeaderTableSize, tableSize)
+    await tc.reply(frm1)
   var tc = newTestClient("foo.bar")
   withConnection tc:
     # XXX wait for sent ACK, and do one single request

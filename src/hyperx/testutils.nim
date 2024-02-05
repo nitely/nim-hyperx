@@ -18,15 +18,18 @@ template testAsync*(name: string, body: untyped): untyped =
   )()
 
 func toString(bytes: openArray[byte]): string =
-  let L = bytes.len
-  if L > 0:
-    result = newString(L)
-    copyMem(result.cstring, bytes[0].unsafeAddr, L)
+  result = ""
+  for b in bytes:
+    result.add b.char
+
+func toBytes(s: string): seq[byte] =
+  result = newSeq[byte]()
+  for c in s:
+    result.add c.byte
 
 proc frame*(
   typ: FrmTyp,
   sid: FrmSid,
-  pl: FrmPayloadLen,
   flags: seq[FrmFlag] = @[]
 ): Frame =
   result = newFrame()
@@ -34,25 +37,6 @@ proc frame*(
   result.setSid sid
   for f in flags:
     result.flags.incl f
-  result.setPayloadLen pl
-
-proc frameStr(
-  typ: FrmTyp,
-  sid: FrmSid,
-  pl: FrmPayloadLen,
-  flags: seq[FrmFlag] = @[]
-): string =
-  result = frame(typ, sid, pl, flags).rawStr()
-
-proc headerFrame*(
-  sid: FrmSid,
-  pl: FrmPayloadLen,
-  flags = @[frmfEndHeaders]
-): Frame =
-  result = frame(frmtHeaders, sid, pl, flags)
-
-proc dataFrame*(sid: FrmSid, pl: FrmPayloadLen): Frame =
-  result = frame(frmtData, sid, pl, @[frmfEndStream])
 
 type
   TestClientContext* = ref object
@@ -73,10 +57,9 @@ func newTestClient*(hostname: string): TestClientContext =
 proc frame*(
   tc: TestClientContext,
   typ: FrmTyp,
-  plSize: int,
   flags: seq[FrmFlag] = @[]
 ): Frame =
-  result = frame(typ, tc.sid.FrmSid, plSize.FrmPayloadLen, flags)
+  result = frame(typ, tc.sid.FrmSid, flags)
 
 proc hencode*(tc: TestClientContext, hs: string): string =
   var resp = newSeq[byte]()
@@ -99,24 +82,23 @@ proc reply*(
   headers: string,
   text: string
 ) {.async.} =
-  let encHeaders = hencode(tc, headers)
-  await tc.c.putTestData frameStr(
-    frmtHeaders, tc.sid.FrmSid, encHeaders.len.FrmPayloadLen, @[frmfEndHeaders]
+  var frm1 = frame(
+    frmtHeaders, tc.sid.FrmSid, @[frmfEndHeaders]
   )
-  await tc.c.putTestData encHeaders
-  await tc.c.putTestData frameStr(
-    frmtData, tc.sid.FrmSid, text.len.FrmPayloadLen, @[frmfEndStream]
+  frm1.add hencode(tc, headers).toBytes
+  await tc.c.putTestData frm1.s.toString
+  var frm2 = frame(
+    frmtData, tc.sid.FrmSid, @[frmfEndStream]
   )
-  await tc.c.putTestData text
+  frm2.add text.toBytes
+  await tc.c.putTestData frm2.s.toString
   tc.sid += 2
 
 proc reply*(
   tc: TestClientContext,
-  frm: Frame,
-  data: string
+  frm: Frame
 ) {.async.} =
-  await tc.c.putTestData frm.rawStr()
-  await tc.c.putTestData data
+  await tc.c.putTestData frm.s.toString()
 
 type TestRequest = object
   frm: Frame

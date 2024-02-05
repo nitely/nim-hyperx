@@ -100,28 +100,40 @@ proc clearBit(v: var FrmSid, bit: int) {.inline.} =
   v = FrmSid(v.uint and not (1'u32 shl bit))
 
 const
-  frmsidMain* = 0x00'u32.FrmSid
+  frmSidMain* = 0x00'u32.FrmSid
 
 type
   FrmPayloadLen* = uint32  # range[0 .. 24.ones.int]
   Frame* = ref object
-    s: array[frmHeaderSize, byte]
+    s*: seq[byte]
 
-func newFrame*(): Frame {.inline.} =
-  Frame()
+func newFrame*(payloadLen = 0): Frame {.inline.} =
+  Frame(s: newSeq[byte](frmHeaderSize+payloadLen))
 
 func rawBytesPtr*(frm: Frame): ptr byte =
   addr frm.s[0]
 
-func bytes*(frm: Frame): array[frmHeaderSize, byte] =
-  frm.s
+func rawPayloadBytesPtr*(frm: Frame): ptr byte =
+  addr frm.s[frmHeaderSize]
 
 func clear*(frm: Frame) {.inline.} =
+  frm.s.setLen frmHeaderSize
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0
 
 func len*(frm: Frame): int {.inline.} =
-  frmHeaderSize
+  frm.s.len
+
+template payload*(frm: Frame): untyped =
+  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
+
+func grow*(frm: Frame, size: int) =
+  frm.s.setLen frm.s.len+size
+
+func shrink*(frm: Frame, size: int) =
+  doAssert frm.s.len >= size
+  doAssert frm.s.len-size >= frmHeaderSize
+  frm.s.setLen frm.s.len-size
 
 func payloadLen*(frm: Frame): FrmPayloadLen {.inline.} =
   # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
@@ -167,6 +179,10 @@ func setSid*(frm: Frame, sid: FrmSid) {.inline.} =
   frm.s[7] = ((sid.uint shr 8) and 8.ones).byte
   frm.s[8] = (sid.uint and 8.ones).byte
 
+func add*(frm: Frame, payload: openArray[byte]) =
+  frm.s.add payload
+  frm.setPayloadLen frm.payload.len.FrmPayloadLen
+
 func isValidSize*(frm: Frame, size: int): bool =
   result = case frm.typ
   of frmtRstStream:
@@ -186,98 +202,92 @@ func isValidSize*(frm: Frame, size: int): bool =
     true
 
 func newGoAwayFrame*(
-  payload: var seq[byte],
   lastSid, errorCode: int
 ): Frame =
-  result = newFrame()
+  result = newFrame(frmGoAwaySize)
   result.setTyp frmtGoAway
   result.setPayloadLen frmGoAwaySize.FrmPayloadLen
-  payload.setLen frmGoAwaySize
-  payload[0] = ((lastSid.uint shr 24) and 8.ones).byte
-  payload[1] = ((lastSid.uint shr 16) and 8.ones).byte
-  payload[2] = ((lastSid.uint shr 8) and 8.ones).byte
-  payload[3] = (lastSid.uint and 8.ones).byte
-  payload[4] = ((errorCode.uint shr 24) and 8.ones).byte
-  payload[5] = ((errorCode.uint shr 16) and 8.ones).byte
-  payload[6] = ((errorCode.uint shr 8) and 8.ones).byte
-  payload[7] = (errorCode.uint and 8.ones).byte
+  let i = frmHeaderSize
+  result.s[i] = ((lastSid.uint shr 24) and 8.ones).byte
+  result.s[i+1] = ((lastSid.uint shr 16) and 8.ones).byte
+  result.s[i+2] = ((lastSid.uint shr 8) and 8.ones).byte
+  result.s[i+3] = (lastSid.uint and 8.ones).byte
+  result.s[i+4] = ((errorCode.uint shr 24) and 8.ones).byte
+  result.s[i+5] = ((errorCode.uint shr 16) and 8.ones).byte
+  result.s[i+6] = ((errorCode.uint shr 8) and 8.ones).byte
+  result.s[i+7] = (errorCode.uint and 8.ones).byte
 
 func newRstStreamFrame*(
-  payload: var seq[byte],
   sid: FrmSid,
   errorCode: int
 ): Frame =
-  result = newFrame()
+  result = newFrame(frmRstStreamSize)
   result.setTyp frmtRstStream
   result.setSid sid
   result.setPayloadLen frmRstStreamSize.FrmPayloadLen
-  payload.setLen frmRstStreamSize
-  payload[0] = ((errorCode.uint shr 24) and 8.ones).byte
-  payload[1] = ((errorCode.uint shr 16) and 8.ones).byte
-  payload[2] = ((errorCode.uint shr 8) and 8.ones).byte
-  payload[3] = (errorCode.uint and 8.ones).byte
-
-func setWindowSizeInc*(
-  payload: var seq[byte],
-  increment: int
-) =
-  if payload.len != frmWindowUpdateSize:
-    payload.setLen frmWindowUpdateSize
-  payload[0] = ((increment.uint shr 24) and 8.ones).byte
-  payload[1] = ((increment.uint shr 16) and 8.ones).byte
-  payload[2] = ((increment.uint shr 8) and 8.ones).byte
-  payload[3] = (increment.uint and 8.ones).byte
+  let i = frmHeaderSize
+  result.s[i] = ((errorCode.uint shr 24) and 8.ones).byte
+  result.s[i+1] = ((errorCode.uint shr 16) and 8.ones).byte
+  result.s[i+2] = ((errorCode.uint shr 8) and 8.ones).byte
+  result.s[i+3] = (errorCode.uint and 8.ones).byte
 
 func newWindowSizeFrame*(
-  sid: FrmSid
+  sid: FrmSid,
+  increment: int
 ): Frame =
-  result = newFrame()
+  result = newFrame(frmWindowUpdateSize)
   result.setTyp frmtWindowUpdate
   result.setSid sid
   result.setPayloadLen frmWindowUpdateSize.FrmPayloadLen
+  let i = frmHeaderSize
+  result.s[i] = ((increment.uint shr 24) and 8.ones).byte
+  result.s[i+1] = ((increment.uint shr 16) and 8.ones).byte
+  result.s[i+2] = ((increment.uint shr 8) and 8.ones).byte
+  result.s[i+3] = (increment.uint and 8.ones).byte
 
 func addSetting*(
-  payload: var seq[byte],
+  frm: Frame,
   id: FrmSetting,
   value: uint32
 ) =
-  let i = payload.len
-  payload.setLen i+frmSettingsSize
-  payload[i] = 0.byte
-  payload[i+1] = id.byte
-  payload[i+2] = ((value shr 24) and 8.ones).byte
-  payload[i+3] = ((value shr 16) and 8.ones).byte
-  payload[i+4] = ((value shr 8) and 8.ones).byte
-  payload[i+5] = (value and 8.ones).byte
+  let i = frm.len
+  frm.grow frmSettingsSize
+  frm.setPayloadLen frm.payload.len.FrmPayloadLen
+  frm.s[i] = 0.byte
+  frm.s[i+1] = id.byte
+  frm.s[i+2] = ((value shr 24) and 8.ones).byte
+  frm.s[i+3] = ((value shr 16) and 8.ones).byte
+  frm.s[i+4] = ((value shr 8) and 8.ones).byte
+  frm.s[i+5] = (value and 8.ones).byte
 
-iterator settings*(payload: seq[byte]): (FrmSetting, uint32) {.inline.} =
+iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline.} =
   # https://httpwg.org/specs/rfc9113.html#SettingFormat
-  doAssert payload.len mod frmSettingsSize == 0
-  var i = 0
+  #doAssert frm.payload.len mod frmSettingsSize == 0
+  var i = frmHeaderSize
   var id = 0'u16
   # need to return last value for each ID
   var skip: array[7, int32]
-  while i < payload.len:
+  while i < frm.len:
     id = 0'u16
-    id += payload[i].uint16 shl 8
-    id += payload[i+1].uint16
+    id += frm.s[i].uint16 shl 8
+    id += frm.s[i+1].uint16
     if id.FrmSetting in frmsAllSettings:
       skip[id.int] += 1
     i += frmSettingsSize
-  i = 0
+  i = frmHeaderSize
   var value = 0'u32
-  while i < payload.len:
+  while i < frm.len:
     id = 0'u16
-    id += payload[i].uint16 shl 8
-    id += payload[i+1].uint16
+    id += frm.s[i].uint16 shl 8
+    id += frm.s[i+1].uint16
     if id.FrmSetting in frmsAllSettings:
       dec skip[id.int]
       if skip[id.int] == 0:
         value = 0'u32
-        value += payload[i+2].uint32 shl 24
-        value += payload[i+3].uint32 shl 16
-        value += payload[i+4].uint32 shl 8
-        value += payload[i+5].uint32
+        value += frm.s[i+2].uint32 shl 24
+        value += frm.s[i+3].uint32 shl 16
+        value += frm.s[i+4].uint32 shl 8
+        value += frm.s[i+5].uint32
         yield (id.FrmSetting, value)
     # else skip
     i += frmSettingsSize
@@ -293,11 +303,6 @@ iterator settings*(payload: seq[byte]): (FrmSetting, uint32) {.inline.} =
 #template payload*(frm: Frame): untyped =
 #  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
-func rawStr*(frm: Frame): string =
-  result = ""
-  for i in 0 .. frm.len-1:
-    result.add frm.s[i].char
-
 func `$`*(frm: Frame): string =
   result = &"""
 ===Frame===
@@ -306,45 +311,43 @@ typ: {$frm.typ.int}
 ack: {$(frmfAck in frm.flags)}
 payload len: {$frm.payloadLen.int}
 ==========="""
-
-func toString*(frm: Frame, payload: seq[byte]): string =
-  result = "===Payload==="
+  result.add "===Payload==="
   case frm.typ
   of frmtGoAway:
     var lastStreamId = 0.uint
-    lastStreamId += payload[0].uint shl 24
-    lastStreamId += payload[1].uint shl 16
-    lastStreamId += payload[2].uint shl 8
-    lastStreamId += payload[3].uint
+    lastStreamId += frm.s[0].uint shl 24
+    lastStreamId += frm.s[1].uint shl 16
+    lastStreamId += frm.s[2].uint shl 8
+    lastStreamId += frm.s[3].uint
     result.add &"\nLast-Stream-ID {$lastStreamId}"
     var errCode = 0.uint
-    errCode += payload[4].uint shl 24
-    errCode += payload[5].uint shl 16
-    errCode += payload[6].uint shl 8
-    errCode += payload[7].uint
+    errCode += frm.s[4].uint shl 24
+    errCode += frm.s[5].uint shl 16
+    errCode += frm.s[6].uint shl 8
+    errCode += frm.s[7].uint
     result.add &"\nError Code {$errCode}"
   of frmtWindowUpdate:
     var wsIncrement = 0.uint
-    wsIncrement += payload[0].uint shl 24
-    wsIncrement += payload[1].uint shl 16
-    wsIncrement += payload[2].uint shl 8
-    wsIncrement += payload[3].uint
+    wsIncrement += frm.s[0].uint shl 24
+    wsIncrement += frm.s[1].uint shl 16
+    wsIncrement += frm.s[2].uint shl 8
+    wsIncrement += frm.s[3].uint
     result.add &"\nWindow Size Increment {$wsIncrement}"
   of frmtSettings:
-    if payload.len mod 6 != 0:
+    if frm.payloadLen.int mod 6 != 0:
       result.add "\nbad payload"
       return
     var i = 0
-    for _ in 0 .. int(payload.len div 6)-1:
+    for _ in 0 .. int(frm.payloadLen.int div 6)-1:
       var iden = 0.uint
-      iden += payload[i].uint shl 8
-      iden += payload[i+1].uint
+      iden += frm.s[i].uint shl 8
+      iden += frm.s[i+1].uint
       result.add &"\nIdentifier {$iden}"
       var value = 0.uint
-      value += payload[i+2].uint shl 24
-      value += payload[i+3].uint shl 16
-      value += payload[i+4].uint shl 8
-      value += payload[i+5].uint
+      value += frm.s[i+2].uint shl 24
+      value += frm.s[i+3].uint shl 16
+      value += frm.s[i+4].uint shl 8
+      value += frm.s[i+5].uint
       result.add &"\nValue {$value}"
       i += 6
   else:
