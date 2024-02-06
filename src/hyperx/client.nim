@@ -241,6 +241,11 @@ proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} 
   doAssert sid == frm.sid.StreamId
   if frm.typ == frmtWindowUpdate:
     check frm.payload.len > 0, newStrmError(errProtocolError)
+  if frm.typ == frmtData and
+      frm.payload.len > 0 and
+      frmfEndStream notin frm.flags:
+    let frmWs = newWindowUpdateFrame(sid.FrmSid, frm.payload.len)
+    await client.write(frmWs)
 
 proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
   try:
@@ -389,7 +394,8 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   while client.isConnected:
     let msg = await client.sendMsgs.pop()
     doAssert frm.payloadLen.int == frm.payload.len
-    client.stream(frm.sid).doTransitionSend frm
+    if frm.sid.StreamId in client.streams:
+      client.stream(frm.sid).doTransitionSend frm
     await client.sock.send(frm.rawBytesPtr, frm.len)
 
 proc sendTask(client: ClientContext) {.async.} =
@@ -480,8 +486,7 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       frm.shrink frm.payload.len
       frm.s.add $headers
     if frm.typ == frmtData and frm.payload.len > 0:
-      # XXX send stream update too, frm did not close it
-      let frmWs = newWindowSizeFrame(frmSidMain, frm.payload.len)
+      let frmWs = newWindowUpdateFrame(frmSidMain, frm.payload.len)
       await client.write(frmWs)
     # Process headers even if the stream
     # does not exist

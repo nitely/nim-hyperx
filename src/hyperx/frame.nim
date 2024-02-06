@@ -201,21 +201,20 @@ func isValidSize*(frm: Frame, size: int): bool =
   else:
     true
 
+template assignAt(s: var seq[byte], i: int, x: uint32): untyped =
+  s[i+0] = ((x shr 24) and 8.ones).byte
+  s[i+1] = ((x shr 16) and 8.ones).byte
+  s[i+2] = ((x shr 8) and 8.ones).byte
+  s[i+3] = (x and 8.ones).byte
+
 func newGoAwayFrame*(
   lastSid, errorCode: int
 ): Frame =
   result = newFrame(frmGoAwaySize)
   result.setTyp frmtGoAway
   result.setPayloadLen frmGoAwaySize.FrmPayloadLen
-  let i = frmHeaderSize
-  result.s[i] = ((lastSid.uint shr 24) and 8.ones).byte
-  result.s[i+1] = ((lastSid.uint shr 16) and 8.ones).byte
-  result.s[i+2] = ((lastSid.uint shr 8) and 8.ones).byte
-  result.s[i+3] = (lastSid.uint and 8.ones).byte
-  result.s[i+4] = ((errorCode.uint shr 24) and 8.ones).byte
-  result.s[i+5] = ((errorCode.uint shr 16) and 8.ones).byte
-  result.s[i+6] = ((errorCode.uint shr 8) and 8.ones).byte
-  result.s[i+7] = (errorCode.uint and 8.ones).byte
+  result.s.assignAt(frmHeaderSize, lastSid.uint32)
+  result.s.assignAt(frmHeaderSize+4, errorCode.uint32)
 
 func newRstStreamFrame*(
   sid: FrmSid,
@@ -225,13 +224,9 @@ func newRstStreamFrame*(
   result.setTyp frmtRstStream
   result.setSid sid
   result.setPayloadLen frmRstStreamSize.FrmPayloadLen
-  let i = frmHeaderSize
-  result.s[i] = ((errorCode.uint shr 24) and 8.ones).byte
-  result.s[i+1] = ((errorCode.uint shr 16) and 8.ones).byte
-  result.s[i+2] = ((errorCode.uint shr 8) and 8.ones).byte
-  result.s[i+3] = (errorCode.uint and 8.ones).byte
+  result.s.assignAt(frmHeaderSize, errorCode.uint32)
 
-func newWindowSizeFrame*(
+func newWindowUpdateFrame*(
   sid: FrmSid,
   increment: int
 ): Frame =
@@ -239,11 +234,7 @@ func newWindowSizeFrame*(
   result.setTyp frmtWindowUpdate
   result.setSid sid
   result.setPayloadLen frmWindowUpdateSize.FrmPayloadLen
-  let i = frmHeaderSize
-  result.s[i] = ((increment.uint shr 24) and 8.ones).byte
-  result.s[i+1] = ((increment.uint shr 16) and 8.ones).byte
-  result.s[i+2] = ((increment.uint shr 8) and 8.ones).byte
-  result.s[i+3] = (increment.uint and 8.ones).byte
+  result.s.assignAt(frmHeaderSize, increment.uint32)
 
 func addSetting*(
   frm: Frame,
@@ -255,10 +246,7 @@ func addSetting*(
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
   frm.s[i] = 0.byte
   frm.s[i+1] = id.byte
-  frm.s[i+2] = ((value shr 24) and 8.ones).byte
-  frm.s[i+3] = ((value shr 16) and 8.ones).byte
-  frm.s[i+4] = ((value shr 8) and 8.ones).byte
-  frm.s[i+5] = (value and 8.ones).byte
+  frm.s.assignAt(i+2, value)
 
 iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline.} =
   # https://httpwg.org/specs/rfc9113.html#SettingFormat
