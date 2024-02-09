@@ -14,6 +14,7 @@ when defined(hyperxTest):
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
+  statusLineLen = ":status: xxx\r\n".len
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize = 4096'u32
   stgMaxConcurrentStreams = uint32.high
@@ -242,9 +243,9 @@ proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} 
   if frm.typ == frmtWindowUpdate:
     check frm.payload.len > 0, newStrmError(errProtocolError)
   if frm.typ == frmtData and
-      frm.payload.len > 0 and
+      frm.payloadLen.int > 0 and
       frmfEndStream notin frm.flags:
-    let frmWs = newWindowUpdateFrame(sid.FrmSid, frm.payload.len)
+    let frmWs = newWindowUpdateFrame(sid.FrmSid, frm.payloadLen.int)
     await client.write(frmWs)
 
 proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
@@ -485,8 +486,8 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       decode(frm.payload, headers, client.headersDec)
       frm.shrink frm.payload.len
       frm.s.add $headers
-    if frm.typ == frmtData and frm.payload.len > 0:
-      let frmWs = newWindowUpdateFrame(frmSidMain, frm.payload.len)
+    if frm.typ == frmtData and frm.payloadLen.int > 0:
+      let frmWs = newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
       await client.write(frmWs)
     # Process headers even if the stream
     # does not exist
@@ -621,13 +622,30 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   frm.flags.incl frmfEndHeaders
   frm.add req.data
   await client.write(frm)
-  # XXX read in loop, discard other frames
-  let msg = await client.read(sid)
-  doAssert msg.frm.typ == frmtHeaders
-  result.headers.add msg.frm.payload
-  let msg2 = await client.read(sid)
-  doAssert msg2.frm.typ == frmtData
-  result.data.s.add msg2.frm.payload
+  # https://httpwg.org/specs/rfc9113.html#HttpFraming
+  while true:
+    let msg = await client.read(sid)
+    check msg.frm.typ == frmtHeaders, newStrmError(errProtocolError)
+    check msg.frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
+    #check msg.frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
+    if msg.frm.payload[9] == '1'.byte:
+      check frmfEndStream notin msg.frm.flags, newStrmError(errProtocolError)
+    else:
+      result.headers.add msg.frm.payload
+      if frmfEndStream in msg.frm.flags:
+        return
+      break
+  while true:
+    let msg = await client.read(sid)
+    # XXX store trailer headers
+    # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
+    if msg.frm.typ == frmtHeaders:
+      check frmfEndStream in msg.frm.flags, newStrmError(errProtocolError)
+      return
+    check msg.frm.typ == frmtData, newStrmError(errProtocolError)
+    result.data.s.add msg.frm.payload
+    if frmfEndStream in msg.frm.flags:
+      return
 
 proc get*(
   client: ClientContext,

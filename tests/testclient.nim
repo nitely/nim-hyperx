@@ -15,7 +15,7 @@ func toBytes(s: string): seq[byte] =
     result.add c.byte
 
 testAsync "simple response":
-  const headers = ":method: foobar\r\L"
+  const headers = ":status: 200\r\nfoo: foo\r\n"
   const text = "foobar body"
   var tc = newTestClient("foo.bar")
   withConnection tc:
@@ -28,9 +28,9 @@ testAsync "simple response":
 
 testAsync "multiple responses":
   const
-    headers = ":method: foo\r\L"
+    headers = ":status: 200\r\nfoo: foo\r\n"
     text = "foo body"
-    headers2 = ":method: bar\r\L"
+    headers2 = ":status: 200\r\nbar: bar\r\n"
     text2 = "bar body"
   var tc = newTestClient("foo.bar")
   withConnection tc:
@@ -47,9 +47,9 @@ testAsync "multiple responses":
 
 testAsync "multiple responses unordered":
   const
-    headers = ":method: foo\r\L"
+    headers = ":status: 200\r\nfoo: foo\r\n"
     text = "foo body"
-    headers2 = ":method: bar\r\L"
+    headers2 = ":status: 200\r\nbar: bar\r\n"
     text2 = "bar body"
   var tc = newTestClient("foo.bar")
   withConnection tc:
@@ -69,7 +69,7 @@ testAsync "simple request":
   withConnection tc:
     await (
       tc.get("/") and
-      tc.reply("foo: foo\r\L", "bar")
+      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
     )
   let reqs = tc.sent()
   doAssert reqs[0].frm.sid == frmsidMain
@@ -88,9 +88,9 @@ testAsync "multiple requests":
   withConnection tc:
     await (
       tc.get("/1") and
-      tc.reply("foo: foo\r\L", "bar") and
+      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar") and
       tc.get("/2") and
-      tc.reply("foo: foo\r\L", "bar")
+      tc.reply(":status: 200\r\nbar: bar\r\n", "bar")
     )
   let reqs = tc.sent()
   doAssert reqs[0].frm.sid == frmsidMain
@@ -140,9 +140,9 @@ testAsync "response with headers prio":
     await tc.reply(frm2)
     tc.sid += 2
   const
-    headers = ":method: foo\r\L"
+    headers = ":status: 200\r\nfoo: foo\r\n"
     text = "foo body"
-    headers2 = ":method: bar\r\L"
+    headers2 = ":status: 200\r\nbar: bar\r\n"
     text2 = "bar body"
   var tc = newTestClient("foo.bar")
   withConnection tc:
@@ -188,9 +188,9 @@ testAsync "response with headers padding":
     await tc.reply(frm2)
     tc.sid += 2
   const
-    headers = ":method: foo\r\L"
+    headers = ":status: 200\r\nfoo: foo\r\n"
     text = "foo body"
-    headers2 = ":method: bar\r\L"
+    headers2 = ":status: 200\r\nbar: bar\r\n"
     text2 = "bar body"
   var tc = newTestClient("foo.bar")
   withConnection tc:
@@ -247,7 +247,7 @@ testAsync "header table is populated":
   withConnection tc:
     await (
       tc.get("/foo") and
-      tc.reply("foo: foo\r\L", "bar")
+      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
     )
   let reqs = tc.sent()
   doAssert tc.headersDec.len == 2
@@ -273,11 +273,11 @@ testAsync "header table size setting is applied":
     await tc.recvTableSizeSetting(0)
     await (
       tc.get("/foo") and
-      tc.reply("foo: foo\r\L", "bar")
+      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
     )
     await (
       tc.get("/bar") and
-      tc.reply("foo2: foo2\r\L", "bar2")
+      tc.reply(":status: 200\r\nbar: bar\r\n", "bar2")
     )
   let reqs = tc.sent()
   doAssert tc.headersDec.len == 0
