@@ -72,11 +72,13 @@ func isClosed*[T](q: QueueAsync[T]): bool =
 proc close*[T](q: QueueAsync[T]) =
   doAssert not q.isClosed
   q.isClosed = true
-  let closedError = newQueueClosedError()
+  #let closedError = newQueueClosedError()
   for ev in items q.putEv:
-    ev.fail(closedError)
+    if not ev.finished:
+      ev.fail newQueueClosedError()
   for ev in items q.popEv:
-    ev.fail(closedError)
+    if not ev.finished:
+      ev.fail newQueueClosedError()
 
 when isMainModule:
   block:

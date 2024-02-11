@@ -164,6 +164,22 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     maxFrameSize: stgInitialMaxFrameSize
   )
 
+proc close(client: ClientContext) =
+  if not client.isConnected:
+    return
+  client.isConnected = false
+  try:
+    client.sock.close()
+  except OSError as err:
+    raise (ref InternalOSError)(msg: err.msg)
+  finally:
+    client.sendMsgs.close()
+    client.recvMsgs.close()
+    # XXX race con may create stream but
+    #     client is closed
+    for stream in values client.streams:
+      stream.msgs.close()
+
 func stream(client: ClientContext, sid: StreamId): var Stream =
   try:
     result = client.streams[sid]
@@ -186,31 +202,6 @@ proc close(client: ClientContext, sid: StreamId) =
 
 proc doTransitionSend(s: var Stream, frm: Frame) =
   discard
-
-const connFrmAllowed = {
-  frmtSettings,
-  frmtPing,
-  frmtGoAway,
-  frmtWindowUpdate
-}
-
-proc doTransitionRecv(s: var Stream, frm: Frame) =
-  if s.id == frmSidMain.StreamId:
-    check frm.typ in connFrmAllowed, newConnError(errProtocolError)
-    return
-  check frm.typ in frmRecvAllowed, newConnError(errProtocolError)
-  if not s.state.isAllowedToRecv frm:
-    if s.state == strmHalfClosedRemote:
-      raise newStrmError(errStreamClosed)  # XXX this probably cannot be done here
-    else:
-      raise newConnError(errProtocolError)
-  let event = frm.toEventRecv()
-  let oldState = s.state
-  s.state = s.state.toNextStateRecv event
-  check s.state != strmInvalid, newConnError(errProtocolError)
-  if oldState == strmIdle:
-    # XXX close streams < s.id in idle state
-    discard
 
 proc write(client: ClientContext, frm: Frame) {.async.} =
   ## Frames passed cannot be reused because they are references
@@ -236,10 +227,27 @@ proc sendRstStream(
     debugInfo err.msg
     raise err
 
+proc doTransitionRecv(s: var Stream, frm: Frame) =
+  doAssert frm.sid.StreamId == s.id
+  doAssert frm.sid != frmSidMain
+  check frm.typ in frmRecvAllowed, newConnError(errProtocolError)
+  if not s.state.isAllowedToRecv frm:
+    if s.state == strmHalfClosedRemote:
+      raise newStrmError(errStreamClosed)
+    else:
+      raise newConnError(errProtocolError)
+  s.state = s.state.toNextStateRecv frm.toEventRecv()
+  check s.state != strmInvalid, newConnError(errProtocolError)
+  #if oldState == strmIdle:
+  #  # XXX close streams < s.id in idle state
+  #  discard
+
 proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
   template frm: untyped = result.frm
   result = await client.stream(sid).msgs.pop()
   doAssert sid == frm.sid.StreamId
+  # this may throw a conn error
+  client.stream(sid).doTransitionRecv frm
   if frm.typ == frmtWindowUpdate:
     check frm.payload.len > 0, newStrmError(errProtocolError)
   if frm.typ == frmtData and
@@ -251,19 +259,23 @@ proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} 
 proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
   try:
     result = await client.readNaked(sid)
+  except QueueClosedError as err:
+    doAssert not client.isConnected
+    raise err
   except StrmError as err:
     client.close(sid)
-    # This needs to be done here, it cannot be
-    # sent by the dispatcher or receiver
-    # since it may block
     if client.isConnected:
       await client.sendRstStream(sid.FrmSid, err.code)
+    raise err
+  except ConnError as err:
+    debugInfo err.msg
+    client.close()
     raise err
 
 proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
-  assert frm.typ in {frmtHeaders, frmtPushPromise}
-  assert frmfEndHeaders notin frm.flags
+  doAssert frm.typ in {frmtHeaders, frmtPushPromise}
+  doAssert frmfEndHeaders notin frm.flags
   var frm2 = newFrame()
   while frmfEndHeaders notin frm2.flags:
     let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm2.len)
@@ -281,6 +293,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
     )
     check payloadRln == frm2.payloadLen.int, newConnClosedError()
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
+  frm.flags.incl frmfEndHeaders
 
 proc read(client: ClientContext, frm: Frame) {.async.} =
   ## Read a frame + payload. If read frame is a ``Header`` or
@@ -330,9 +343,6 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   if frmfEndHeaders notin frm.flags and frm.typ in {frmtHeaders, frmtPushPromise}:
     debugInfo "Continuation"
     await client.readUntilEnd(frm)
-  # XXX maybe do not do this here
-  if frm.sid.StreamId in client.streams:
-    client.stream(frm.sid).doTransitionRecv frm
 
 proc openMainStream(client: ClientContext): StreamId =
   doAssert frmSidMain.StreamId notin client.streams
@@ -371,22 +381,6 @@ proc connect(client: ClientContext) {.async.} =
   # Assume server supports http2
   await client.handshake()
 
-proc close(client: ClientContext) =
-  if not client.isConnected:
-    return
-  client.isConnected = false
-  try:
-    client.sock.close()
-  except OSError as err:
-    raise (ref InternalOSError)(msg: err.msg)
-  finally:
-    client.sendMsgs.close()
-    client.recvMsgs.close()
-    # XXX race con may create stream but
-    #     client is closed
-    for stream in values client.streams:
-      stream.msgs.close()
-
 proc sendTaskNaked(client: ClientContext) {.async.} =
   ## Send frames
   ## Meant to be asyncCheck'ed
@@ -415,6 +409,13 @@ proc sendTask(client: ClientContext) {.async.} =
   finally:
     debugInfo "sendTask exited"
     client.close()
+
+const connFrmAllowed = {
+  frmtSettings,
+  frmtPing,
+  frmtGoAway,
+  frmtWindowUpdate
+}
 
 proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   # XXX process settings, window updates, etc
@@ -448,8 +449,11 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         # ignore unknown setting
         debugInfo "unknown setting recived"
     # XXX send ack
+  of frmtPing: discard
+  of frmtGoAway: discard
   else:
-    discard
+    doAssert frm.typ notin connFrmAllowed
+    raise newConnError(errProtocolError)
 
 proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
   # do not send any debug information for security reasons

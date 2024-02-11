@@ -87,7 +87,7 @@ func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState =
     doAssert false
     strmInvalid
   of strmInvalid:
-    #doAssert false  # XXX uncomment when errors are handled
+    doAssert false
     strmInvalid
 
 func toEventRecv*(frm: Frame): StreamEvent =
@@ -223,7 +223,8 @@ when isMainModule:
       raisesAssertion:
         discard toNextStateRecv(strmReservedLocal, ev)
     for ev in eventRecvAllowed:
-      doAssert toNextStateRecv(strmInvalid, ev) == strmInvalid
+      raisesAssertion:
+        discard toNextStateRecv(strmInvalid, ev)
   block:
     for frmTyp in allFrames-frmRecvAllowed:
       raisesAssertion:
