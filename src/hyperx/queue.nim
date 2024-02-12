@@ -1,11 +1,12 @@
 import std/asyncdispatch
 import std/deques
+import ./utils
 
 type
   QueueError* = object of CatchableError
   QueueClosedError* = object of QueueError
 
-func newQueueClosedError(): ref QueueClosedError =
+func newQueueClosedError(): ref QueueClosedError {.raises: [].} =
   result = (ref QueueClosedError)(msg: "Queue is closed")
 
 type
@@ -16,7 +17,7 @@ type
     putEv, popEv: Deque[Future[void]]
     isClosed: bool
 
-proc newQueue*[T](size: int): QueueAsync[T] =
+proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
   doAssert size > 0
   new result
   result = QueueAsync[T](
@@ -28,21 +29,23 @@ proc newQueue*[T](size: int): QueueAsync[T] =
     isClosed: false
   )
 
-proc popEvent[T](q: QueueAsync[T]): Future[void] =
+proc popEvent[T](q: QueueAsync[T]): Future[void] {.raises: [].} =
   result = newFuture[void]()
   q.popEv.addLast result
 
-proc popDone[T](q: QueueAsync[T]) =
+proc popDone[T](q: QueueAsync[T]) {.raises: [].} =
   if q.popEv.len > 0:
-    q.popEv.popFirst().complete()
+    untrackExceptions:
+      q.popEv.popFirst().complete()
 
-proc putEvent[T](q: QueueAsync[T]): Future[void] =
+proc putEvent[T](q: QueueAsync[T]): Future[void] {.raises: [].} =
   result = newFuture[void]()
   q.putEv.addLast result
 
-proc putDone[T](q: QueueAsync[T]) =
+proc putDone[T](q: QueueAsync[T]) {.raises: [].} =
   if q.putEv.len > 0:
-    q.putEv.popFirst().complete()
+    untrackExceptions:
+      q.putEv.popFirst().complete()
 
 proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   doAssert q.used <= q.size
@@ -66,19 +69,21 @@ proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
   q.popDone()
 
-func isClosed*[T](q: QueueAsync[T]): bool =
+func isClosed*[T](q: QueueAsync[T]): bool {.raises: [].} =
   q.isClosed
 
-proc close*[T](q: QueueAsync[T]) =
+proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   doAssert not q.isClosed
   q.isClosed = true
   #let closedError = newQueueClosedError()
   for ev in items q.putEv:
     if not ev.finished:
-      ev.fail newQueueClosedError()
+      untrackExceptions:
+        ev.fail newQueueClosedError()
   for ev in items q.popEv:
     if not ev.finished:
-      ev.fail newQueueClosedError()
+      untrackExceptions:
+        ev.fail newQueueClosedError()
 
 when isMainModule:
   block:

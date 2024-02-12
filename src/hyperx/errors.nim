@@ -18,7 +18,7 @@ const
   errInadequateSecurity* = 0x0c.ErrorCode
   errHttp11Required* = 0x0d.ErrorCode
 
-func `$`(errCode: ErrorCode): string =
+func `$`(errCode: ErrorCode): string {.raises: [].} =
   case errCode
   of errNoError: "NO_ERROR"
   of errProtocolError: "PROTOCOL_ERROR"
@@ -42,15 +42,16 @@ type
   ConnError* = object of HyperxConnectionError
     code*: ErrorCode
   ConnectionClosedError* = object of HyperxConnectionError
-  InternalOSError* = object of HyperxConnectionError
+  InternalOsError* = object of HyperxConnectionError
+  InternalSslError* = object of InternalOsError
   StrmError* = object of HyperxError
     code*: ErrorCode
 
-func newConnError*(errCode: ErrorCode): ref ConnError =
+func newConnError*(errCode: ErrorCode): ref ConnError {.raises: [].} =
   result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
 
-func newConnClosedError*(): ref ConnectionClosedError =
+func newConnClosedError*(): ref ConnectionClosedError {.raises: [].} =
   result = (ref ConnectionClosedError)(msg: "Connection Closed")
 
-func newStrmError*(errCode: ErrorCode): ref StrmError =
+func newStrmError*(errCode: ErrorCode): ref StrmError {.raises: [].} =
   result = (ref StrmError)(code: errCode, msg: "Stream Error: " & $errCode)

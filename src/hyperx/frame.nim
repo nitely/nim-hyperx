@@ -1,4 +1,6 @@
+import std/strutils
 import std/strformat
+import ./utils
 
 template ones(n: untyped): uint = (1.uint shl n) - 1
 
@@ -37,10 +39,10 @@ type
   FrmFlags* = distinct uint8
   FrmFlag* = distinct uint8
 
-func contains*(flags: FrmFlags, f: FrmFlag): bool {.inline.} =
+func contains*(flags: FrmFlags, f: FrmFlag): bool {.inline, raises: [].} =
   result = (flags.uint8 and f.uint8) > 0
 
-func incl*(flags: var FrmFlags, f: FrmFlag) {.inline.} =
+func incl*(flags: var FrmFlags, f: FrmFlag) {.inline, raises: [].} =
   flags = (flags.uint8 xor f.uint8).FrmFlags
 
 const
@@ -93,10 +95,10 @@ type
 
 proc `==`*(a, b: FrmSid): bool {.borrow.}
 
-func `+=`*(a: var FrmSid, b: uint) {.inline.} =
+func `+=`*(a: var FrmSid, b: uint) {.inline, raises: [].} =
   a = (a.uint + b).FrmSid
 
-proc clearBit(v: var FrmSid, bit: int) {.inline.} =
+proc clearBit(v: var FrmSid, bit: int) {.inline, raises: [].} =
   v = FrmSid(v.uint and not (1'u32 shl bit))
 
 const
@@ -107,7 +109,7 @@ type
   Frame* = ref object
     s*: seq[byte]
 
-func newFrame*(payloadLen = 0): Frame {.inline.} =
+func newFrame*(payloadLen = 0): Frame {.inline, raises: [].} =
   Frame(s: newSeq[byte](frmHeaderSize+payloadLen))
 
 func rawBytesPtr*(frm: Frame): ptr byte =
@@ -116,74 +118,74 @@ func rawBytesPtr*(frm: Frame): ptr byte =
 func rawPayloadBytesPtr*(frm: Frame): ptr byte =
   addr frm.s[frmHeaderSize]
 
-func clear*(frm: Frame) {.inline.} =
+func clear*(frm: Frame) {.inline, raises: [].} =
   frm.s.setLen frmHeaderSize
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0
 
-func len*(frm: Frame): int {.inline.} =
+func len*(frm: Frame): int {.inline, raises: [].} =
   frm.s.len
 
 template payload*(frm: Frame): untyped =
   toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
-func grow*(frm: Frame, size: int) =
+func grow*(frm: Frame, size: int) {.inline, raises: [].} =
   frm.s.setLen frm.s.len+size
 
-func shrink*(frm: Frame, size: int) =
+func shrink*(frm: Frame, size: int) {.inline, raises: [].} =
   doAssert frm.s.len >= size
   doAssert frm.s.len-size >= frmHeaderSize
   frm.s.setLen frm.s.len-size
 
-func payloadLen*(frm: Frame): FrmPayloadLen {.inline.} =
+func payloadLen*(frm: Frame): FrmPayloadLen {.inline, raises: [].} =
   # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
   result += frm.s[0].uint32 shl 16
   result += frm.s[1].uint32 shl 8
   result += frm.s[2].uint32
   doAssert result <= 24.ones.uint
 
-func typ*(frm: Frame): FrmTyp {.inline.} =
+func typ*(frm: Frame): FrmTyp {.inline, raises: [].} =
   result = frm.s[3].FrmTyp
 
-func flags*(frm: Frame): var FrmFlags {.inline.} =
+func flags*(frm: Frame): var FrmFlags {.inline, raises: [].} =
   result = frm.s[4].FrmFlags
 
-func sid*(frm: Frame): FrmSid {.inline.} =
+func sid*(frm: Frame): FrmSid {.inline, raises: [].} =
   result += frm.s[5].uint shl 24
   result += frm.s[6].uint shl 16
   result += frm.s[7].uint shl 8
   result += frm.s[8].uint
   result.clearBit 31  # clear reserved byte
 
-func setHeader*(frm: Frame, data: string) =
+func setHeader*(frm: Frame, data: string) {.inline, raises: [].} =
   doAssert data.len == frmHeaderSize
   for i in 0 .. data.len-1:
     frm.s[i] = data[i].byte
 
-func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline.} =
+func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline, raises: [].} =
   doAssert n <= 24.ones.uint
   frm.s[0] = ((n.uint shr 16) and 8.ones).byte
   frm.s[1] = ((n.uint shr 8) and 8.ones).byte
   frm.s[2] = (n.uint and 8.ones).byte
 
-func setTyp*(frm: Frame, t: FrmTyp) {.inline.} =
+func setTyp*(frm: Frame, t: FrmTyp) {.inline, raises: [].} =
   frm.s[3] = t.uint8
 
-func setFlags*(frm: Frame, f: FrmFlags) {.inline.} =
+func setFlags*(frm: Frame, f: FrmFlags) {.inline, raises: [].} =
   frm.s[4] = f.uint8
 
-func setSid*(frm: Frame, sid: FrmSid) {.inline.} =
+func setSid*(frm: Frame, sid: FrmSid) {.inline, raises: [].} =
   ## Set the stream ID
   frm.s[5] = ((sid.uint shr 24) and 8.ones).byte
   frm.s[6] = ((sid.uint shr 16) and 8.ones).byte
   frm.s[7] = ((sid.uint shr 8) and 8.ones).byte
   frm.s[8] = (sid.uint and 8.ones).byte
 
-func add*(frm: Frame, payload: openArray[byte]) =
+func add*(frm: Frame, payload: openArray[byte]) {.inline, raises: [].} =
   frm.s.add payload
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
 
-func isValidSize*(frm: Frame, size: int): bool =
+func isValidSize*(frm: Frame, size: int): bool {.inline, raises: [].} =
   result = case frm.typ
   of frmtRstStream:
     size == frmRstStreamSize
@@ -209,7 +211,7 @@ template assignAt(s: var seq[byte], i: int, x: uint32): untyped =
 
 func newGoAwayFrame*(
   lastSid, errorCode: int
-): Frame =
+): Frame {.inline, raises: [].} =
   result = newFrame(frmGoAwaySize)
   result.setTyp frmtGoAway
   result.setPayloadLen frmGoAwaySize.FrmPayloadLen
@@ -219,7 +221,7 @@ func newGoAwayFrame*(
 func newRstStreamFrame*(
   sid: FrmSid,
   errorCode: int
-): Frame =
+): Frame {.inline, raises: [].} =
   result = newFrame(frmRstStreamSize)
   result.setTyp frmtRstStream
   result.setSid sid
@@ -229,7 +231,7 @@ func newRstStreamFrame*(
 func newWindowUpdateFrame*(
   sid: FrmSid,
   increment: int
-): Frame =
+): Frame {.inline, raises: [].} =
   result = newFrame(frmWindowUpdateSize)
   result.setTyp frmtWindowUpdate
   result.setSid sid
@@ -240,7 +242,7 @@ func addSetting*(
   frm: Frame,
   id: FrmSetting,
   value: uint32
-) =
+) {.inline, raises: [].} =
   let i = frm.len
   frm.grow frmSettingsSize
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
@@ -248,7 +250,7 @@ func addSetting*(
   frm.s[i+1] = id.byte
   frm.s.assignAt(i+2, value)
 
-iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline.} =
+iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline, raises: [].} =
   # https://httpwg.org/specs/rfc9113.html#SettingFormat
   #doAssert frm.payload.len mod frmSettingsSize == 0
   var i = frmHeaderSize
@@ -291,56 +293,57 @@ iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline.} =
 #template payload*(frm: Frame): untyped =
 #  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
-func `$`*(frm: Frame): string =
-  result = &"""
-===Frame===
-sid: {$frm.sid.int}
-typ: {$frm.typ.int}
-ack: {$(frmfAck in frm.flags)}
-payload len: {$frm.payloadLen.int}
-==========="""
-  result.add "===Payload==="
-  case frm.typ
-  of frmtGoAway:
-    var lastStreamId = 0.uint
-    lastStreamId += frm.s[0].uint shl 24
-    lastStreamId += frm.s[1].uint shl 16
-    lastStreamId += frm.s[2].uint shl 8
-    lastStreamId += frm.s[3].uint
-    result.add &"\nLast-Stream-ID {$lastStreamId}"
-    var errCode = 0.uint
-    errCode += frm.s[4].uint shl 24
-    errCode += frm.s[5].uint shl 16
-    errCode += frm.s[6].uint shl 8
-    errCode += frm.s[7].uint
-    result.add &"\nError Code {$errCode}"
-  of frmtWindowUpdate:
-    var wsIncrement = 0.uint
-    wsIncrement += frm.s[0].uint shl 24
-    wsIncrement += frm.s[1].uint shl 16
-    wsIncrement += frm.s[2].uint shl 8
-    wsIncrement += frm.s[3].uint
-    result.add &"\nWindow Size Increment {$wsIncrement}"
-  of frmtSettings:
-    if frm.payloadLen.int mod 6 != 0:
-      result.add "\nbad payload"
-      return
-    var i = 0
-    for _ in 0 .. int(frm.payloadLen.int div 6)-1:
-      var iden = 0.uint
-      iden += frm.s[i].uint shl 8
-      iden += frm.s[i+1].uint
-      result.add &"\nIdentifier {$iden}"
-      var value = 0.uint
-      value += frm.s[i+2].uint shl 24
-      value += frm.s[i+3].uint shl 16
-      value += frm.s[i+4].uint shl 8
-      value += frm.s[i+5].uint
-      result.add &"\nValue {$value}"
-      i += 6
-  else:
-    result.add "\nUnimplemented debug"
-  result.add "\n============="
+func `$`*(frm: Frame): string {.raises: [].} =
+  untrackExceptions:
+    result = fmt"""
+      ===Frame===
+      sid: {$frm.sid.int}
+      typ: {$frm.typ.int}
+      ack: {$(frmfAck in frm.flags)}
+      payload len: {$frm.payloadLen.int}
+      ===========""".unindent
+    result.add "===Payload==="
+    case frm.typ
+    of frmtGoAway:
+      var lastStreamId = 0.uint
+      lastStreamId += frm.s[0].uint shl 24
+      lastStreamId += frm.s[1].uint shl 16
+      lastStreamId += frm.s[2].uint shl 8
+      lastStreamId += frm.s[3].uint
+      result.add fmt("\nLast-Stream-ID {$lastStreamId}")
+      var errCode = 0.uint
+      errCode += frm.s[4].uint shl 24
+      errCode += frm.s[5].uint shl 16
+      errCode += frm.s[6].uint shl 8
+      errCode += frm.s[7].uint
+      result.add fmt("\nError Code {$errCode}")
+    of frmtWindowUpdate:
+      var wsIncrement = 0.uint
+      wsIncrement += frm.s[0].uint shl 24
+      wsIncrement += frm.s[1].uint shl 16
+      wsIncrement += frm.s[2].uint shl 8
+      wsIncrement += frm.s[3].uint
+      result.add fmt("\nWindow Size Increment {$wsIncrement}")
+    of frmtSettings:
+      if frm.payloadLen.int mod 6 != 0:
+        result.add "\nbad payload"
+        return
+      var i = 0
+      for _ in 0 .. int(frm.payloadLen.int div 6)-1:
+        var iden = 0.uint
+        iden += frm.s[i].uint shl 8
+        iden += frm.s[i+1].uint
+        result.add fmt("\nIdentifier {$iden}")
+        var value = 0.uint
+        value += frm.s[i+2].uint shl 24
+        value += frm.s[i+3].uint shl 16
+        value += frm.s[i+4].uint shl 8
+        value += frm.s[i+5].uint
+        result.add fmt("\nValue {$value}")
+        i += 6
+    else:
+      result.add "\nUnimplemented debug"
+    result.add "\n============="
 
 when isMainModule:
   block:

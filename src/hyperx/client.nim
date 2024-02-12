@@ -37,12 +37,12 @@ template check(cond: bool, errObj: untyped): untyped =
   if not cond:
     raise errObj
 
-func add(s: var seq[byte], ss: string) =
+func add(s: var seq[byte], ss: string) {.raises: [].} =
   # XXX x_x
   for c in ss:
     s.add c.byte
 
-func add(s: var string, ss: openArray[byte]) =
+func add(s: var string, ss: openArray[byte]) {.raises: [].} =
   # XXX x_x
   for c in ss:
     s.add c.char
@@ -53,34 +53,43 @@ type
 proc `==`(a, b: StreamId): bool {.borrow.}
 proc `+=`(a: var StreamId, b: StreamId) {.borrow.}
 
+from std/openssl import SSL_CTX_set_alpn_protos
 import std/tables
 import std/net
 import std/asyncdispatch
 import std/asyncnet
 import pkg/hpack
 
-# XXX remove, move to client or make it threadlocal
-var sslContext: SslContext
+var sslContext {.threadvar.}: SslContext
 
 proc destroySslContext() {.noconv.} =
   sslContext.destroyContext()
 
-from std/openssl import SSL_CTX_set_alpn_protos
-
-proc defaultSslContext(): SslContext =
+proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   if not sslContext.isNil:
     return sslContext
   # protSSLv23 will disable all protocols
   # lower than the min protocol defined
   # in openssl.config, usually +TLSv1.2
-  sslContext = newContext(protSSLv23, verifyMode=CVerifyNone)
+  try:
+    sslContext = newContext(protSSLv23, verifyMode=CVerifyNone)
+  except CatchableError as err:
+    raise newException(InternalSslError, err.msg)
+  except Exception as err:
+    # workaround for newContext raising Exception
+    raise newException(Defect, err.msg)
+  doAssert sslContext != nil, "failure to initialize the SSL context"
   # XXX OPENSSL_VERSION_NUMBER >= 0x10002000L
   discard SSL_CTX_set_alpn_protos(sslContext.context, "\x02h2", 3)
   # XXX catch EOutOfIndex
   addQuitProc(destroySslContext)
   return sslContext
 
-proc decode(payload: openArray[byte], ds: var DecodedStr, dh: var DynHeaders) =
+func decode(
+  payload: openArray[byte],
+  ds: var DecodedStr,
+  dh: var DynHeaders
+) {.raises: [ConnError].} =
   try:
     hdecodeAll(payload, dh, ds)
   except HpackError as err:
@@ -94,16 +103,16 @@ type
     headers*: string
     data*: Payload
 
-func newPayload(): Payload =
+func newPayload(): Payload {.raises: [].} =
   Payload()
 
-func newResponse*(): Response =
+func newResponse*(): Response {.raises: [].} =
   Response(
     headers: "",
     data: newPayload()
   )
 
-func text*(r: Response): string =
+func text*(r: Response): string {.raises: [].} =
   result = ""
   result.add r.data.s
 
@@ -120,7 +129,7 @@ type
     state: StreamState
     msgs: QueueAsync[MsgData]
 
-proc initStream(id: StreamId): Stream =
+proc initStream(id: StreamId): Stream {.raises: [].} =
   result = Stream(
     id: id,
     state: strmIdle,
@@ -141,11 +150,16 @@ type
     maxConcurrentStreams, windowSize, maxFrameSize: uint32
 
 when not defined(hyperxTest):
-  proc newMySocket(): MyAsyncSocket =
-    result = newAsyncSocket()
-    wrapSocket(defaultSslContext(), result)
+  proc newMySocket(): MyAsyncSocket {.raises: [InternalOsError].} =
+    try:
+      result = newAsyncSocket()
+      wrapSocket(defaultSslContext(), result)
+    except CatchableError as err:
+      raise newException(InternalOsError, err.msg)
 
-proc newClient*(hostname: string, port = Port 443): ClientContext =
+proc newClient*(
+  hostname: string, port = Port 443
+): ClientContext {.raises: [InternalOsError].} =
   result = ClientContext(
     sock: newMySocket(),
     hostname: hostname,
@@ -163,14 +177,16 @@ proc newClient*(hostname: string, port = Port 443): ClientContext =
     maxFrameSize: stgInitialMaxFrameSize
   )
 
-proc close(client: ClientContext) =
+proc close(client: ClientContext) {.raises: [InternalOsError].} =
   if not client.isConnected:
     return
   client.isConnected = false
   try:
     client.sock.close()
-  except OSError as err:
-    raise (ref InternalOSError)(msg: err.msg)
+  except CatchableError as err:
+    raise newException(InternalOsError, err.msg)
+  except Exception as err:
+    raise newException(Defect, err.msg)
   finally:
     client.sendMsgs.close()
     client.recvMsgs.close()
@@ -179,27 +195,27 @@ proc close(client: ClientContext) =
     for stream in values client.streams:
       stream.msgs.close()
 
-func stream(client: ClientContext, sid: StreamId): var Stream =
+func stream(client: ClientContext, sid: StreamId): var Stream {.raises: [].} =
   try:
     result = client.streams[sid]
   except KeyError:
-    raise newConnError(errProtocolError)
+    doAssert false, "sid is not a stream"
 
-func stream(client: ClientContext, sid: FrmSid): var Stream =
+func stream(client: ClientContext, sid: FrmSid): var Stream {.raises: [].} =
   client.stream sid.StreamId
 
-proc close(client: ClientContext, sid: StreamId) =
+proc close(client: ClientContext, sid: StreamId) {.raises: [].} =
   # Close stream messages queue and delete stream from
   # the client.
   # This does nothing if the stream is already close
   if sid notin client.streams:
     return
-  let stream = client.streams[sid]
+  let stream = client.stream(sid)
   if not stream.msgs.isClosed:
     stream.msgs.close()
   client.streams.del stream.id
 
-proc doTransitionSend(s: var Stream, frm: Frame) =
+func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   discard
 
 proc write(client: ClientContext, frm: Frame) {.async.} =
@@ -226,7 +242,7 @@ proc sendRstStream(
     debugInfo err.msg
     raise err
 
-proc doTransitionRecv(s: var Stream, frm: Frame) =
+func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
   doAssert frm.sid != frmSidMain
   check frm.typ in frmRecvAllowed, newConnError(errProtocolError)
@@ -343,12 +359,12 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     debugInfo "Continuation"
     await client.readUntilEnd(frm)
 
-proc openMainStream(client: ClientContext): StreamId =
+func openMainStream(client: ClientContext): StreamId {.raises: [].} =
   doAssert frmSidMain.StreamId notin client.streams
   result = frmSidMain.StreamId
   client.streams[result] = initStream result
 
-proc openStream(client: ClientContext): StreamId =
+func openStream(client: ClientContext): StreamId {.raises: [].} =
   # XXX some error if max sid is reached
   # XXX error if maxStreams is reached
   result = client.currStreamId
@@ -397,7 +413,7 @@ proc sendTask(client: ClientContext) {.async.} =
     await client.sendTaskNaked()
   except OSError as err:
     if client.isConnected:
-      raise (ref InternalOSError)(msg: err.msg)
+      raise (ref InternalOsError)(msg: err.msg)
     else:
       debugInfo "not connected"
   except QueueClosedError:
@@ -543,7 +559,7 @@ proc recvTask(client: ClientContext) {.async.} =
     raise err
   except OSError as err:
     if client.isConnected:
-      raise (ref InternalOSError)(msg: err.msg)
+      raise (ref InternalOsError)(msg: err.msg)
     else:
       debugInfo "not connected"
   except ConnectionClosedError as err:
@@ -605,13 +621,16 @@ type
   Request* = ref object
     data: seq[byte]
 
-func newRequest(): Request =
+func newRequest(): Request {.raises: [].} =
   Request()
 
-func addHeader(client: ClientContext, r: Request, n, v: string) =
+func addHeader(client: ClientContext, r: Request, n, v: string) {.raises: [HyperxError].} =
   ## headers must be added synchronously, no await in between,
   ## or else a table resize could occur in the meantime
-  discard hencode(n, v, client.headersEnc, r.data, huffman = false)
+  try:
+    discard hencode(n, v, client.headersEnc, r.data, huffman = false)
+  except HpackError as err:
+    raise newException(HyperxError, err.msg)
 
 proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   if not client.isConnected:

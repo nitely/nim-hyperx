@@ -9,6 +9,13 @@ template raisesAssertion*(exp: untyped): untyped =
       asserted = true
     doAssert asserted
 
+template untrackExceptions*(body: untyped): untyped =
+  ## workaround for API errors in Nim's stdlib
+  try:
+    body
+  except Exception as err:
+    raise newException(Defect, err.msg)
+
 when isMainModule:
   block:
     raisesAssertion(doAssert false)

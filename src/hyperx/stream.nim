@@ -46,7 +46,7 @@ const frmRecvAllowed* = {
 }
 
 # Section 5.1
-func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState =
+func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState {.raises: [].} =
   doAssert e in eventRecvAllowed
   case s
   of strmIdle:
@@ -90,7 +90,7 @@ func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState =
     doAssert false
     strmInvalid
 
-func toEventRecv*(frm: Frame): StreamEvent =
+func toEventRecv*(frm: Frame): StreamEvent {.raises: [].} =
   doAssert frm.typ in frmRecvAllowed
   case frm.typ
   of frmtData:
@@ -115,11 +115,11 @@ func toEventRecv*(frm: Frame): StreamEvent =
     doAssert false
     seUnknown
 
-func isAllowedToSend*(state: StreamState, frm: Frame): bool =
+func isAllowedToSend*(state: StreamState, frm: Frame): bool {.raises: [].} =
   ## Check if the stream is allowed to send the frame
   true
 
-func isAllowedToRecv*(state: StreamState, frm: Frame): bool =
+func isAllowedToRecv*(state: StreamState, frm: Frame): bool {.raises: [].} =
   ## Check if the stream is allowed to receive the frame
   # https://httpwg.org/specs/rfc9113.html#StreamStates
   case state
