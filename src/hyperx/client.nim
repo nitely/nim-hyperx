@@ -6,7 +6,6 @@
 import ./frame
 import ./stream
 import ./queue
-import ./lock
 import ./errors
 
 when defined(hyperxTest):
@@ -223,7 +222,7 @@ proc sendRstStream(
   let frm = newRstStreamFrame(frmSid, errCode.int)
   try:
     await client.write(frm)
-  except Exception as err:
+  except CatchableError as err:
     debugInfo err.msg
     raise err
 
@@ -403,7 +402,7 @@ proc sendTask(client: ClientContext) {.async.} =
       debugInfo "not connected"
   except QueueClosedError:
     doAssert not client.isConnected
-  except Exception as err:
+  except CatchableError as err:
     debugInfo err.msg
     raise err
   finally:
@@ -462,7 +461,7 @@ proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
   )
   try:
     await client.write(frm)
-  except Exception as err:
+  except CatchableError as err:
     debugInfo err.msg
     raise err
 
@@ -519,7 +518,7 @@ proc responseDispatcher(client: ClientContext) {.async.} =
       debugInfo "not connected"
   except QueueClosedError:
     doAssert not client.isConnected
-  except Exception as err:
+  except CatchableError as err:
     debugInfo err.msg
     raise err
   finally:
@@ -554,7 +553,7 @@ proc recvTask(client: ClientContext) {.async.} =
       debugInfo "not connected"
   except QueueClosedError:
     doAssert not client.isConnected
-  except Exception as err:
+  except CatchableError as err:
     debugInfo err.msg
     raise err
   finally:
@@ -582,9 +581,10 @@ template withConnection*(
       waitForRespFut = true
       block:
         body
-    except QueueClosedError:
+    except QueueClosedError as err:
       doAssert not client.isConnected
-    except Exception as err:
+      raise err
+    except CatchableError as err:
       debugInfo err.msg
       raise err
     finally:
