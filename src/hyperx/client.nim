@@ -125,6 +125,7 @@ type
   MsgData = object
     frm: Frame
   Stream = object
+    # XXX: add body stream, if set stream data through it
     id: StreamId
     state: StreamState
     msgs: QueueAsync[MsgData]
@@ -341,6 +342,8 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   payloadLen -= paddingLen
   check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
   if payloadLen > 0:
+    # XXX recv into Stream.bodyStream if typ is frmtData
+    # XXX recv in chunks and discard if stream does not exists
     frm.grow payloadLen
     let payloadRln = await client.sock.recvInto(
       frm.rawPayloadBytesPtr, payloadLen
@@ -378,12 +381,9 @@ proc handshake(client: ClientContext) {.async.} =
   # XXX: allow sending some params
   let sid = client.openMainStream()
   doAssert sid == frmSidMain.StreamId
-  var frm = newFrame()
-  frm.setTyp frmtSettings
-  frm.setSid frmSidMain
+  var frm = newSettingsFrame()
   frm.addSetting frmsEnablePush, stgDisablePush
   frm.addSetting frmsInitialWindowSize, stgMaxWindowSize
-  frm.setPayloadLen frm.payload.len.FrmPayloadLen
   var blob = newSeqOfCap[byte](preface.len+frm.len)
   blob.add preface
   blob.add frm.s
@@ -433,7 +433,6 @@ const connFrmAllowed = {
 }
 
 proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
-  # XXX process settings, window updates, etc
   case frm.typ
   of frmtWindowUpdate:
     check frm.payload.len > 0, newConnError(errProtocolError)
@@ -462,8 +461,8 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         discard
       else:
         # ignore unknown setting
-        debugInfo "unknown setting recived"
-    # XXX send ack
+        debugInfo "unknown setting received"
+    await client.write newSettingsFrame()
   of frmtPing: discard
   of frmtGoAway: discard
   else:

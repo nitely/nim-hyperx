@@ -238,11 +238,20 @@ func newWindowUpdateFrame*(
   result.setPayloadLen frmWindowUpdateSize.FrmPayloadLen
   result.s.assignAt(frmHeaderSize, increment.uint32)
 
+func newSettingsFrame*(ack = false): Frame {.inline, raises: [].} =
+  result = newFrame()
+  result.setTyp frmtSettings
+  result.setSid frmSidMain
+  if ack:
+    result.flags.incl frmfAck
+
 func addSetting*(
   frm: Frame,
   id: FrmSetting,
   value: uint32
 ) {.inline, raises: [].} =
+  doAssert frm.typ == frmtSettings
+  doAssert frmfAck notin frm.flags
   let i = frm.len
   frm.grow frmSettingsSize
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
