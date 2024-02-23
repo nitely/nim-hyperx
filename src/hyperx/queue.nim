@@ -73,7 +73,8 @@ func isClosed*[T](q: QueueAsync[T]): bool {.raises: [].} =
   q.isClosed
 
 proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
-  doAssert not q.isClosed
+  if q.isClosed:
+    return
   q.isClosed = true
   #let closedError = newQueueClosedError()
   for ev in items q.putEv:
