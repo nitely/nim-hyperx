@@ -75,6 +75,8 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
     sslContext = newContext(protSSLv23, verifyMode=CVerifyNone)
   except CatchableError as err:
     raise newException(InternalSslError, err.msg)
+  except Defect as err:
+    raise err  # raise original error
   except Exception as err:
     # workaround for newContext raising Exception
     raise newException(Defect, err.msg)
@@ -149,6 +151,7 @@ type
     sendMsgs, recvMsgs: QueueAsync[MsgData]
     maxPeerStrmIdSeen: StreamId
     maxConcurrentStreams, windowSize, maxFrameSize: uint32
+    exitError: ref HyperxError
 
 when not defined(hyperxTest):
   proc newMySocket(): MyAsyncSocket {.raises: [InternalOsError].} =
@@ -156,7 +159,7 @@ when not defined(hyperxTest):
       result = newAsyncSocket()
       wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
-      raise newException(InternalOsError, err.msg)
+      raise newInternalOsError(err.msg)
 
 proc newClient*(
   hostname: string, port = Port 443
@@ -185,7 +188,9 @@ proc close(client: ClientContext) {.raises: [InternalOsError].} =
   try:
     client.sock.close()
   except CatchableError as err:
-    raise newException(InternalOsError, err.msg)
+    raise newInternalOsError(err.msg)
+  except Defect as err:
+    raise err  # raise original error
   except Exception as err:
     raise newException(Defect, err.msg)
   finally:
@@ -219,6 +224,9 @@ proc close(client: ClientContext, sid: StreamId) {.raises: [].} =
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   discard
 
+# XXX continuations need a mechanism
+#     similar to streamBody i.e: if frm without end is
+#     found consume from streamContinuations
 proc write(client: ClientContext, frm: Frame) {.async.} =
   ## Frames passed cannot be reused because they are references
   ## added to a queue, and may not have been consumed yet
@@ -269,14 +277,15 @@ proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} 
   if frm.typ == frmtData and
       frm.payloadLen.int > 0 and
       frmfEndStream notin frm.flags:
-    let frmWs = newWindowUpdateFrame(sid.FrmSid, frm.payloadLen.int)
-    await client.write(frmWs)
+    await client.write newWindowUpdateFrame(sid.FrmSid, frm.payloadLen.int)
 
 proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
   try:
     result = await client.readNaked(sid)
   except QueueClosedError as err:
     doAssert not client.isConnected
+    if client.exitError != nil:
+      raise newHyperxConnectionError(client.exitError.msg)
     raise err
   except StrmError as err:
     client.close(sid)
@@ -349,7 +358,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
       frm.rawPayloadBytesPtr, payloadLen
     )
     check payloadRln == payloadLen, newConnClosedError()
-    debugInfo $frm
+    debugInfo frm.debugPayload
   if paddingLen > 0:
     let oldFrmLen = frm.len
     frm.grow paddingLen
@@ -404,20 +413,27 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   while client.isConnected:
     let msg = await client.sendMsgs.pop()
     doAssert frm.payloadLen.int == frm.payload.len
-    if frm.sid.StreamId in client.streams:
+    if frm.sid.StreamId in client.streams:  # XXX move to stream
       client.stream(frm.sid).doTransitionSend frm
     await client.sock.send(frm.rawBytesPtr, frm.len)
 
 proc sendTask(client: ClientContext) {.async.} =
   try:
     await client.sendTaskNaked()
-  except OSError as err:
+  except HyperxError as err:
     if client.isConnected:
-      raise (ref InternalOsError)(msg: err.msg)
+      client.exitError = err
+      raise err
     else:
       debugInfo "not connected"
   except QueueClosedError:
     doAssert not client.isConnected
+  except OSError as err:  # XXX remove
+    if client.isConnected:
+      client.exitError = newInternalOsError(err.msg)
+      raise client.exitError
+    else:
+      debugInfo "not connected"
   except CatchableError as err:
     debugInfo err.msg
     raise err
@@ -462,9 +478,15 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
       else:
         # ignore unknown setting
         debugInfo "unknown setting received"
-    await client.write newSettingsFrame()
-  of frmtPing: discard
-  of frmtGoAway: discard
+    await client.write newSettingsFrame(ack = true)
+  of frmtPing:
+    if frmfAck notin frm.flags:
+      await client.write newPingFrame(ackPayload = frm.payload)
+  of frmtGoAway:
+    # XXX close streams lower than Last-Stream-ID
+    # XXX don't allow new streams creation
+    # the connection is still ok for streams lower than Last-Stream-ID
+    discard
   else:
     doAssert frm.typ notin connFrmAllowed
     raise newConnError(errProtocolError)
@@ -505,8 +527,7 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       frm.shrink frm.payload.len
       frm.s.add $headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
-      let frmWs = newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
-      await client.write(frmWs)
+      await client.write newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
@@ -524,10 +545,12 @@ proc responseDispatcher(client: ClientContext) {.async.} =
     await client.responseDispatcherNaked()
   except ConnError as err:
     if client.isConnected:
+      client.exitError = err
       await client.sendGoAway(err.code)
     raise err
-  except ConnectionClosedError as err:
+  except HyperxError as err:
     if client.isConnected:
+      client.exitError = err
       raise err
     else:
       debugInfo "not connected"
@@ -554,20 +577,24 @@ proc recvTask(client: ClientContext) {.async.} =
     await client.recvTaskNaked()
   except ConnError as err:
     if client.isConnected:
+      # XXX close all streams
+      client.exitError = err
       await client.sendGoAway(err.code)
     raise err
-  except OSError as err:
+  except HyperxError as err:
     if client.isConnected:
-      raise (ref InternalOsError)(msg: err.msg)
-    else:
-      debugInfo "not connected"
-  except ConnectionClosedError as err:
-    if client.isConnected:
+      client.exitError = err
       raise err
     else:
       debugInfo "not connected"
   except QueueClosedError:
     doAssert not client.isConnected
+  except OSError as err:
+    if client.isConnected:
+      client.exitError = newInternalOsError(err.msg)
+      raise client.exitError
+    else:
+      debugInfo "not connected"
   except CatchableError as err:
     debugInfo err.msg
     raise err
@@ -581,19 +608,13 @@ template withConnection*(
 ) =
   block:
     var sendFut, recvFut, respFut: Future[void]
-    var waitForSendFut = false
-    var waitForRecvFut = false
-    var waitForRespFut = false
     try:
       debugInfo "connecting"
       await client.connect()
       debugInfo "connected"
       sendFut = client.sendTask()
-      waitForSendFut = true
       recvFut = client.recvTask()
-      waitForRecvFut = true
       respFut = client.responseDispatcher()
-      waitForRespFut = true
       block:
         body
     except QueueClosedError as err:
@@ -608,13 +629,15 @@ template withConnection*(
       # XXX do gracefull shutdown with timeout,
       #     wait for send/recv to drain the queue
       #     before closing
-      # XXX wait both even if one errors out
-      if waitForSendFut:
-        await sendFut
-      if waitForRecvFut:
-        await recvFut
-      if waitForRespFut:
-        await respFut
+      
+      # do not bother the user with hyperx errors
+      # at this point body completed or errored out
+      for fut in [sendFut, recvFut, respFut]:
+        try:
+          if fut != nil:
+            await fut
+        except HyperxError as err:
+          debugInfo err.msg
 
 type
   Request* = ref object

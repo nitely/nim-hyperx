@@ -118,14 +118,14 @@ testAsync "response with bad header compression":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  try:
-    withConnection tc:
+  withConnection tc:
+    try:
       await (
         tc.get("/") and
         tc.replyBadHeaders()
       )
-  except HyperxConnectionError as err:
-    errorMsg = err.msg
+    except HyperxConnectionError as err:
+      errorMsg = err.msg
   doAssert "COMPRESSION_ERROR" in errorMsg
 
 testAsync "response with headers prio":
@@ -166,14 +166,14 @@ testAsync "response with bad prio length":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  try:
-    withConnection tc:
+  withConnection tc:
+    try:
       await (
         tc.get("/") and
         tc.replyPrio()
       )
-  except HyperxConnectionError as err:
-    errorMsg = err.msg
+    except HyperxConnectionError as err:
+      errorMsg = err.msg
   doAssert "PROTOCOL_ERROR" in errorMsg
 
 testAsync "response with headers padding":
@@ -214,14 +214,14 @@ testAsync "response with bad over padding length":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  try:
-    withConnection tc:
+  withConnection tc:
+    try:
       await (
         tc.get("/") and
         tc.replyPadding()
       )
-  except HyperxConnectionError as err:
-    errorMsg = err.msg
+    except HyperxConnectionError as err:
+      errorMsg = err.msg
   doAssert "PROTOCOL_ERROR" in errorMsg
 
 testAsync "response with bad missing padding length":
@@ -232,14 +232,14 @@ testAsync "response with bad missing padding length":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  try:
-    withConnection tc:
+  withConnection tc:
+    try:
       await (
         tc.get("/") and
         tc.replyPadding()
       )
-  except HyperxConnectionError as err:
-    errorMsg = err.msg
+    except HyperxConnectionError as err:
+      errorMsg = err.msg
   doAssert "PROTOCOL_ERROR" in errorMsg
 
 testAsync "header table is populated":

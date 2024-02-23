@@ -55,3 +55,9 @@ func newConnClosedError*(): ref ConnectionClosedError {.raises: [].} =
 
 func newStrmError*(errCode: ErrorCode): ref StrmError {.raises: [].} =
   result = (ref StrmError)(code: errCode, msg: "Stream Error: " & $errCode)
+
+func newInternalOsError*(msg: string): ref InternalOsError {.raises: [].} =
+  result = (ref InternalOsError)(msg: msg)
+
+func newHyperxConnectionError*(msg: string): ref HyperxConnectionError {.raises: [].} =
+  result = (ref HyperxConnectionError)(msg: msg)

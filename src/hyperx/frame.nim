@@ -245,6 +245,19 @@ func newSettingsFrame*(ack = false): Frame {.inline, raises: [].} =
   if ack:
     result.flags.incl frmfAck
 
+func newPingFrame*(
+  ackPayload: openArray[byte] = []
+): Frame {.inline, raises: [].} =
+  doAssert ackPayload.len == 0 or ackPayload.len == frmPingSize
+  result = newFrame(frmPingSize)
+  result.setTyp frmtPing
+  result.setSid frmSidMain
+  result.setPayloadLen frmPingSize.FrmPayloadLen
+  if ackPayload.len > 0:
+    result.flags.incl frmfAck
+    for i in 0 .. frmPingSize-1:
+      result.s[frmHeaderSize+i] = ackPayload[i]
+
 func addSetting*(
   frm: Frame,
   id: FrmSetting,
@@ -311,33 +324,36 @@ func `$`*(frm: Frame): string {.raises: [].} =
       ack: {$(frmfAck in frm.flags)}
       payload len: {$frm.payloadLen.int}
       ===========""".unindent
+
+func debugPayload*(frm: Frame): string {.raises: [].} =
+  untrackExceptions:
+    var i = frmHeaderSize
     result.add "===Payload==="
     case frm.typ
     of frmtGoAway:
       var lastStreamId = 0.uint
-      lastStreamId += frm.s[0].uint shl 24
-      lastStreamId += frm.s[1].uint shl 16
-      lastStreamId += frm.s[2].uint shl 8
-      lastStreamId += frm.s[3].uint
+      lastStreamId += frm.s[i+0].uint shl 24
+      lastStreamId += frm.s[i+1].uint shl 16
+      lastStreamId += frm.s[i+2].uint shl 8
+      lastStreamId += frm.s[i+3].uint
       result.add fmt("\nLast-Stream-ID {$lastStreamId}")
       var errCode = 0.uint
-      errCode += frm.s[4].uint shl 24
-      errCode += frm.s[5].uint shl 16
-      errCode += frm.s[6].uint shl 8
-      errCode += frm.s[7].uint
+      errCode += frm.s[i+4].uint shl 24
+      errCode += frm.s[i+5].uint shl 16
+      errCode += frm.s[i+6].uint shl 8
+      errCode += frm.s[i+7].uint
       result.add fmt("\nError Code {$errCode}")
     of frmtWindowUpdate:
       var wsIncrement = 0.uint
-      wsIncrement += frm.s[0].uint shl 24
-      wsIncrement += frm.s[1].uint shl 16
-      wsIncrement += frm.s[2].uint shl 8
-      wsIncrement += frm.s[3].uint
+      wsIncrement += frm.s[i+0].uint shl 24
+      wsIncrement += frm.s[i+1].uint shl 16
+      wsIncrement += frm.s[i+2].uint shl 8
+      wsIncrement += frm.s[i+3].uint
       result.add fmt("\nWindow Size Increment {$wsIncrement}")
     of frmtSettings:
       if frm.payloadLen.int mod 6 != 0:
         result.add "\nbad payload"
         return
-      var i = 0
       for _ in 0 .. int(frm.payloadLen.int div 6)-1:
         var iden = 0.uint
         iden += frm.s[i].uint shl 8
@@ -350,6 +366,11 @@ func `$`*(frm: Frame): string {.raises: [].} =
         value += frm.s[i+5].uint
         result.add fmt("\nValue {$value}")
         i += 6
+    of frmtPing:
+      var value = 0
+      for x in frm.payload:
+        value += x.int
+      result.add fmt("\nPing {$value}")
     else:
       result.add "\nUnimplemented debug"
     result.add "\n============="

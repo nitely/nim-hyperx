@@ -13,6 +13,8 @@ template untrackExceptions*(body: untyped): untyped =
   ## workaround for API errors in Nim's stdlib
   try:
     body
+  except Defect as err:
+    raise err  # raise original error
   except Exception as err:
     raise newException(Defect, err.msg)
 
