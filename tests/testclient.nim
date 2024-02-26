@@ -9,6 +9,9 @@ import ../src/hyperx/testutils
 import ../src/hyperx/frame
 import ../src/hyperx/errors
 
+const
+  userAgent = "Nim - HyperX"
+
 func toBytes(s: string): seq[byte] =
   result = newSeq[byte]()
   for c in s:
@@ -81,7 +84,9 @@ testAsync "simple request":
     ":method: GET\r\L" &
     ":scheme: https\r\L" &
     ":path: /\r\L" &
-    ":authority: foo.bar\r\L"
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"
 
 testAsync "multiple requests":
   var tc = newTestClient("foo.bar")
@@ -102,14 +107,18 @@ testAsync "multiple requests":
     ":method: GET\r\L" &
     ":scheme: https\r\L" &
     ":path: /1\r\L" &
-    ":authority: foo.bar\r\L"
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"
   doAssert reqs[2].frm.sid.int == 3
   doAssert reqs[2].frm.typ == frmtHeaders
   doAssert reqs[2].payload ==
     ":method: GET\r\L" &
     ":scheme: https\r\L" &
     ":path: /2\r\L" &
-    ":authority: foo.bar\r\L"
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"
 
 testAsync "response with bad header compression":
   proc replyBadHeaders(tc: TestClientContext) {.async.} =
@@ -250,8 +259,10 @@ testAsync "header table is populated":
       tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
     )
   let reqs = tc.sent()
-  doAssert tc.headersDec.len == 2
+  doAssert tc.headersDec.len == 4
   doAssert $tc.headersDec ==
+    "accept: */*\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
     ":authority: foo.bar\r\L" &
     ":path: /foo\r\L"
   doAssert reqs[1].frm.sid.int == 1
@@ -260,7 +271,9 @@ testAsync "header table is populated":
     ":method: GET\r\L" &
     ":scheme: https\r\L" &
     ":path: /foo\r\L" &
-    ":authority: foo.bar\r\L"
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"
 
 testAsync "header table size setting is applied":
   proc recvTableSizeSetting(tc: TestClientContext, tableSize: uint32) {.async.} =
@@ -287,7 +300,9 @@ testAsync "header table size setting is applied":
     ":method: GET\r\L" &
     ":scheme: https\r\L" &
     ":path: /foo\r\L" &
-    ":authority: foo.bar\r\L"
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"
   # XXX reqs[2] window size update
   # XXX reqs[3] ack window size update
   doAssert reqs[4].frm.sid.int == 3
@@ -296,4 +311,6 @@ testAsync "header table size setting is applied":
     ":method: GET\r\L" &
     ":scheme: https\r\L" &
     ":path: /bar\r\L" &
-    ":authority: foo.bar\r\L"
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"

@@ -339,6 +339,13 @@ func debugPayload*(frm: Frame): string {.raises: [].} =
     var i = frmHeaderSize
     result.add "===Payload==="
     case frm.typ
+    of frmtRstStream:
+      var errCode = 0.uint
+      errCode += frm.s[i+0].uint shl 24
+      errCode += frm.s[i+1].uint shl 16
+      errCode += frm.s[i+2].uint shl 8
+      errCode += frm.s[i+3].uint
+      result.add fmt("\nError Code {$errCode}")
     of frmtGoAway:
       var lastStreamId = 0.uint
       lastStreamId += frm.s[i+0].uint shl 24

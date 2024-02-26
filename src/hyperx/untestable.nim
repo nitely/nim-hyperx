@@ -13,24 +13,34 @@ when isMainModule:
   proc main() {.async.} =
     var client = newClient("www.google.com")
     withConnection(client):
+      echo "G"
       let r = await client.get("/")
       doAssert ":status: 200" in r.headers
       doAssert "doctype" in r.text
       await sleepAsync 2000
-  echo "GET"
   waitFor main()
 
-  proc mainPost() {.async.} =
+  proc mainReqBin() {.async.} =
     var client = newClient("reqbin.com")
     withConnection(client):
-      let r = await client.post(
-        "/echo/post/form",
-        "foo=bar&baz=qux".toBytes
-      )
-      doAssert ":status: 200" in r.headers
-      doAssert "Success" in r.text
+      block:
+        echo "GET"
+        let r = await client.get(
+          "/echo/get/json",
+          accept = "application/json"
+        )
+        doAssert ":status: 200" in r.headers
+        doAssert """{"success":"true"}""" in r.text
+      block:
+        echo "POST"
+        let r = await client.post(
+          "/echo/post/json",
+          """{"foo": "bar"}""".toBytes,
+          contentType = "application/json"
+        )
+        doAssert ":status: 200" in r.headers
+        doAssert """{"success":"true"}""" in r.text
       await sleepAsync 2000
-  echo "POST"
-  waitFor mainPost()
+  waitFor mainReqBin()
 
   echo "ok"

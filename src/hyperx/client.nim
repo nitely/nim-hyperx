@@ -14,6 +14,7 @@ when defined(hyperxTest):
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
   statusLineLen = ":status: xxx\r\n".len
+  userAgent = "Nim - HyperX"
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize = 4096'u32
   stgMaxConcurrentStreams = uint32.high
@@ -753,16 +754,17 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
 proc get*(
   client: ClientContext,
   path: string,
-  accept = "*"
+  accept = "*/*"
 ): Future[Response] {.async.} =
   var req = newRequest()
   client.addHeader(req, ":method", "GET")
   client.addHeader(req, ":scheme", "https")
   client.addHeader(req, ":path", path)
   client.addHeader(req, ":authority", client.hostname)
+  client.addHeader(req, "user-agent", userAgent)
+  # XXX google closes the stream with protocol error
   #client.addHeader(req, "host", client.hostname)
-  #client.addHeader(req, "accept", accept)
-  #client.addHeader(req, "user-agent", "Nim - HyperX")
+  client.addHeader(req, "accept", accept)
   result = await client.request req
 
 proc post*(
@@ -777,10 +779,10 @@ proc post*(
   client.addHeader(req, ":scheme", "https")
   client.addHeader(req, ":path", path)
   client.addHeader(req, ":authority", client.hostname)
+  client.addHeader(req, "user-agent", userAgent)
   client.addHeader(req, "host", client.hostname)
   client.addHeader(req, "content-type", contentType)
   client.addHeader(req, "content-length", $data.len)
-  client.addHeader(req, "user-agent", "Nim - HyperX")
   req.dataFrm = newFrame()
   req.dataFrm.add data
   result = await client.request req
