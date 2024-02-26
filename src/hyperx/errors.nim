@@ -39,11 +39,11 @@ func `$`(errCode: ErrorCode): string {.raises: [].} =
 type
   HyperxError* = object of CatchableError
   HyperxConnectionError* = object of HyperxError
-  ConnError* = object of HyperxConnectionError
-    code*: ErrorCode
   ConnectionClosedError* = object of HyperxConnectionError
   InternalOsError* = object of HyperxConnectionError
   InternalSslError* = object of InternalOsError
+  ConnError* = object of HyperxConnectionError
+    code*: ErrorCode
   StrmError* = object of HyperxError
     code*: ErrorCode
 

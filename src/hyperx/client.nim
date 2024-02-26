@@ -17,10 +17,10 @@ const
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize = 4096'u32
   stgMaxConcurrentStreams = uint32.high
-  stgInitialWindowSize = (1'u32 shl 15) - 1'u32
-  stgMaxWindowSize = (1'u32 shl 30) - 1'u32
-  stgInitialMaxFrameSize = 1'u32 shl 13
-  stgMaxFrameSize = (1'u32 shl 23) - 1'u32
+  stgInitialWindowSize = (1'u32 shl 16) - 1'u32
+  stgMaxWindowSize = (1'u32 shl 31) - 1'u32
+  stgInitialMaxFrameSize = 1'u32 shl 14
+  stgMaxFrameSize = (1'u32 shl 24) - 1'u32
   stgDisablePush = 0'u32
 
 template debugInfo(s: string): untyped =
@@ -339,6 +339,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
   doAssert frmfEndHeaders notin frm.flags
   var frm2 = newFrame()
   while frmfEndHeaders notin frm2.flags:
+    check not client.sock.isClosed, newConnClosedError()
     let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm2.len)
     check headerRln == frmHeaderSize, newConnClosedError()
     debugInfo $frm2
@@ -349,6 +350,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
       continue
     let oldFrmLen = frm.len
     frm.grow frm2.payloadLen.int
+    check not client.sock.isClosed, newConnClosedError()
     let payloadRln = await client.sock.recvInto(
       addr frm.s[oldFrmLen], frm2.payloadLen.int
     )
@@ -362,6 +364,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   ## Frames cannot be interleaved here
   ##
   ## Unused flags MUST be ignored on receipt
+  check not client.sock.isClosed, newConnClosedError()
   let headerRln = await client.sock.recvInto(frm.rawBytesPtr, frm.len)
   check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
@@ -370,6 +373,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
     debugInfo "Padding"
     check payloadLen >= frmPaddingSize, newConnError(errProtocolError)
+    check not client.sock.isClosed, newConnClosedError()
     let paddingRln = await client.sock.recvInto(addr paddingLen, frmPaddingSize)
     check paddingRln == frmPaddingSize, newConnClosedError()
     paddingLen *= 8
@@ -379,6 +383,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     debugInfo "Priority"
     check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
     var prio = 0'i64
+    check not client.sock.isClosed, newConnClosedError()
     let prioRln = await client.sock.recvInto(addr prio, frmPrioritySize)
     check prioRln == frmPrioritySize, newConnClosedError()
     payloadLen -= frmPrioritySize
@@ -390,6 +395,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     # XXX recv into Stream.bodyStream if typ is frmtData
     # XXX recv in chunks and discard if stream does not exists
     frm.grow payloadLen
+    check not client.sock.isClosed, newConnClosedError()
     let payloadRln = await client.sock.recvInto(
       frm.rawPayloadBytesPtr, payloadLen
     )
@@ -398,6 +404,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   if paddingLen > 0:
     let oldFrmLen = frm.len
     frm.grow paddingLen
+    check not client.sock.isClosed, newConnClosedError()
     let paddingRln = await client.sock.recvInto(
       addr frm.s[oldFrmLen], paddingLen
     )
@@ -433,6 +440,7 @@ proc handshake(client: ClientContext) {.async.} =
   var blob = newSeqOfCap[byte](preface.len+frm.len)
   blob.add preface
   blob.add frm.s
+  check not client.sock.isClosed, newConnClosedError()
   await client.sock.send(addr blob[0], blob.len)
 
 proc connect(client: ClientContext) {.async.} =
@@ -452,6 +460,7 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
     doAssert frm.payloadLen.int == frm.payload.len
     if frm.sid.StreamId in client.streams:  # XXX move to stream
       client.stream(frm.sid).doTransitionSend frm
+    check not client.sock.isClosed, newConnClosedError()
     await client.sock.send(frm.rawBytesPtr, frm.len)
 
 proc sendTask(client: ClientContext) {.async.} =
@@ -696,6 +705,7 @@ func addHeader(client: ClientContext, r: Request, n, v: string) {.raises: [Hyper
     raise newException(HyperxError, err.msg)
 
 proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
+  debugInfo "request"
   if not client.isConnected:
     raise newConnClosedError()
   result = newResponse()
@@ -706,11 +716,14 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   req.headersFrm.setSid sid.FrmSid
   req.headersFrm.setPayloadLen req.headersFrm.payloadSize.FrmPayloadLen
   req.headersFrm.flags.incl frmfEndHeaders
+  if req.dataFrm.isEmpty:
+    req.headersFrm.flags.incl frmfEndStream
   await client.write req.headersFrm
   if not req.dataFrm.isEmpty:
     req.dataFrm.setTyp frmtData
     req.dataFrm.setSid sid.FrmSid
     req.dataFrm.setPayloadLen req.dataFrm.payloadSize.FrmPayloadLen
+    req.dataFrm.flags.incl frmfEndStream
     await client.write req.dataFrm
   # https://httpwg.org/specs/rfc9113.html#HttpFraming
   while true:
@@ -739,14 +752,37 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
 
 proc get*(
   client: ClientContext,
-  path: string
+  path: string,
+  accept = "*"
 ): Future[Response] {.async.} =
   var req = newRequest()
   client.addHeader(req, ":method", "GET")
   client.addHeader(req, ":scheme", "https")
   client.addHeader(req, ":path", path)
   client.addHeader(req, ":authority", client.hostname)
-  debugInfo "REQUEST"
+  #client.addHeader(req, "host", client.hostname)
+  #client.addHeader(req, "accept", accept)
+  #client.addHeader(req, "user-agent", "Nim - HyperX")
+  result = await client.request req
+
+proc post*(
+  client: ClientContext,
+  path: string,
+  data: seq[byte],
+  contentType = "application/x-www-form-urlencoded"
+): Future[Response] {.async.} =
+  # https://httpwg.org/specs/rfc9113.html#n-complex-request
+  var req = newRequest()
+  client.addHeader(req, ":method", "POST")
+  client.addHeader(req, ":scheme", "https")
+  client.addHeader(req, ":path", path)
+  client.addHeader(req, ":authority", client.hostname)
+  client.addHeader(req, "host", client.hostname)
+  client.addHeader(req, "content-type", contentType)
+  client.addHeader(req, "content-length", $data.len)
+  client.addHeader(req, "user-agent", "Nim - HyperX")
+  req.dataFrm = newFrame()
+  req.dataFrm.add data
   result = await client.request req
 
 when defined(hyperxTest):

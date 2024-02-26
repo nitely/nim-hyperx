@@ -21,6 +21,9 @@ proc newMySocket*(): TestSocket =
     port: Port 0
   )
 
+func isClosed*(s: TestSocket): bool =
+  false
+
 proc recvInto*(s: TestSocket, buff: pointer, size: int): Future[int] {.async.} =
   ## Simulates socket recv
   if not s.isConnected:
