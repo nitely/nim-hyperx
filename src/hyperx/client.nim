@@ -677,17 +677,21 @@ template withConnection*(
           debugInfo err.msg
 
 type
-  Request* = ref object
-    data: seq[byte]
+  Request = object
+    headersFrm: Frame
+    dataFrm: Frame
 
 func newRequest(): Request {.raises: [].} =
-  Request()
+  Request(
+    headersFrm: newFrame(),
+    dataFrm: newEmptyFrame()
+  )
 
 func addHeader(client: ClientContext, r: Request, n, v: string) {.raises: [HyperxError].} =
   ## headers must be added synchronously, no await in between,
   ## or else a table resize could occur in the meantime
   try:
-    discard hencode(n, v, client.headersEnc, r.data, huffman = false)
+    discard hencode(n, v, client.headersEnc, r.headersFrm.s, huffman = false)
   except HpackError as err:
     raise newException(HyperxError, err.msg)
 
@@ -698,12 +702,16 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
   let sid = client.openStream()
   defer: client.close(sid)
   doAssert sid.FrmSid != frmSidMain
-  var frm = newFrame()
-  frm.setTyp frmtHeaders
-  frm.setSid sid.FrmSid
-  frm.flags.incl frmfEndHeaders
-  frm.add req.data
-  await client.write(frm)
+  req.headersFrm.setTyp frmtHeaders
+  req.headersFrm.setSid sid.FrmSid
+  req.headersFrm.setPayloadLen req.headersFrm.payloadSize.FrmPayloadLen
+  req.headersFrm.flags.incl frmfEndHeaders
+  await client.write req.headersFrm
+  if not req.dataFrm.isEmpty:
+    req.dataFrm.setTyp frmtData
+    req.dataFrm.setSid sid.FrmSid
+    req.dataFrm.setPayloadLen req.dataFrm.payloadSize.FrmPayloadLen
+    await client.write req.dataFrm
   # https://httpwg.org/specs/rfc9113.html#HttpFraming
   while true:
     let msg = await client.read(sid)

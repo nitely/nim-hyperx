@@ -109,8 +109,14 @@ type
   Frame* = ref object
     s*: seq[byte]
 
-func newFrame*(payloadLen = 0): Frame {.inline, raises: [].} =
+func newFrame*(payloadLen = 0): Frame {.raises: [].} =
   Frame(s: newSeq[byte](frmHeaderSize+payloadLen))
+
+func newEmptyFrame*(): Frame {.raises: [].} =
+  Frame(s: newSeq[byte]())
+
+func isEmpty*(frm: Frame): bool =
+  frm.s.len == 0
 
 func rawBytesPtr*(frm: Frame): ptr byte =
   addr frm.s[0]
@@ -128,6 +134,9 @@ func len*(frm: Frame): int {.inline, raises: [].} =
 
 template payload*(frm: Frame): untyped =
   toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
+
+func payloadSize*(frm: Frame): int {.raises: [].} =
+  frm.len-frmHeaderSize
 
 func grow*(frm: Frame, size: int) {.inline, raises: [].} =
   frm.s.setLen frm.s.len+size

@@ -11,7 +11,8 @@ Pure Nim Http2 client/server implementation.
 
 ## Client
 
-This snippet actually works at the time of writing
+While the client is not stable, it should be functional as
+most of the spec is implemented.
 
 ```nim
 {.define: ssl.}
