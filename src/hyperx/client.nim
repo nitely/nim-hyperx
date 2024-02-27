@@ -293,13 +293,13 @@ proc sendRstStream(
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
   doAssert frm.sid != frmSidMain
-  check frm.typ in frmRecvAllowed, newConnError(errProtocolError)
+  check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
   if not s.state.isAllowedToRecv frm:
     if s.state == strmHalfClosedRemote:
       raise newStrmError(errStreamClosed)
     else:
       raise newConnError(errProtocolError)
-  s.state = s.state.toNextStateRecv frm.toEventRecv()
+  s.state = s.state.toNextStateRecv frm.toStreamEvent()
   check s.state != strmInvalid, newConnError(errProtocolError)
   #if oldState == strmIdle:
   #  # XXX close streams < s.id in idle state
@@ -772,14 +772,14 @@ const
   defaultAccept = "*/*"
   defaultContentType = "application/json"
 
-proc request*(
+proc request(
   client: ClientContext,
   httpMethod: HttpMethod,
   path: string,
   data: seq[byte] = @[],
   userAgent = defaultUserAgent,
-  accept = "",
-  contentType = ""
+  accept = defaultAccept,
+  contentType = defaultContentType
 ): Future[Response] {.async.} =
   var req = newRequest()
   client.addHeader(req, ":method", $httpMethod)
