@@ -40,6 +40,11 @@ when isMainModule:
         )
         doAssert ":status: 200" in r.headers
         doAssert """{"success":"true"}""" in r.text
+      block:
+        echo "HEAD"
+        let r = await client.head("/echo")
+        doAssert ":status: 200" in r.headers
+        doAssert r.text.len == 0
       await sleepAsync 2000
   waitFor mainReqBin()
 

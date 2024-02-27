@@ -14,7 +14,6 @@ when defined(hyperxTest):
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
   statusLineLen = ":status: xxx\r\n".len
-  userAgent = "Nim - HyperX"
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize = 4096'u32
   stgMaxConcurrentStreams = uint32.high
@@ -258,6 +257,9 @@ proc close(client: ClientContext, sid: StreamId) {.raises: [].} =
   # This does nothing if the stream is already close
   client.streams.close sid
 
+# XXX do transitions for send
+#     sending a frame must transition from idle to open
+#     for example
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   discard
 
@@ -751,41 +753,92 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
     if frmfEndStream in msg.frm.flags:
       return
 
-proc get*(
+type
+  HttpMethod = enum
+    hmPost, hmGet, hmPut, hmHead, hmOptions, hmDelete, hmPatch
+
+func `$`(hm: HttpMethod): string =
+  case hm
+  of hmPost: "POST"
+  of hmGet: "GET"
+  of hmPut: "PUT"
+  of hmHead: "HEAD"
+  of hmOptions: "OPTIONS"
+  of hmDelete: "DELETE"
+  of hmPatch: "PATCH"
+
+const
+  defaultUserAgent = "Nim - HyperX"
+  defaultAccept = "*/*"
+  defaultContentType = "application/json"
+
+proc request*(
   client: ClientContext,
+  httpMethod: HttpMethod,
   path: string,
-  accept = "*/*"
+  data: seq[byte] = @[],
+  userAgent = defaultUserAgent,
+  accept = "",
+  contentType = ""
 ): Future[Response] {.async.} =
   var req = newRequest()
-  client.addHeader(req, ":method", "GET")
+  client.addHeader(req, ":method", $httpMethod)
   client.addHeader(req, ":scheme", "https")
   client.addHeader(req, ":path", path)
   client.addHeader(req, ":authority", client.hostname)
   client.addHeader(req, "user-agent", userAgent)
-  # XXX google closes the stream with protocol error
-  #client.addHeader(req, "host", client.hostname)
-  client.addHeader(req, "accept", accept)
+  if httpMethod in {hmGet, hmHead}:
+    client.addHeader(req, "accept", accept)
+  if httpMethod in {hmPost, hmPut, hmPatch}:
+    # XXX google closes the stream with protocol 
+    #     error if host is included in GET
+    client.addHeader(req, "host", client.hostname)
+    client.addHeader(req, "content-type", contentType)
+    client.addHeader(req, "content-length", $data.len)
+    req.dataFrm = newFrame()
+    req.dataFrm.add data
   result = await client.request req
+
+proc get*(
+  client: ClientContext,
+  path: string,
+  accept = defaultAccept
+): Future[Response] {.async.} =
+  result = await request(client, hmGet, path, accept = accept)
+
+proc head*(
+  client: ClientContext,
+  path: string,
+  accept = defaultAccept
+): Future[Response] {.async.} =
+  result = await request(client, hmHead, path, accept = accept)
 
 proc post*(
   client: ClientContext,
   path: string,
   data: seq[byte],
-  contentType = "application/x-www-form-urlencoded"
+  contentType = defaultContentType
 ): Future[Response] {.async.} =
   # https://httpwg.org/specs/rfc9113.html#n-complex-request
-  var req = newRequest()
-  client.addHeader(req, ":method", "POST")
-  client.addHeader(req, ":scheme", "https")
-  client.addHeader(req, ":path", path)
-  client.addHeader(req, ":authority", client.hostname)
-  client.addHeader(req, "user-agent", userAgent)
-  client.addHeader(req, "host", client.hostname)
-  client.addHeader(req, "content-type", contentType)
-  client.addHeader(req, "content-length", $data.len)
-  req.dataFrm = newFrame()
-  req.dataFrm.add data
-  result = await client.request req
+  result = await request(
+    client, hmPost, path, data = data, contentType = contentType
+  )
+
+proc put*(
+  client: ClientContext,
+  path: string,
+  data: seq[byte],
+  contentType = defaultContentType
+): Future[Response] {.async.} =
+  result = await request(
+    client, hmPut, path, data = data, contentType = contentType
+  )
+
+proc delete*(
+  client: ClientContext,
+  path: string
+): Future[Response] {.async.} =
+  result = await request(client, hmDelete, path)
 
 when defined(hyperxTest):
   proc putTestData*(client: ClientContext, data: string) {.async.} =
