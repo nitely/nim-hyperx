@@ -257,11 +257,15 @@ proc close(client: ClientContext, sid: StreamId) {.raises: [].} =
   # This does nothing if the stream is already close
   client.streams.close sid
 
-# XXX do transitions for send
-#     sending a frame must transition from idle to open
-#     for example
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
-  discard
+  doAssert frm.sid.StreamId == s.id
+  doAssert frm.sid != frmSidMain
+  if frm.typ == frmtContinuation:
+    return
+  doAssert frm.typ in frmStreamAllowed
+  doAssert s.state.isAllowedToSend frm
+  s.state = s.state.toNextStateSend frm.toStreamEvent()
+  doAssert s.state != strmInvalid
 
 # XXX continuations need a mechanism
 #     similar to streamBody i.e: if frm without end is
@@ -278,6 +282,8 @@ proc write(client: ClientContext, frm: Frame) {.async.} =
     payload.add frm.payload
     frm.shrink frm.payload.len
     frm.add payload
+  if frm.sid != frmSidMain:
+    client.stream(frm.sid).doTransitionSend frm
   await client.sendMsgs.put MsgData(frm: frm)
 
 proc sendRstStream(
@@ -327,7 +333,7 @@ proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
       raise newHyperxConnectionError(client.exitError.msg)
     raise err
   except StrmError as err:
-    client.close(sid)
+    #client.close(sid)
     if client.isConnected:
       await client.sendRstStream(sid.FrmSid, err.code)
     raise err
@@ -461,8 +467,6 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   while client.isConnected:
     let msg = await client.sendMsgs.pop()
     doAssert frm.payloadLen.int == frm.payload.len
-    if frm.sid.StreamId in client.streams:  # XXX move to stream
-      client.stream(frm.sid).doTransitionSend frm
     check not client.sock.isClosed, newConnClosedError()
     await client.sock.send(frm.rawBytesPtr, frm.len)
 
@@ -786,13 +790,12 @@ proc request(
   client.addHeader(req, ":scheme", "https")
   client.addHeader(req, ":path", path)
   client.addHeader(req, ":authority", client.hostname)
+  # host is deprecated in http2 and some servers return a protocol error
+  # client.addHeader(req, "host", client.hostname)
   client.addHeader(req, "user-agent", userAgent)
   if httpMethod in {hmGet, hmHead}:
     client.addHeader(req, "accept", accept)
   if httpMethod in {hmPost, hmPut, hmPatch}:
-    # XXX google closes the stream with protocol 
-    #     error if host is included in GET
-    client.addHeader(req, "host", client.hostname)
     client.addHeader(req, "content-type", contentType)
     client.addHeader(req, "content-length", $data.len)
     req.dataFrm = newFrame()
