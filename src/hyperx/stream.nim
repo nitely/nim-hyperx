@@ -66,25 +66,8 @@ func toStreamEvent*(frm: Frame): StreamEvent {.raises: [].} =
     doAssert false
     seUnknown
 
-func isAllowedToRecv*(state: StreamState, frm: Frame): bool {.raises: [].} =
-  ## Check if the stream is allowed to receive the frame
-  # https://httpwg.org/specs/rfc9113.html#StreamStates
-  case state
-  of strmIdle:
-    frm.typ in {frmtHeaders, frmtPriority}
-  of strmHalfClosedRemote, strmReservedLocal:
-    # XXX need to respond with stream closed error (strmHalfClosedRemote)
-    frm.typ in {frmtRstStream, frmtPriority, frmtWindowUpdate}
-  of strmReservedRemote:
-    frm.typ in {frmtHeaders, frmtRstStream, frmtPriority}
-  of strmOpen, strmHalfClosedLocal:
-    true
-  of strmClosed:  # XXX only do minimal processing of frames
-    true
-  of strmInvalid: false
-
-# Section 5.1
 func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState {.raises: [].} =
+  # https://httpwg.org/specs/rfc9113.html#StreamStates
   doAssert e != seUnknown
   case s
   of strmIdle:
@@ -125,23 +108,8 @@ func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     doAssert false
     strmInvalid
 
-func isAllowedToSend*(state: StreamState, frm: Frame): bool {.raises: [].} =
-  ## Check if the stream is allowed to send the frame
-  case state
-  of strmIdle:
-    frm.typ in {frmtHeaders, frmtPriority}
-  of strmReservedLocal:
-    frm.typ in {frmtHeaders, frmtRstStream, frmtPriority}
-  of strmReservedRemote, strmHalfClosedLocal:
-    frm.typ in {frmtRstStream, frmtWindowUpdate, frmtPriority}
-  of strmOpen, strmHalfClosedRemote:
-    true
-  of strmClosed:
-    frm.typ in {frmtPriority}
-  of strmInvalid: false
-
-# Section 5.1
 func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].} =
+  # https://httpwg.org/specs/rfc9113.html#StreamStates
   doAssert e != seUnknown
   case s
   of strmIdle:
@@ -266,33 +234,5 @@ when isMainModule:
     doAssert toStreamEvent(frmtRstStream.frame) == seRstStream
     doAssert toStreamEvent(frmtPushPromise.frame) == sePushPromise
     doAssert toStreamEvent(frmtWindowUpdate.frame) == seWindowUpdate
-  block:
-    doAssert isAllowedToRecv(strmIdle, frmtHeaders.frame)
-    doAssert isAllowedToRecv(strmIdle, frmtPriority.frame)
-    for frmTyp in allFrames-{frmtHeaders,frmtPriority}:
-      doAssert(not isAllowedToRecv(strmIdle, frmTyp.frame))
-    doAssert isAllowedToRecv(strmReservedLocal, frmtRstStream.frame)
-    doAssert isAllowedToRecv(strmReservedLocal, frmtPriority.frame)
-    doAssert isAllowedToRecv(strmReservedLocal, frmtWindowUpdate.frame)
-    for frmTyp in allFrames-{frmtRstStream,frmtPriority,frmtWindowUpdate}:
-      doAssert(not isAllowedToRecv(strmReservedLocal, frmTyp.frame))
-    doAssert isAllowedToRecv(strmReservedRemote, frmtHeaders.frame)
-    doAssert isAllowedToRecv(strmReservedRemote, frmtRstStream.frame)
-    doAssert isAllowedToRecv(strmReservedRemote, frmtPriority.frame)
-    for frmTyp in allFrames-{frmtHeaders,frmtRstStream,frmtPriority}:
-      doAssert(not isAllowedToRecv(strmReservedRemote, frmTyp.frame))
-    for frmTyp in allFrames:
-      doAssert isAllowedToRecv(strmOpen, frmTyp.frame)
-    for frmTyp in allFrames:
-      doAssert isAllowedToRecv(strmHalfClosedLocal, frmTyp.frame)
-    doAssert isAllowedToRecv(strmHalfClosedRemote, frmtWindowUpdate.frame)
-    doAssert isAllowedToRecv(strmHalfClosedRemote, frmtPriority.frame)
-    doAssert isAllowedToRecv(strmHalfClosedRemote, frmtRstStream.frame)
-    for frmTyp in allFrames-{frmtWindowUpdate,frmtPriority,frmtRstStream}:
-      doAssert(not isAllowedToRecv(strmHalfClosedRemote, frmTyp.frame))
-    for frmTyp in allFrames:
-      doAssert isAllowedToRecv(strmClosed, frmTyp.frame)
-    for frmTyp in allFrames:
-      doAssert(not isAllowedToRecv(strmInvalid, frmTyp.frame))
 
   echo "ok"

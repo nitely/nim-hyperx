@@ -260,11 +260,11 @@ proc close(client: ClientContext, sid: StreamId) {.raises: [].} =
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   doAssert frm.sid.StreamId == s.id
   doAssert frm.sid != frmSidMain
+  doAssert s.state != strmInvalid
   if frm.typ == frmtContinuation:
     return
   doAssert frm.typ in frmStreamAllowed
-  doAssert s.state.isAllowedToSend frm
-  s.state = s.state.toNextStateSend frm.toStreamEvent()
+  s.state = toNextStateSend(s.state, frm.toStreamEvent)
   doAssert s.state != strmInvalid
 
 # XXX continuations need a mechanism
@@ -299,15 +299,17 @@ proc sendRstStream(
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
   doAssert frm.sid != frmSidMain
+  doAssert s.state != strmInvalid
   check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
-  if not s.state.isAllowedToRecv frm:
+  let nextState = toNextStateRecv(s.state, frm.toStreamEvent)
+  if nextState == strmInvalid:
     if s.state == strmHalfClosedRemote:
       raise newStrmError(errStreamClosed)
     else:
       raise newConnError(errProtocolError)
-  s.state = s.state.toNextStateRecv frm.toStreamEvent()
-  check s.state != strmInvalid, newConnError(errProtocolError)
+  s.state = nextState
   #if oldState == strmIdle:
+  #  # XXX do this elsewhere not here
   #  # XXX close streams < s.id in idle state
   #  discard
 
