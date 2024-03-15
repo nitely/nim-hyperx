@@ -86,44 +86,36 @@ proc reply*(
     frmtHeaders, tc.sid.FrmSid, @[frmfEndHeaders]
   )
   frm1.add hencode(tc, headers).toBytes
-  await tc.c.putTestData frm1.s.toString
+  await tc.c.putRecvTestData frm1.s.toString
   var frm2 = frame(
     frmtData, tc.sid.FrmSid, @[frmfEndStream]
   )
   frm2.add text.toBytes
-  await tc.c.putTestData frm2.s.toString
+  await tc.c.putRecvTestData frm2.s.toString
   tc.sid += 2
 
 proc reply*(
   tc: TestClientContext,
   frm: Frame
 ) {.async.} =
-  await tc.c.putTestData frm.s.toString()
+  await tc.c.putRecvTestData frm.s.toString()
 
-type TestRequest = object
-  frm: Frame
-  payload: string
+proc sent*(tc: TestClientContext, size: int): Future[string] {.async.} =
+  result = await tc.c.sentTestData(size)
 
-proc sent*(tc: TestClientContext): seq[TestRequest] =
-  result = newSeq[TestRequest]()
-  let data = tc.c.testDataSent()
-  if data.len == 0:
-    return
-  #doAssert tc.prefaceSent()
-  const prefaceLen = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".len
-  var i = prefaceLen
-  while i < data.len:
-    var frame = newFrame()
-    frame.setHeader data[i .. i+frmHeaderSize-1].toString
-    i += frame.len
-    let payload = data[i .. i+frame.payloadLen.int-1]
-    i += payload.len
-    if frame.typ == frmtHeaders:
-      var ds = initDecodedStr()
-      hdecodeAll(payload, tc.headersDec, ds)
-      result.add TestRequest(frm: frame, payload: $ds)
-    else:
-      result.add TestRequest(frm: frame, payload: payload.toString)
+proc sent*(tc: TestClientContext): Future[Frame] {.async.} =
+  result = newFrame()
+  let data = await tc.c.sentTestData(frmHeaderSize)
+  doAssert data.len == frmHeaderSize
+  result.setHeader data
+  let payload = await tc.c.sentTestData(result.payloadLen.int)
+  doAssert payload.len == result.payloadLen.int
+  if result.typ == frmtHeaders:
+    var ds = initDecodedStr()
+    hdecodeAll(payload.toBytes, tc.headersDec, ds)
+    result.add toBytes($ds)
+  else:
+    result.add payload.toBytes
 
 when isMainModule:
   block:

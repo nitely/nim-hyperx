@@ -286,16 +286,6 @@ proc write(client: ClientContext, frm: Frame) {.async.} =
     client.stream(frm.sid).doTransitionSend frm
   await client.sendMsgs.put MsgData(frm: frm)
 
-proc sendRstStream(
-  client: ClientContext, frmSid: FrmSid, errCode: ErrorCode
-) {.async.} =
-  let frm = newRstStreamFrame(frmSid, errCode.int)
-  try:
-    await client.write(frm)
-  except CatchableError as err:
-    debugInfo err.msg
-    raise err
-
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
   doAssert frm.sid != frmSidMain
@@ -337,7 +327,7 @@ proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
   except StrmError as err:
     #client.close(sid)
     if client.isConnected:
-      await client.sendRstStream(sid.FrmSid, err.code)
+      await client.write newRstStreamFrame(sid.FrmSid, err.code.int)
     raise err
   except ConnError as err:
     debugInfo err.msg
@@ -846,16 +836,24 @@ proc delete*(
   result = await request(client, hmDelete, path)
 
 when defined(hyperxTest):
-  proc putTestData*(client: ClientContext, data: string) {.async.} =
-    await client.sock.data.put data
+  proc putRecvTestData*(client: ClientContext, data: string) {.async.} =
+    await client.sock.putRecvData data
 
-  proc testDataSent*(client: ClientContext): seq[byte] =
-    result = client.sock.sent
+  proc sentTestData*(client: ClientContext, size: int): Future[string] {.async.}  =
+    await client.sock.sentData(size)
 
 when isMainModule:
   when not defined(hyperxTest):
     {.error: "tests need -d:hyperxTest".}
 
+  block default_settins:
+    doAssert stgHeaderTableSize == 4096'u32
+    doAssert stgMaxConcurrentStreams == uint32.high
+    doAssert stgInitialWindowSize == 65_535'u32
+    doAssert stgMaxWindowSize == 2_147_483_647'u32
+    doAssert stgInitialMaxFrameSize == 16_384'u32
+    doAssert stgMaxFrameSize == 16_777_215'u32
+    doAssert stgDisablePush == 0'u32
   block sock_default_state:
     var client = newClient("example.com")
     doAssert not client.sock.isConnected

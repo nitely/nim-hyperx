@@ -76,7 +76,6 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   if q.isClosed:
     return
   q.isClosed = true
-  #let closedError = newQueueClosedError()
   for ev in items q.putEv:
     if not ev.finished:
       untrackExceptions:
