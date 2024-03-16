@@ -198,7 +198,10 @@ type
     currStreamId: StreamId
     sendMsgs, recvMsgs: QueueAsync[MsgData]
     maxPeerStrmIdSeen: StreamId
-    maxConcurrentStreams, windowSize, maxFrameSize: uint32
+    maxConcurrentStreams: uint32
+    windowSize: uint32
+    maxFrameSize: uint32  # XXX peerMaxFrameSize
+    recvMaxFrameSize: uint32  # XXX maxFrameSize
     exitError: ref HyperxError
 
 when not defined(hyperxTest):
@@ -210,8 +213,12 @@ when not defined(hyperxTest):
       raise newInternalOsError(err.msg)
 
 proc newClient*(
-  hostname: string, port = Port 443
+  hostname: string,
+  port = Port 443,
+  maxFrameSize = stgInitialMaxFrameSize
 ): ClientContext {.raises: [InternalOsError].} =
+  doAssert maxFrameSize >= stgInitialMaxFrameSize
+  doAssert maxFrameSize <= stgMaxFrameSize
   result = ClientContext(
     sock: newMySocket(),
     hostname: hostname,
@@ -225,7 +232,8 @@ proc newClient*(
     maxPeerStrmIdSeen: 0.StreamId,
     maxConcurrentStreams: stgMaxConcurrentStreams,
     windowSize: stgInitialWindowSize,
-    maxFrameSize: stgInitialMaxFrameSize
+    maxFrameSize: stgInitialMaxFrameSize,
+    recvMaxFrameSize: maxFrameSize
   )
 
 proc close(client: ClientContext) {.raises: [InternalOsError].} =
@@ -346,9 +354,14 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
     debugInfo $frm2
     check frm2.sid == frm.sid, newConnError(errProtocolError)
     check frm2.typ == frmtContinuation, newConnError(errProtocolError)
+    check frm2.payloadLen <= client.recvMaxFrameSize, newConnError(errProtocolError)
     check frm2.payloadLen >= 0
     if frm2.payloadLen == 0:
       continue
+    # XXX the spec does not limit total headers size,
+    #     but there needs to be a limit unless we stream
+    let totalPayloadLen = frm2.payloadLen.int + frm.payload.len
+    check totalPayloadLen <= client.recvMaxFrameSize.int, newConnError(errProtocolError)
     let oldFrmLen = frm.len
     frm.grow frm2.payloadLen.int
     check not client.sock.isClosed, newConnClosedError()
@@ -370,6 +383,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
+  check payloadLen <= client.recvMaxFrameSize.int, newConnError(errProtocolError)
   var paddingLen = 0
   if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
     debugInfo "Padding"
@@ -438,6 +452,7 @@ proc handshake(client: ClientContext) {.async.} =
   var frm = newSettingsFrame()
   frm.addSetting frmsEnablePush, stgDisablePush
   frm.addSetting frmsInitialWindowSize, stgMaxWindowSize
+  frm.addSetting frmsMaxFrameSize, client.recvMaxFrameSize
   var blob = newSeqOfCap[byte](preface.len+frm.len)
   blob.add preface
   blob.add frm.s
