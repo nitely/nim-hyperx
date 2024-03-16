@@ -76,14 +76,12 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   if q.isClosed:
     return
   q.isClosed = true
-  for ev in items q.putEv:
-    if not ev.finished:
-      untrackExceptions:
-        ev.fail newQueueClosedError()
-  for ev in items q.popEv:
-    if not ev.finished:
-      untrackExceptions:
-        ev.fail newQueueClosedError()
+  while q.putEv.len > 0:
+    untrackExceptions:
+      q.putEv.popFirst().fail newQueueClosedError()
+  while q.popEv.len > 0:
+    untrackExceptions:
+      q.popEv.popFirst().fail newQueueClosedError()
 
 when isMainModule:
   block:

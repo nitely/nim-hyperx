@@ -22,109 +22,129 @@ func toString(s: openArray[byte]): string =
   for c in s:
     result.add c.char
 
-#testAsync "simple response":
-#  const headers = ":status: 200\r\nfoo: foo\r\n"
-#  const text = "foobar body"
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    await (
-#      tc.get("/") and
-#      tc.reply(headers, text)
-#    )
-#  doAssert tc.resps[0].headers == headers
-#  doAssert tc.resps[0].text == text
-#
-#testAsync "multiple responses":
-#  const
-#    headers = ":status: 200\r\nfoo: foo\r\n"
-#    text = "foo body"
-#    headers2 = ":status: 200\r\nbar: bar\r\n"
-#    text2 = "bar body"
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    await (
-#      tc.get("/") and
-#      tc.reply(headers, text) and
-#      tc.get("/") and
-#      tc.reply(headers2, text2)
-#    )
-#  doAssert tc.resps[0].headers == headers
-#  doAssert tc.resps[0].text == text
-#  doAssert tc.resps[1].headers == headers2
-#  doAssert tc.resps[1].text == text2
-#
-#testAsync "multiple responses unordered":
-#  const
-#    headers = ":status: 200\r\nfoo: foo\r\n"
-#    text = "foo body"
-#    headers2 = ":status: 200\r\nbar: bar\r\n"
-#    text2 = "bar body"
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    await (
-#      tc.get("/") and
-#      tc.get("/") and
-#      tc.reply(headers, text) and
-#      tc.reply(headers2, text2)
-#    )
-#  doAssert tc.resps[0].headers == headers
-#  doAssert tc.resps[0].text == text
-#  doAssert tc.resps[1].headers == headers2
-#  doAssert tc.resps[1].text == text2
-#
-#testAsync "simple request":
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    await (
-#      tc.get("/") and
-#      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
-#    )
-#  let reqs = tc.sent()
-#  doAssert reqs[0].frm.sid == frmSidMain
-#  doAssert reqs[0].frm.typ == frmtSettings
-#  #doAssert reqs[0].payload.len == 0
-#  doAssert reqs[1].frm.sid.int == 1
-#  doAssert reqs[1].frm.typ == frmtHeaders
-#  doAssert reqs[1].payload ==
-#    ":method: GET\r\L" &
-#    ":scheme: https\r\L" &
-#    ":path: /\r\L" &
-#    ":authority: foo.bar\r\L" &
-#    "user-agent: " & userAgent & "\r\L" &
-#    "accept: */*\r\L"
-#
-#testAsync "multiple requests":
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    await (
-#      tc.get("/1") and
-#      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar") and
-#      tc.get("/2") and
-#      tc.reply(":status: 200\r\nbar: bar\r\n", "bar")
-#    )
-#  let reqs = tc.sent()
-#  doAssert reqs[0].frm.sid == frmSidMain
-#  doAssert reqs[0].frm.typ == frmtSettings
-#  #doAssert reqs[0].payload.len == 0
-#  doAssert reqs[1].frm.sid.int == 1
-#  doAssert reqs[1].frm.typ == frmtHeaders
-#  doAssert reqs[1].payload ==
-#    ":method: GET\r\L" &
-#    ":scheme: https\r\L" &
-#    ":path: /1\r\L" &
-#    ":authority: foo.bar\r\L" &
-#    "user-agent: " & userAgent & "\r\L" &
-#    "accept: */*\r\L"
-#  doAssert reqs[2].frm.sid.int == 3
-#  doAssert reqs[2].frm.typ == frmtHeaders
-#  doAssert reqs[2].payload ==
-#    ":method: GET\r\L" &
-#    ":scheme: https\r\L" &
-#    ":path: /2\r\L" &
-#    ":authority: foo.bar\r\L" &
-#    "user-agent: " & userAgent & "\r\L" &
-#    "accept: */*\r\L"
-#
+proc checkHandshake(tc: TestClientContext) {.async.} =
+  const preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".toBytes
+  let data = await tc.sent(preface.len)
+  doAssert data == preface
+  let frm1 = await tc.sent()
+  doAssert frm1.typ == frmtSettings
+  doAssert frm1.sid == frmSidMain
+
+proc checkTableSizeAck(tc: TestClientContext) {.async.} =
+  let frm1 = await tc.sent()
+  doAssert frm1.typ == frmtSettings
+  doAssert frm1.sid == frmSidMain
+  doAssert frmfAck in frm1.flags
+
+testAsync "simple response":
+  const headers = ":status: 200\r\nfoo: foo\r\n"
+  const text = "foobar body"
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    await (
+      tc.get("/") and
+      tc.reply(headers, text)
+    )
+  doAssert tc.resps[0].headers == headers
+  doAssert tc.resps[0].text == text
+
+testAsync "multiple responses":
+  const
+    headers = ":status: 200\r\nfoo: foo\r\n"
+    text = "foo body"
+    headers2 = ":status: 200\r\nbar: bar\r\n"
+    text2 = "bar body"
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    await (
+      tc.get("/") and
+      tc.reply(headers, text) and
+      tc.get("/") and
+      tc.reply(headers2, text2)
+    )
+  doAssert tc.resps[0].headers == headers
+  doAssert tc.resps[0].text == text
+  doAssert tc.resps[1].headers == headers2
+  doAssert tc.resps[1].text == text2
+
+testAsync "multiple responses unordered":
+  const
+    headers = ":status: 200\r\nfoo: foo\r\n"
+    text = "foo body"
+    headers2 = ":status: 200\r\nbar: bar\r\n"
+    text2 = "bar body"
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    await (
+      tc.get("/") and
+      tc.get("/") and
+      tc.reply(headers, text) and
+      tc.reply(headers2, text2)
+    )
+  doAssert tc.resps[0].headers == headers
+  doAssert tc.resps[0].text == text
+  doAssert tc.resps[1].headers == headers2
+  doAssert tc.resps[1].text == text2
+
+testAsync "simple request":
+  var frm1: Frame
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    await (
+      tc.get("/") and
+      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
+    )
+    frm1 = await tc.sent()
+  doAssert frm1.sid.int == 1
+  doAssert frm1.typ == frmtHeaders
+  doAssert frm1.payload.toString() ==
+    ":method: GET\r\L" &
+    ":scheme: https\r\L" &
+    ":path: /\r\L" &
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"
+
+testAsync "multiple requests":
+  var frm1, frm2, frm3: Frame
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    await (
+      tc.get("/1") and
+      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
+    )
+    await (
+      tc.get("/2") and
+      tc.reply(":status: 200\r\nbar: bar\r\n", "bar")
+    )
+    frm1 = await tc.sent()
+    frm2 = await tc.sent()
+    frm3 = await tc.sent()
+  doAssert frm1.sid.int == 1
+  doAssert frm1.typ == frmtHeaders
+  doAssert frm1.payload.toString() ==
+    ":method: GET\r\L" &
+    ":scheme: https\r\L" &
+    ":path: /1\r\L" &
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"
+  # XXX frm2 window update
+  doAssert frm3.sid.int == 3
+  doAssert frm3.typ == frmtHeaders
+  doAssert frm3.payload.toString() ==
+    ":method: GET\r\L" &
+    ":scheme: https\r\L" &
+    ":path: /2\r\L" &
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"
+
 #testAsync "response with bad header compression":
 #  proc replyBadHeaders(tc: TestClientContext) {.async.} =
 #    var frm1 = tc.frame(frmtHeaders, @[frmfEndHeaders])
@@ -141,36 +161,37 @@ func toString(s: openArray[byte]): string =
 #    except HyperxConnectionError as err:
 #      errorMsg = err.msg
 #  doAssert "COMPRESSION_ERROR" in errorMsg
-#
-#testAsync "response with headers prio":
-#  proc replyPrio(tc: TestClientContext; headers, text: string) {.async.} =
-#    var frm1 = tc.frame(
-#      frmtHeaders, @[frmfPriority, frmfEndHeaders]
-#    )
-#    frm1.add ("12345" & hencode(tc, headers)).toBytes
-#    await tc.reply(frm1)
-#    var frm2 = tc.frame(frmtData, @[frmfEndStream])
-#    frm2.add text.toBytes
-#    await tc.reply(frm2)
-#    tc.sid += 2
-#  const
-#    headers = ":status: 200\r\nfoo: foo\r\n"
-#    text = "foo body"
-#    headers2 = ":status: 200\r\nbar: bar\r\n"
-#    text2 = "bar body"
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    await (
-#      tc.get("/") and
-#      tc.replyPrio(headers, text) and
-#      tc.get("/") and
-#      tc.reply(headers2, text2)
-#    )
-#  doAssert tc.resps[0].headers == headers
-#  doAssert tc.resps[0].text == text
-#  doAssert tc.resps[1].headers == headers2
-#  doAssert tc.resps[1].text == text2
-#
+
+testAsync "response with headers prio":
+  proc replyPrio(tc: TestClientContext; headers, text: string) {.async.} =
+    var frm1 = tc.frame(
+      frmtHeaders, @[frmfPriority, frmfEndHeaders]
+    )
+    frm1.add ("12345" & hencode(tc, headers)).toBytes
+    await tc.reply(frm1)
+    var frm2 = tc.frame(frmtData, @[frmfEndStream])
+    frm2.add text.toBytes
+    await tc.reply(frm2)
+    tc.sid += 2
+  const
+    headers = ":status: 200\r\nfoo: foo\r\n"
+    text = "foo body"
+    headers2 = ":status: 200\r\nbar: bar\r\n"
+    text2 = "bar body"
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    await (
+      tc.get("/") and
+      tc.replyPrio(headers, text) and
+      tc.get("/") and
+      tc.reply(headers2, text2)
+    )
+  doAssert tc.resps[0].headers == headers
+  doAssert tc.resps[0].text == text
+  doAssert tc.resps[1].headers == headers2
+  doAssert tc.resps[1].text == text2
+
 #testAsync "response with bad prio length":
 #  proc replyPrio(tc: TestClientContext) {.async.} =
 #    let frm1 = tc.frame(
@@ -189,36 +210,37 @@ func toString(s: openArray[byte]): string =
 #    except HyperxConnectionError as err:
 #      errorMsg = err.msg
 #  doAssert "PROTOCOL_ERROR" in errorMsg
-#
-#testAsync "response with headers padding":
-#  proc replyPadding(tc: TestClientContext; headers, text: string) {.async.} =
-#    var frm1 = tc.frame(
-#      frmtHeaders, @[frmfPadded, frmfEndHeaders]
-#    )
-#    frm1.add ("\x01" & hencode(tc, headers) & "12345678").toBytes
-#    await tc.reply(frm1)
-#    var frm2 = tc.frame(frmtData, @[frmfEndStream])
-#    frm2.add text.toBytes
-#    await tc.reply(frm2)
-#    tc.sid += 2
-#  const
-#    headers = ":status: 200\r\nfoo: foo\r\n"
-#    text = "foo body"
-#    headers2 = ":status: 200\r\nbar: bar\r\n"
-#    text2 = "bar body"
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    await (
-#      tc.get("/") and
-#      tc.replyPadding(headers, text) and
-#      tc.get("/") and
-#      tc.reply(headers2, text2)
-#    )
-#  doAssert tc.resps[0].headers == headers
-#  doAssert tc.resps[0].text == text
-#  doAssert tc.resps[1].headers == headers2
-#  doAssert tc.resps[1].text == text2
-#
+
+testAsync "response with headers padding":
+  proc replyPadding(tc: TestClientContext; headers, text: string) {.async.} =
+    var frm1 = tc.frame(
+      frmtHeaders, @[frmfPadded, frmfEndHeaders]
+    )
+    frm1.add ("\x01" & hencode(tc, headers) & "12345678").toBytes
+    await tc.reply(frm1)
+    var frm2 = tc.frame(frmtData, @[frmfEndStream])
+    frm2.add text.toBytes
+    await tc.reply(frm2)
+    tc.sid += 2
+  const
+    headers = ":status: 200\r\nfoo: foo\r\n"
+    text = "foo body"
+    headers2 = ":status: 200\r\nbar: bar\r\n"
+    text2 = "bar body"
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    await (
+      tc.get("/") and
+      tc.replyPadding(headers, text) and
+      tc.get("/") and
+      tc.reply(headers2, text2)
+    )
+  doAssert tc.resps[0].headers == headers
+  doAssert tc.resps[0].text == text
+  doAssert tc.resps[1].headers == headers2
+  doAssert tc.resps[1].text == text2
+
 #testAsync "response with bad over padding length":
 #  proc replyPadding(tc: TestClientContext) {.async.} =
 #    var frm1 = tc.frame(
@@ -237,7 +259,7 @@ func toString(s: openArray[byte]): string =
 #    except HyperxConnectionError as err:
 #      errorMsg = err.msg
 #  doAssert "PROTOCOL_ERROR" in errorMsg
-#
+
 #testAsync "response with bad missing padding length":
 #  proc replyPadding(tc: TestClientContext) {.async.} =
 #    let frm1 = tc.frame(
@@ -255,43 +277,32 @@ func toString(s: openArray[byte]): string =
 #    except HyperxConnectionError as err:
 #      errorMsg = err.msg
 #  doAssert "PROTOCOL_ERROR" in errorMsg
-#
-#testAsync "header table is populated":
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    await (
-#      tc.get("/foo") and
-#      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
-#    )
-#  let reqs = tc.sent()
-#  doAssert tc.headersDec.len == 4
-#  doAssert $tc.headersDec ==
-#    "accept: */*\r\L" &
-#    "user-agent: " & userAgent & "\r\L" &
-#    ":authority: foo.bar\r\L" &
-#    ":path: /foo\r\L"
-#  doAssert reqs[1].frm.sid.int == 1
-#  doAssert reqs[1].frm.typ == frmtHeaders
-#  doAssert reqs[1].payload ==
-#    ":method: GET\r\L" &
-#    ":scheme: https\r\L" &
-#    ":path: /foo\r\L" &
-#    ":authority: foo.bar\r\L" &
-#    "user-agent: " & userAgent & "\r\L" &
-#    "accept: */*\r\L"
 
-proc checkHandshake(tc: TestClientContext) {.async.} =
-  const preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".toBytes
-  let data = await tc.sent(preface.len)
-  doAssert data == preface
-  let frm1 = await tc.sent()
-  doAssert frm1.typ == frmtSettings
-
-proc checkTableSizeAck(tc: TestClientContext) {.async.} =
-  let frm1 = await tc.sent()
-  doAssert frm1.typ == frmtSettings
-  doAssert frm1.sid == frmSidMain
-  doAssert frmfAck in frm1.flags
+testAsync "header table is populated":
+  var frm1: Frame
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    await (
+      tc.get("/foo") and
+      tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
+    )
+    frm1 = await tc.sent()
+  doAssert tc.headersDec.len == 4
+  doAssert $tc.headersDec ==
+    "accept: */*\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    ":authority: foo.bar\r\L" &
+    ":path: /foo\r\L"
+  doAssert frm1.sid.int == 1
+  doAssert frm1.typ == frmtHeaders
+  doAssert frm1.payload.toString() ==
+    ":method: GET\r\L" &
+    ":scheme: https\r\L" &
+    ":path: /foo\r\L" &
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L"
 
 testAsync "header table size setting is applied":
   proc recvTableSizeSetting(tc: TestClientContext, tableSize: uint32) {.async.} =
