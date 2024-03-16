@@ -145,22 +145,23 @@ testAsync "multiple requests":
     "user-agent: " & userAgent & "\r\L" &
     "accept: */*\r\L"
 
-#testAsync "response with bad header compression":
-#  proc replyBadHeaders(tc: TestClientContext) {.async.} =
-#    var frm1 = tc.frame(frmtHeaders, @[frmfEndHeaders])
-#    frm1.add "abc".toBytes
-#    await tc.reply(frm1)
-#  var errorMsg = ""
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    try:
-#      await (
-#        tc.get("/") and
-#        tc.replyBadHeaders()
-#      )
-#    except HyperxConnectionError as err:
-#      errorMsg = err.msg
-#  doAssert "COMPRESSION_ERROR" in errorMsg
+testAsync "response with bad header compression":
+  proc replyBadHeaders(tc: TestClientContext) {.async.} =
+    var frm1 = tc.frame(frmtHeaders, @[frmfEndHeaders])
+    frm1.add "abc".toBytes
+    await tc.reply(frm1)
+  var errorMsg = ""
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    try:
+      await (
+        tc.get("/") and
+        tc.replyBadHeaders()
+      )
+    except HyperxConnectionError as err:
+      errorMsg = err.msg
+  doAssert "COMPRESSION_ERROR" in errorMsg
 
 testAsync "response with headers prio":
   proc replyPrio(tc: TestClientContext; headers, text: string) {.async.} =
@@ -192,24 +193,25 @@ testAsync "response with headers prio":
   doAssert tc.resps[1].headers == headers2
   doAssert tc.resps[1].text == text2
 
-#testAsync "response with bad prio length":
-#  proc replyPrio(tc: TestClientContext) {.async.} =
-#    let frm1 = tc.frame(
-#      frmtHeaders, @[frmfPriority, frmfEndHeaders]
-#    )
-#    frm1.add "1".toBytes
-#    await tc.reply(frm1)
-#  var errorMsg = ""
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    try:
-#      await (
-#        tc.get("/") and
-#        tc.replyPrio()
-#      )
-#    except HyperxConnectionError as err:
-#      errorMsg = err.msg
-#  doAssert "PROTOCOL_ERROR" in errorMsg
+testAsync "response with bad prio length":
+  proc replyPrio(tc: TestClientContext) {.async.} =
+    let frm1 = tc.frame(
+      frmtHeaders, @[frmfPriority, frmfEndHeaders]
+    )
+    frm1.add "1".toBytes
+    await tc.reply(frm1)
+  var errorMsg = ""
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    try:
+      await (
+        tc.get("/") and
+        tc.replyPrio()
+      )
+    except HyperxConnectionError as err:
+      errorMsg = err.msg
+  doAssert "PROTOCOL_ERROR" in errorMsg
 
 testAsync "response with headers padding":
   proc replyPadding(tc: TestClientContext; headers, text: string) {.async.} =
@@ -241,42 +243,43 @@ testAsync "response with headers padding":
   doAssert tc.resps[1].headers == headers2
   doAssert tc.resps[1].text == text2
 
-#testAsync "response with bad over padding length":
-#  proc replyPadding(tc: TestClientContext) {.async.} =
-#    var frm1 = tc.frame(
-#      frmtHeaders, @[frmfPadded, frmfEndHeaders]
-#    )
-#    frm1.add ("\xfd" & hencode(tc, ":me: foo\r\L")).toBytes
-#    await tc.reply(frm1)
-#  var errorMsg = ""
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    try:
-#      await (
-#        tc.get("/") and
-#        tc.replyPadding()
-#      )
-#    except HyperxConnectionError as err:
-#      errorMsg = err.msg
-#  doAssert "PROTOCOL_ERROR" in errorMsg
-
-#testAsync "response with bad missing padding length":
-#  proc replyPadding(tc: TestClientContext) {.async.} =
-#    let frm1 = tc.frame(
-#      frmtHeaders, @[frmfPadded, frmfEndHeaders]
-#    )
-#    await tc.reply(frm1)
-#  var errorMsg = ""
-#  var tc = newTestClient("foo.bar")
-#  withConnection tc:
-#    try:
-#      await (
-#        tc.get("/") and
-#        tc.replyPadding()
-#      )
-#    except HyperxConnectionError as err:
-#      errorMsg = err.msg
-#  doAssert "PROTOCOL_ERROR" in errorMsg
+testAsync "response with bad over padding length":
+  proc replyPadding(tc: TestClientContext) {.async.} =
+    var frm1 = tc.frame(
+      frmtHeaders, @[frmfPadded, frmfEndHeaders]
+    )
+    frm1.add ("\xfd" & hencode(tc, ":me: foo\r\L")).toBytes
+    await tc.reply(frm1)
+  var errorMsg = ""
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    try:
+      await (
+        tc.get("/") and
+        tc.replyPadding()
+      )
+    except HyperxConnectionError as err:
+      errorMsg = err.msg
+  doAssert "PROTOCOL_ERROR" in errorMsg
+testAsync "response with bad missing padding length":
+  proc replyPadding(tc: TestClientContext) {.async.} =
+    let frm1 = tc.frame(
+      frmtHeaders, @[frmfPadded, frmfEndHeaders]
+    )
+    await tc.reply(frm1)
+  var errorMsg = ""
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    try:
+      await (
+        tc.get("/") and
+        tc.replyPadding()
+      )
+    except HyperxConnectionError as err:
+      errorMsg = err.msg
+  doAssert "PROTOCOL_ERROR" in errorMsg
 
 testAsync "header table is populated":
   var frm1: Frame
