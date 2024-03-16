@@ -836,11 +836,13 @@ proc delete*(
   result = await request(client, hmDelete, path)
 
 when defined(hyperxTest):
-  proc putRecvTestData*(client: ClientContext, data: string) {.async.} =
+  proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =
     await client.sock.putRecvData data
 
-  proc sentTestData*(client: ClientContext, size: int): Future[string] {.async.}  =
-    await client.sock.sentData(size)
+  proc sentTestData*(client: ClientContext, size: int): Future[seq[byte]] {.async.}  =
+    result = newSeq[byte](size)
+    let sz = await client.sock.sentInto(addr result[0], size)
+    result.setLen sz
 
 when isMainModule:
   when not defined(hyperxTest):

@@ -281,7 +281,7 @@ func toString(s: openArray[byte]): string =
 #    "accept: */*\r\L"
 
 proc checkHandshake(tc: TestClientContext) {.async.} =
-  const preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
+  const preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".toBytes
   let data = await tc.sent(preface.len)
   doAssert data == preface
   let frm1 = await tc.sent()

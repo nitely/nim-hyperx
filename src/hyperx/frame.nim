@@ -166,11 +166,6 @@ func sid*(frm: Frame): FrmSid {.inline, raises: [].} =
   result += frm.s[8].uint
   result.clearBit 31  # clear reserved byte
 
-func setHeader*(frm: Frame, data: string) {.inline, raises: [].} =
-  doAssert data.len == frmHeaderSize
-  for i in 0 .. data.len-1:
-    frm.s[i] = data[i].byte
-
 func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline, raises: [].} =
   doAssert n <= 24.ones.uint
   frm.s[0] = ((n.uint shr 16) and 8.ones).byte

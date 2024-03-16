@@ -86,36 +86,37 @@ proc reply*(
     frmtHeaders, tc.sid.FrmSid, @[frmfEndHeaders]
   )
   frm1.add hencode(tc, headers).toBytes
-  await tc.c.putRecvTestData frm1.s.toString
+  await tc.c.putRecvTestData frm1.s
   var frm2 = frame(
     frmtData, tc.sid.FrmSid, @[frmfEndStream]
   )
   frm2.add text.toBytes
-  await tc.c.putRecvTestData frm2.s.toString
+  await tc.c.putRecvTestData frm2.s
   tc.sid += 2
 
 proc reply*(
   tc: TestClientContext,
   frm: Frame
 ) {.async.} =
-  await tc.c.putRecvTestData frm.s.toString()
+  await tc.c.putRecvTestData frm.s
 
-proc sent*(tc: TestClientContext, size: int): Future[string] {.async.} =
+proc sent*(tc: TestClientContext, size: int): Future[seq[byte]] {.async.} =
   result = await tc.c.sentTestData(size)
 
 proc sent*(tc: TestClientContext): Future[Frame] {.async.} =
-  result = newFrame()
-  let data = await tc.c.sentTestData(frmHeaderSize)
-  doAssert data.len == frmHeaderSize
-  result.setHeader data
-  let payload = await tc.c.sentTestData(result.payloadLen.int)
-  doAssert payload.len == result.payloadLen.int
+  result = newEmptyFrame()
+  result.s = await tc.c.sentTestData(frmHeaderSize)
+  doAssert result.len == frmHeaderSize
+  var payload = newSeq[byte]()
+  if result.payloadLen.int > 0:
+    payload = await tc.c.sentTestData(result.payloadLen.int)
+    doAssert payload.len == result.payloadLen.int
   if result.typ == frmtHeaders:
     var ds = initDecodedStr()
-    hdecodeAll(payload.toBytes, tc.headersDec, ds)
+    hdecodeAll(payload, tc.headersDec, ds)
     result.add toBytes($ds)
   else:
-    result.add payload.toBytes
+    result.add payload
 
 when isMainModule:
   block:
