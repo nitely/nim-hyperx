@@ -468,6 +468,7 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   while client.isConnected:
     let msg = await client.sendMsgs.pop()
     doAssert frm.payloadLen.int == frm.payload.len
+    doAssert frm.payload.len <= client.peerMaxFrameSize.int
     check not client.sock.isClosed, newConnClosedError()
     await client.sock.send(frm.rawBytesPtr, frm.len)
 

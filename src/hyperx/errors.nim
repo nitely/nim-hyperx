@@ -36,6 +36,7 @@ func `$`(errCode: ErrorCode): string {.raises: [].} =
   of errHttp11Required: "HTTP_1_1_REQUIRED"
   else: "UNKNOWN ERROR CODE"
 
+# XXX prefix Hyperx
 type
   HyperxError* = object of CatchableError
   HyperxConnectionError* = object of HyperxError
