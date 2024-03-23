@@ -43,15 +43,16 @@ proc checkTableSizeAck(tc: TestClientContext) {.async.} =
 testAsync "simple response":
   const headers = ":status: 200\r\nfoo: foo\r\n"
   const text = "foobar body"
+  var resp1: Response
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
-    await (
-      tc.get("/") and
-      tc.reply(headers, text)
-    )
-  doAssert tc.resps[0].headers == headers
-  doAssert tc.resps[0].text == text
+    let get1 = tc.client.get("/")
+    let rep1 = tc.reply(headers, text)
+    resp1 = await get1
+    await rep1
+  doAssert resp1.headers == headers
+  doAssert resp1.text == text
 
 testAsync "multiple responses":
   const
@@ -59,47 +60,29 @@ testAsync "multiple responses":
     text = "foo body"
     headers2 = ":status: 200\r\nbar: bar\r\n"
     text2 = "bar body"
+  var resp1, resp2: Response
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
-    await (
-      tc.get("/") and
-      tc.reply(headers, text) and
-      tc.get("/") and
-      tc.reply(headers2, text2)
-    )
-  doAssert tc.resps[0].headers == headers
-  doAssert tc.resps[0].text == text
-  doAssert tc.resps[1].headers == headers2
-  doAssert tc.resps[1].text == text2
-
-testAsync "multiple responses unordered":
-  const
-    headers = ":status: 200\r\nfoo: foo\r\n"
-    text = "foo body"
-    headers2 = ":status: 200\r\nbar: bar\r\n"
-    text2 = "bar body"
-  var tc = newTestClient("foo.bar")
-  withConnection tc:
-    await tc.checkHandshake()
-    await (
-      tc.get("/") and
-      tc.get("/") and
-      tc.reply(headers, text) and
-      tc.reply(headers2, text2)
-    )
-  doAssert tc.resps[0].headers == headers
-  doAssert tc.resps[0].text == text
-  doAssert tc.resps[1].headers == headers2
-  doAssert tc.resps[1].text == text2
+    let get1 = tc.client.get("/")
+    let get2 = tc.client.get("/")
+    let rep1 = tc.reply(headers, text)
+    let rep2 = tc.reply(headers2, text2)
+    resp1 = await get1
+    resp2 = await get2
+    await (rep1 and rep2)
+  doAssert resp1.headers == headers
+  doAssert resp1.text == text
+  doAssert resp2.headers == headers2
+  doAssert resp2.text == text2
 
 testAsync "simple request":
   var frm1: Frame
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
     await (
-      tc.get("/") and
+      tc.client.get("/") and
       tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
     )
     frm1 = await tc.sent()
@@ -116,14 +99,14 @@ testAsync "simple request":
 testAsync "multiple requests":
   var frm1, frm2, frm3: Frame
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
     await (
-      tc.get("/1") and
+      tc.client.get("/1") and
       tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
     )
     await (
-      tc.get("/2") and
+      tc.client.get("/2") and
       tc.reply(":status: 200\r\nbar: bar\r\n", "bar")
     )
     frm1 = await tc.sent()
@@ -156,11 +139,11 @@ testAsync "response with bad header compression":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
     try:
       await (
-        tc.get("/") and
+        tc.client.get("/") and
         tc.replyBadHeaders()
       )
     except HyperxConnectionError as err:
@@ -183,19 +166,21 @@ testAsync "response with headers prio":
     text = "foo body"
     headers2 = ":status: 200\r\nbar: bar\r\n"
     text2 = "bar body"
+  var resp1, resp2: Response
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
-    await (
-      tc.get("/") and
-      tc.replyPrio(headers, text) and
-      tc.get("/") and
-      tc.reply(headers2, text2)
-    )
-  doAssert tc.resps[0].headers == headers
-  doAssert tc.resps[0].text == text
-  doAssert tc.resps[1].headers == headers2
-  doAssert tc.resps[1].text == text2
+    let get1 = tc.client.get("/")
+    let get2 = tc.client.get("/")
+    let rep1 = tc.replyPrio(headers, text)
+    let rep2 = tc.reply(headers2, text2)
+    resp1 = await get1
+    resp2 = await get2
+    await (rep1 and rep2)
+  doAssert resp1.headers == headers
+  doAssert resp1.text == text
+  doAssert resp2.headers == headers2
+  doAssert resp2.text == text2
 
 testAsync "response with bad prio length":
   proc replyPrio(tc: TestClientContext) {.async.} =
@@ -206,11 +191,11 @@ testAsync "response with bad prio length":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
     try:
       await (
-        tc.get("/") and
+        tc.client.get("/") and
         tc.replyPrio()
       )
     except HyperxConnectionError as err:
@@ -233,19 +218,21 @@ testAsync "response with headers padding":
     text = "foo body"
     headers2 = ":status: 200\r\nbar: bar\r\n"
     text2 = "bar body"
+  var resp1, resp2: Response
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
-    await (
-      tc.get("/") and
-      tc.replyPadding(headers, text) and
-      tc.get("/") and
-      tc.reply(headers2, text2)
-    )
-  doAssert tc.resps[0].headers == headers
-  doAssert tc.resps[0].text == text
-  doAssert tc.resps[1].headers == headers2
-  doAssert tc.resps[1].text == text2
+    let get1 = tc.client.get("/")
+    let get2 = tc.client.get("/")
+    let rep1 = tc.replyPadding(headers, text)
+    let rep2 = tc.reply(headers2, text2)
+    resp1 = await get1
+    resp2 = await get2
+    await (rep1 and rep2)
+  doAssert resp1.headers == headers
+  doAssert resp1.text == text
+  doAssert resp2.headers == headers2
+  doAssert resp2.text == text2
 
 testAsync "response with bad over padding length":
   proc replyPadding(tc: TestClientContext) {.async.} =
@@ -256,16 +243,17 @@ testAsync "response with bad over padding length":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
     try:
       await (
-        tc.get("/") and
+        tc.client.get("/") and
         tc.replyPadding()
       )
     except HyperxConnectionError as err:
       errorMsg = err.msg
   doAssert "PROTOCOL_ERROR" in errorMsg
+
 testAsync "response with bad missing padding length":
   proc replyPadding(tc: TestClientContext) {.async.} =
     let frm1 = tc.frame(
@@ -274,11 +262,11 @@ testAsync "response with bad missing padding length":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
     try:
       await (
-        tc.get("/") and
+        tc.client.get("/") and
         tc.replyPadding()
       )
     except HyperxConnectionError as err:
@@ -288,15 +276,15 @@ testAsync "response with bad missing padding length":
 testAsync "header table is populated":
   var frm1: Frame
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
     await (
-      tc.get("/foo") and
+      tc.client.get("/foo") and
       tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
     )
     frm1 = await tc.sent()
-  doAssert tc.headersDec.len == 4
-  doAssert $tc.headersDec ==
+  doAssert tc.peer.headersDec.len == 4
+  doAssert $tc.peer.headersDec ==
     "accept: */*\r\L" &
     "user-agent: " & userAgent & "\r\L" &
     ":authority: foo.bar\r\L" &
@@ -318,12 +306,12 @@ testAsync "header table size setting is applied":
     await tc.reply(frm1)
   var frm1: Frame
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
     await tc.recvTableSizeSetting(0)
     await tc.checkTableSizeAck()
     await (
-      tc.get("/foo") and
+      tc.client.get("/foo") and
       tc.reply(":status: 200\r\nfoo: foo\r\n", "bar")
     )
     frm1 = await tc.sent()
@@ -331,7 +319,7 @@ testAsync "header table size setting is applied":
     #frm2 = await tc.sent()
     # XXX ack window size update
     #frm3 = await tc.sent()
-  doAssert tc.headersDec.len == 0
+  doAssert tc.peer.headersDec.len == 0
   doAssert frm1.sid.int == 1
   doAssert frm1.typ == frmtHeaders
   doAssert frm1.payload.toString ==
@@ -347,9 +335,9 @@ testAsync "response stream":
   const text = "foobar body"
   let content = newStringRef()
   var tc = newTestClient("foo.bar")
-  withConnection tc:
+  withConnection tc.client:
     await tc.checkHandshake()
-    let strm = tc.c.newClientStream()
+    let strm = tc.client.newClientStream()
     withStream strm:
       await strm.sendHeaders(hmGet, "/")
       await tc.reply(headers, text)
@@ -357,4 +345,3 @@ testAsync "response stream":
       while not strm.ended:
         await strm.recvBody(content)
   doAssert content[] == headers & text
-

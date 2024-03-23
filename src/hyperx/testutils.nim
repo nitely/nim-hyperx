@@ -38,24 +38,25 @@ proc frame*(
   for f in flags:
     result.flags.incl f
 
-# XXX
-# client: ClientContext
-# peer: PeerContext
-# remove resps
 type
-  TestClientContext* = ref object
-    c*: ClientContext
-    sid: int
-    resps*: seq[Response]
+  PeerContext = ref object
     headersEnc*, headersDec*: DynHeaders
+  TestClientContext* = ref object
+    client*: ClientContext
+    peer*: PeerContext
+    sid*: int
 
-func newTestClient*(hostname: string): TestClientContext =
-  result = TestClientContext(
-    c: newClient(hostname, Port 443),
-    sid: 1,
-    resps: newSeq[Response](),
+func newPeerContext(): PeerContext =
+  PeerContext(
     headersEnc: initDynHeaders(4096),
     headersDec: initDynHeaders(4096)
+  )
+
+func newTestClient*(hostname: string): TestClientContext =
+  TestClientContext(
+    client: newClient(hostname, Port 443),
+    peer: newPeerContext(),
+    sid: 1
   )
 
 proc frame*(
@@ -71,15 +72,8 @@ proc hencode*(tc: TestClientContext, hs: string): string =
     if h.len == 0:
       continue
     let parts = h.split(": ", 1)
-    discard hencode(parts[0], parts[1], tc.headersEnc, resp)
+    discard hencode(parts[0], parts[1], tc.peer.headersEnc, resp)
   result = resp.toString
-
-template withConnection*(tc: TestClientContext, body: untyped): untyped =
-  withConnection tc.c:
-    body
-
-proc get*(tc: TestClientContext, path: string) {.async.} =
-  tc.resps.add await tc.c.get(path)
 
 proc reply*(
   tc: TestClientContext,
@@ -90,34 +84,34 @@ proc reply*(
     frmtHeaders, tc.sid.FrmSid, @[frmfEndHeaders]
   )
   frm1.add hencode(tc, headers).toBytes
-  await tc.c.putRecvTestData frm1.s
+  await tc.client.putRecvTestData frm1.s
   var frm2 = frame(
     frmtData, tc.sid.FrmSid, @[frmfEndStream]
   )
   frm2.add text.toBytes
-  await tc.c.putRecvTestData frm2.s
+  await tc.client.putRecvTestData frm2.s
   tc.sid += 2
 
 proc reply*(
   tc: TestClientContext,
   frm: Frame
 ) {.async.} =
-  await tc.c.putRecvTestData frm.s
+  await tc.client.putRecvTestData frm.s
 
 proc sent*(tc: TestClientContext, size: int): Future[seq[byte]] {.async.} =
-  result = await tc.c.sentTestData(size)
+  result = await tc.client.sentTestData(size)
 
 proc sent*(tc: TestClientContext): Future[Frame] {.async.} =
   result = newEmptyFrame()
-  result.s = await tc.c.sentTestData(frmHeaderSize)
+  result.s = await tc.client.sentTestData(frmHeaderSize)
   doAssert result.len == frmHeaderSize
   var payload = newSeq[byte]()
   if result.payloadLen.int > 0:
-    payload = await tc.c.sentTestData(result.payloadLen.int)
+    payload = await tc.client.sentTestData(result.payloadLen.int)
     doAssert payload.len == result.payloadLen.int
   if result.typ == frmtHeaders:
     var ds = initDecodedStr()
-    hdecodeAll(payload, tc.headersDec, ds)
+    hdecodeAll(payload, tc.peer.headersDec, ds)
     result.add toBytes($ds)
   else:
     result.add payload
