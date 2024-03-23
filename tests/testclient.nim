@@ -351,9 +351,7 @@ testAsync "response stream":
     await tc.checkHandshake()
     let strm = tc.c.newClientStream()
     withStream strm:
-      await strm.sendHeaders(
-        httpMethod = hmGet, path = "/"
-      )
+      await strm.sendHeaders(hmGet, "/")
       await tc.reply(headers, text)
       await strm.recvHeaders(content)
       while not strm.ended:

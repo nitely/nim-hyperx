@@ -124,19 +124,17 @@ else:
   type MyAsyncSocket = AsyncSocket
 
 type
-  MsgData = object
-    frm: Frame
   Stream = object
     # XXX: add body stream, if set stream data through it
     id: StreamId
     state: StreamState
-    msgs: QueueAsync[MsgData]
+    msgs: QueueAsync[Frame]
 
 proc initStream(id: StreamId): Stream {.raises: [].} =
   result = Stream(
     id: id,
     state: strmIdle,
-    msgs: newQueue[MsgData](1)
+    msgs: newQueue[Frame](1)
   )
 
 type
@@ -196,7 +194,7 @@ type
     headersEnc, headersDec: DynHeaders
     streams: Streams
     currStreamId: StreamId
-    sendMsgs, recvMsgs: QueueAsync[MsgData]
+    sendMsgs, recvMsgs: QueueAsync[Frame]
     maxPeerStrmIdSeen: StreamId
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
@@ -223,8 +221,8 @@ proc newClient*(
     headersDec: initDynHeaders(stgHeaderTableSize.int),
     streams: initStreams(),
     currStreamId: 1.StreamId,
-    recvMsgs: newQueue[MsgData](10),
-    sendMsgs: newQueue[MsgData](10),
+    recvMsgs: newQueue[Frame](10),
+    sendMsgs: newQueue[Frame](10),
     maxPeerStrmIdSeen: 0.StreamId,
     peerMaxConcurrentStreams: stgMaxConcurrentStreams,
     peerWindowSize: stgInitialWindowSize,
@@ -287,7 +285,7 @@ proc write(client: ClientContext, frm: Frame) {.async.} =
     frm.add payload
   if frm.sid != frmSidMain:
     client.stream(frm.sid).doTransitionSend frm
-  await client.sendMsgs.put MsgData(frm: frm)
+  await client.sendMsgs.put frm
 
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
@@ -306,9 +304,8 @@ func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError
   #  # XXX close streams < s.id in idle state
   #  discard
 
-proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
-  template frm: untyped = result.frm
-  result = await client.stream(sid).msgs.pop()
+proc readNaked(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
+  let frm = await client.stream(sid).msgs.pop()
   doAssert sid == frm.sid.StreamId
   # this may throw a conn error
   client.stream(sid).doTransitionRecv frm
@@ -318,8 +315,9 @@ proc readNaked(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} 
       frm.payloadLen.int > 0 and
       frmfEndStream notin frm.flags:
     await client.write newWindowUpdateFrame(sid.FrmSid, frm.payloadLen.int)
+  return frm
 
-proc read(client: ClientContext, sid: StreamId): Future[MsgData] {.async.} =
+proc read(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
   try:
     result = await client.readNaked(sid)
   except QueueClosedError as err:
@@ -463,10 +461,9 @@ proc connect(client: ClientContext) {.async.} =
 proc sendTaskNaked(client: ClientContext) {.async.} =
   ## Send frames
   ## Meant to be asyncCheck'ed
-  template frm: untyped = msg.frm
   doAssert client.isConnected
   while client.isConnected:
-    let msg = await client.sendMsgs.pop()
+    let frm = await client.sendMsgs.pop()
     doAssert frm.payloadLen.int == frm.payload.len
     doAssert frm.payload.len <= client.peerMaxFrameSize.int
     check not client.sock.isClosed, newConnClosedError()
@@ -562,9 +559,8 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
   ## Note decoding headers must be done in message received order,
   ## so it needs to be done here. Same for processing the main
   ## stream messages.
-  template frm: untyped = msg.frm
   while client.isConnected:
-    let msg = await client.recvMsgs.pop()
+    let frm = await client.recvMsgs.pop()
     debugInfo "recv data on stream " & $frm.sid.int
     if frm.sid == frmSidMain:
       # Settings need to be applied before consuming following messages
@@ -591,7 +587,7 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       continue
     let stream = client.streams.get frm.sid.StreamId
     try:
-      await stream.msgs.put msg
+      await stream.msgs.put frm
     except QueueClosedError:
       debugInfo "stream is closed " & $frm.sid.int
 
@@ -624,8 +620,8 @@ proc recvTaskNaked(client: ClientContext) {.async.} =
   doAssert client.isConnected
   while client.isConnected:
     var frm = newFrame()
-    await client.read(frm)
-    await client.recvMsgs.put MsgData(frm: frm)
+    await client.read frm
+    await client.recvMsgs.put frm
 
 proc recvTask(client: ClientContext) {.async.} =
   try:
@@ -737,27 +733,27 @@ proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
     await client.write req.dataFrm
   # https://httpwg.org/specs/rfc9113.html#HttpFraming
   while true:
-    let msg = await client.read(sid)
-    check msg.frm.typ == frmtHeaders, newStrmError(errProtocolError)
-    check msg.frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
-    #check msg.frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
-    if msg.frm.payload[9] == '1'.byte:
-      check frmfEndStream notin msg.frm.flags, newStrmError(errProtocolError)
+    let frm = await client.read(sid)
+    check frm.typ == frmtHeaders, newStrmError(errProtocolError)
+    check frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
+    #check frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
+    if frm.payload[9] == '1'.byte:
+      check frmfEndStream notin frm.flags, newStrmError(errProtocolError)
     else:
-      result.headers.add msg.frm.payload
-      if frmfEndStream in msg.frm.flags:
+      result.headers.add frm.payload
+      if frmfEndStream in frm.flags:
         return
       break
   while true:
-    let msg = await client.read(sid)
+    let frm = await client.read(sid)
     # XXX store trailer headers
     # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
-    if msg.frm.typ == frmtHeaders:
-      check frmfEndStream in msg.frm.flags, newStrmError(errProtocolError)
+    if frm.typ == frmtHeaders:
+      check frmfEndStream in frm.flags, newStrmError(errProtocolError)
       return
-    check msg.frm.typ == frmtData, newStrmError(errProtocolError)
-    result.data.s.add msg.frm.payload
-    if frmfEndStream in msg.frm.flags:
+    check frm.typ == frmtData, newStrmError(errProtocolError)
+    result.data.s.add frm.payload
+    if frmfEndStream in frm.flags:
       return
 
 type
@@ -945,33 +941,33 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   doAssert strm.state == csStateSentEnded
   strm.state = csStateRecvHeaders
   # https://httpwg.org/specs/rfc9113.html#HttpFraming
-  var msg: MsgData
+  var frm: Frame
   while true:
-    msg = await strm.client.read(strm.sid)
-    check msg.frm.typ == frmtHeaders, newStrmError(errProtocolError)
-    check msg.frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
-    #check msg.frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
-    if msg.frm.payload[9] == '1'.byte:
-      check frmfEndStream notin msg.frm.flags, newStrmError(errProtocolError)
+    frm = await strm.client.read(strm.sid)
+    check frm.typ == frmtHeaders, newStrmError(errProtocolError)
+    check frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
+    #check frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
+    if frm.payload[9] == '1'.byte:
+      check frmfEndStream notin frm.flags, newStrmError(errProtocolError)
     else:
       break
-  data[].add msg.frm.payload
-  if frmfEndStream in msg.frm.flags:
+  data[].add frm.payload
+  if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
 
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
   strm.state = csStateRecvData
-  let msg = await strm.client.read(strm.sid)
+  let frm = await strm.client.read(strm.sid)
   # XXX store trailer headers
   # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
-  if msg.frm.typ == frmtHeaders:
-    check frmfEndStream in msg.frm.flags, newStrmError(errProtocolError)
+  if frm.typ == frmtHeaders:
+    check frmfEndStream in frm.flags, newStrmError(errProtocolError)
     strm.state = csStateRecvEnded
     return
-  check msg.frm.typ == frmtData, newStrmError(errProtocolError)
-  data[].add msg.frm.payload
-  if frmfEndStream in msg.frm.flags:
+  check frm.typ == frmtData, newStrmError(errProtocolError)
+  data[].add frm.payload
+  if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
 
 template withStream*(strm: ClientStream, body: untyped): untyped =
