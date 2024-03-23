@@ -38,9 +38,13 @@ proc frame*(
   for f in flags:
     result.flags.incl f
 
+# XXX
+# client: ClientContext
+# peer: PeerContext
+# remove resps
 type
   TestClientContext* = ref object
-    c: ClientContext
+    c*: ClientContext
     sid: int
     resps*: seq[Response]
     headersEnc*, headersDec*: DynHeaders

@@ -22,6 +22,10 @@ func toString(s: openArray[byte]): string =
   for c in s:
     result.add c.char
 
+func newStringRef(): ref string =
+  new result
+  result[] = ""
+
 proc checkHandshake(tc: TestClientContext) {.async.} =
   const preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".toBytes
   let data = await tc.sent(preface.len)
@@ -341,18 +345,18 @@ testAsync "header table size setting is applied":
 testAsync "response stream":
   const headers = ":status: 200\r\nfoo: foo\r\n"
   const text = "foobar body"
+  let content = newStringRef()
   var tc = newTestClient("foo.bar")
   withConnection tc:
     await tc.checkHandshake()
-    let strm = newStream(tc)
+    let strm = tc.c.newClientStream()
     withStream strm:
-      let r = strm.get("/")
-      let headers = await r.headers()
-      let data: ref string
-      while not r.body.finished:
-        await r.body.recvInto data
-    # closing the stream without consuming it
-    # should be fine; closes the stream queue
-    # and the rest of frames get discarded
-    # a goaway frame must be sent to tell the peer
-    # to stop sending
+      await strm.sendHeaders(
+        httpMethod = hmGet, path = "/"
+      )
+      await tc.reply(headers, text)
+      await strm.recvHeaders(content)
+      while not strm.ended:
+        await strm.recvBody(content)
+  doAssert content[] == headers & text
+
