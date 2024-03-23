@@ -65,8 +65,8 @@ testAsync "multiple responses":
   withConnection tc.client:
     await tc.checkHandshake()
     let get1 = tc.client.get("/")
-    let get2 = tc.client.get("/")
     let rep1 = tc.reply(headers, text)
+    let get2 = tc.client.get("/")
     let rep2 = tc.reply(headers2, text2)
     resp1 = await get1
     resp2 = await get2
@@ -171,8 +171,8 @@ testAsync "response with headers prio":
   withConnection tc.client:
     await tc.checkHandshake()
     let get1 = tc.client.get("/")
-    let get2 = tc.client.get("/")
     let rep1 = tc.replyPrio(headers, text)
+    let get2 = tc.client.get("/")
     let rep2 = tc.reply(headers2, text2)
     resp1 = await get1
     resp2 = await get2
@@ -223,8 +223,8 @@ testAsync "response with headers padding":
   withConnection tc.client:
     await tc.checkHandshake()
     let get1 = tc.client.get("/")
-    let get2 = tc.client.get("/")
     let rep1 = tc.replyPadding(headers, text)
+    let get2 = tc.client.get("/")
     let rep2 = tc.reply(headers2, text2)
     resp1 = await get1
     resp2 = await get2
@@ -345,3 +345,54 @@ testAsync "response stream":
       while not strm.ended:
         await strm.recvBody(content)
   doAssert content[] == headers & text
+
+testAsync "request stream":
+  const headers = ":status: 200\r\nfoo: foo\r\n"
+  const text = "foobar body"
+  const data1 = "12345"
+  const data2 = "67890"
+  var frm1, frm2, frm3: Frame
+  let content = newStringRef()
+  var tc = newTestClient("foo.bar")
+  withConnection tc.client:
+    await tc.checkHandshake()
+    let strm = tc.client.newClientStream()
+    withStream strm:
+      await strm.sendHeaders(
+        hmPost, "/foo",
+        contentLen = data1.len+data2.len
+      )
+      content[].add data1
+      await strm.sendBody(content)
+      content[].setLen 0
+      content[].add data2
+      await strm.sendBody(content, finish = true)
+      await tc.reply(headers, text)
+      content[].setLen 0
+      await strm.recvHeaders(content)
+      while not strm.ended:
+        await strm.recvBody(content)
+      frm1 = await tc.sent()
+      frm2 = await tc.sent()
+      frm3 = await tc.sent()
+  doAssert content[] == headers & text
+  doAssert frm1.sid.int == 1
+  doAssert frm1.typ == frmtHeaders
+  doAssert frm1.payload.toString ==
+    ":method: POST\r\L" &
+    ":scheme: https\r\L" &
+    ":path: /foo\r\L" &
+    ":authority: foo.bar\r\L" &
+    "user-agent: " & userAgent & "\r\L" &
+    "accept: */*\r\L" &
+    "content-type: application/json\r\L" &
+    "content-length: 10\r\L"
+  doAssert frmfEndStream notin frm1.flags
+  doAssert frm2.typ == frmtData
+  doAssert frm2.sid.int == 1
+  doAssert frm2.payload.toString == data1
+  doAssert frmfEndStream notin frm2.flags
+  doAssert frm3.typ == frmtData
+  doAssert frm3.sid.int == 1
+  doAssert frm3.payload.toString == data2
+  doAssert frmfEndStream in frm3.flags
