@@ -337,3 +337,22 @@ testAsync "header table size setting is applied":
     ":authority: foo.bar\r\L" &
     "user-agent: " & userAgent & "\r\L" &
     "accept: */*\r\L"
+
+testAsync "response stream":
+  const headers = ":status: 200\r\nfoo: foo\r\n"
+  const text = "foobar body"
+  var tc = newTestClient("foo.bar")
+  withConnection tc:
+    await tc.checkHandshake()
+    let strm = newStream(tc)
+    withStream strm:
+      let r = strm.get("/")
+      let headers = await r.headers()
+      let data: ref string
+      while not r.body.finished:
+        await r.body.recvInto data
+    # closing the stream without consuming it
+    # should be fine; closes the stream queue
+    # and the rest of frames get discarded
+    # a goaway frame must be sent to tell the peer
+    # to stop sending

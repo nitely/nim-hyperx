@@ -787,6 +787,8 @@ proc request(
   accept = defaultAccept,
   contentType = defaultContentType
 ): Future[Response] {.async.} =
+  # XXX move to its own func and call from request
+  #     no await calls in between
   var req = newRequest()
   client.addHeader(req, ":method", $httpMethod)
   client.addHeader(req, ":scheme", "https")
@@ -844,6 +846,92 @@ proc delete*(
   path: string
 ): Future[Response] {.async.} =
   result = await request(client, hmDelete, path)
+
+type
+  ClientStream = ref object
+    headers: QueueAsync[Frame]
+    body: QueueAsync[Frame]
+
+func newClientStream(): ClientStream =
+  ClientStream(
+    headers: newQueue[Frame](1),
+    body: newQueue[Frame](1)
+  )
+
+func close(strm: ClientStream) =
+  strm.headers.close()
+  strm.body.close()
+  # strm.client.close(strm.sid)
+
+func finished(q: QueueAsync[Frame]): bool =
+  q.isClosed
+
+proc recvInto(q: QueueAsync[Frame], data: ref string) {.async.} =
+  let frm = await q.pop()
+  doAssert frm.typ in {frmtHeaders, frmtData}
+  if frmfEndStream in frm.flags:
+    q.close()
+  data.add frm.payload
+
+template withStream(strm: ClientStream, body: untyped): untyped =
+  var recvStreamFut: Future[void]
+  try:
+    recvStreamFut = recvStream(strm)
+    block:
+      body
+  finally:
+    strm.close()
+    await recvStreamFut
+
+proc stream*(
+  client: ClientContext,
+  path: string
+): Future[ClientStream] {.async.} =
+  result = newClientStream()
+  var req = newRequest()
+  client.addHeader(req, ":method", "GET")
+  client.addHeader(req, ":scheme", "https")
+  client.addHeader(req, ":path", path)
+  client.addHeader(req, ":authority", client.hostname)
+  client.addHeader(req, "user-agent", userAgent)
+  client.addHeader(req, "accept", accept)
+  if not client.isConnected:
+    raise newConnClosedError()
+  let sid = client.openStream()
+  defer: client.close(sid)
+  doAssert sid.FrmSid != frmSidMain
+  req.headersFrm.setTyp frmtHeaders
+  req.headersFrm.setSid sid.FrmSid
+  req.headersFrm.setPayloadLen req.headersFrm.payloadSize.FrmPayloadLen
+  req.headersFrm.flags.incl frmfEndHeaders
+  req.headersFrm.flags.incl frmfEndStream
+  await client.write req.headersFrm
+  # https://httpwg.org/specs/rfc9113.html#HttpFraming
+  while true:
+    let msg = await client.read(sid)
+    check msg.frm.typ == frmtHeaders, newStrmError(errProtocolError)
+    check msg.frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
+    #check msg.frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
+    if msg.frm.payload[9] == '1'.byte:
+      check frmfEndStream notin msg.frm.flags, newStrmError(errProtocolError)
+    else:
+      result.headers.add msg.frm.payload
+      if frmfEndStream in msg.frm.flags:
+        return
+      break
+  while true:
+    let msg = await client.read(sid)
+    # XXX store trailer headers
+    # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
+    if msg.frm.typ == frmtHeaders:
+      check frmfEndStream in msg.frm.flags, newStrmError(errProtocolError)
+      return
+    check msg.frm.typ == frmtData, newStrmError(errProtocolError)
+    result.data.s.add msg.frm.payload
+    if frmfEndStream in msg.frm.flags:
+      return
+  
+  
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =
