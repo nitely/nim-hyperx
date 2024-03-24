@@ -105,7 +105,6 @@ else:
 
 type
   Stream = object
-    # XXX: add body stream, if set stream data through it
     id: StreamId
     state: StreamState
     msgs: QueueAsync[Frame]
@@ -249,7 +248,7 @@ func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   doAssert s.state != strmInvalid
 
 # XXX continuations need a mechanism
-#     similar to streamBody i.e: if frm without end is
+#     similar to a stream i.e: if frm without end is
 #     found consume from streamContinuations
 proc write(client: ClientContext, frm: Frame) {.async.} =
   ## Frames passed cannot be reused because they are references
@@ -380,8 +379,6 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   payloadLen -= paddingLen
   check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
   if payloadLen > 0:
-    # XXX recv into Stream.bodyStream if typ is frmtData
-    # XXX recv in chunks and discard if stream does not exists
     frm.grow payloadLen
     check not client.sock.isClosed, newConnClosedError()
     let payloadRln = await client.sock.recvInto(
@@ -863,8 +860,8 @@ proc request(
     )
     let body = new string
     body[] = ""
-    body[].add data
     if data.len > 0:
+      body[].add data
       await strm.sendBody(body, finish = true)
     body[].setLen 0
     await strm.recvHeaders(body)
