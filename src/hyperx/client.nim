@@ -98,26 +98,6 @@ func decode(
     debugInfo err.msg
     raise newConnError(errCompressionError)
 
-type
-  Payload* = ref object
-    s: seq[byte]
-  Response* = ref object
-    headers*: string
-    data*: Payload
-
-func newPayload(): Payload {.raises: [].} =
-  Payload()
-
-func newResponse*(): Response {.raises: [].} =
-  Response(
-    headers: "",
-    data: newPayload()
-  )
-
-func text*(r: Response): string {.raises: [].} =
-  result = ""
-  result.add r.data.s
-
 when defined(hyperxTest):
   type MyAsyncSocket = TestSocket
 else:
@@ -691,72 +671,6 @@ template withConnection*(
           debugInfo err.msg
 
 type
-  Request = object
-    headersFrm: Frame
-    dataFrm: Frame
-
-func newRequest(): Request {.raises: [].} =
-  Request(
-    headersFrm: newFrame(),
-    dataFrm: newEmptyFrame()
-  )
-
-func addHeader(client: ClientContext, r: Request, n, v: string) {.raises: [HyperxError].} =
-  ## headers must be added synchronously, no await in between,
-  ## or else a table resize could occur in the meantime
-  try:
-    discard hencode(n, v, client.headersEnc, r.headersFrm.s, huffman = false)
-  except HpackError as err:
-    raise newException(HyperxError, err.msg)
-
-# XXX remove
-proc request(client: ClientContext, req: Request): Future[Response] {.async.} =
-  debugInfo "request"
-  if not client.isConnected:
-    raise newConnClosedError()
-  result = newResponse()
-  let sid = client.openStream()
-  defer: client.close(sid)
-  doAssert sid.FrmSid != frmSidMain
-  req.headersFrm.setTyp frmtHeaders
-  req.headersFrm.setSid sid.FrmSid
-  req.headersFrm.setPayloadLen req.headersFrm.payloadSize.FrmPayloadLen
-  req.headersFrm.flags.incl frmfEndHeaders
-  if req.dataFrm.isEmpty:
-    req.headersFrm.flags.incl frmfEndStream
-  await client.write req.headersFrm
-  if not req.dataFrm.isEmpty:
-    req.dataFrm.setTyp frmtData
-    req.dataFrm.setSid sid.FrmSid
-    req.dataFrm.setPayloadLen req.dataFrm.payloadSize.FrmPayloadLen
-    req.dataFrm.flags.incl frmfEndStream
-    await client.write req.dataFrm
-  # https://httpwg.org/specs/rfc9113.html#HttpFraming
-  while true:
-    let frm = await client.read(sid)
-    check frm.typ == frmtHeaders, newStrmError(errProtocolError)
-    check frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
-    #check frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
-    if frm.payload[9] == '1'.byte:
-      check frmfEndStream notin frm.flags, newStrmError(errProtocolError)
-    else:
-      result.headers.add frm.payload
-      if frmfEndStream in frm.flags:
-        return
-      break
-  while true:
-    let frm = await client.read(sid)
-    # XXX store trailer headers
-    # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
-    if frm.typ == frmtHeaders:
-      check frmfEndStream in frm.flags, newStrmError(errProtocolError)
-      return
-    check frm.typ == frmtData, newStrmError(errProtocolError)
-    result.data.s.add frm.payload
-    if frmfEndStream in frm.flags:
-      return
-
-type
   HttpMethod* = enum
     hmPost, hmGet, hmPut, hmHead, hmOptions, hmDelete, hmPatch
 
@@ -774,76 +688,6 @@ const
   defaultUserAgent = "Nim - HyperX"
   defaultAccept = "*/*"
   defaultContentType = "application/json"
-
-# XXX remove
-proc request(
-  client: ClientContext,
-  httpMethod: HttpMethod,
-  path: string,
-  data: seq[byte] = @[],
-  userAgent = defaultUserAgent,
-  accept = defaultAccept,
-  contentType = defaultContentType
-): Future[Response] {.async.} =
-  # XXX move to its own func and call from request
-  #     no await calls in between
-  var req = newRequest()
-  client.addHeader(req, ":method", $httpMethod)
-  client.addHeader(req, ":scheme", "https")
-  client.addHeader(req, ":path", path)
-  client.addHeader(req, ":authority", client.hostname)
-  # host is deprecated in http2 and some servers return a protocol error
-  # client.addHeader(req, "host", client.hostname)
-  client.addHeader(req, "user-agent", userAgent)
-  if httpMethod in {hmGet, hmHead}:
-    client.addHeader(req, "accept", accept)
-  if httpMethod in {hmPost, hmPut, hmPatch}:
-    client.addHeader(req, "content-type", contentType)
-    client.addHeader(req, "content-length", $data.len)
-    req.dataFrm = newFrame()
-    req.dataFrm.add data
-  result = await client.request req
-
-proc get*(
-  client: ClientContext,
-  path: string,
-  accept = defaultAccept
-): Future[Response] {.async.} =
-  result = await request(client, hmGet, path, accept = accept)
-
-proc head*(
-  client: ClientContext,
-  path: string,
-  accept = defaultAccept
-): Future[Response] {.async.} =
-  result = await request(client, hmHead, path, accept = accept)
-
-proc post*(
-  client: ClientContext,
-  path: string,
-  data: seq[byte],
-  contentType = defaultContentType
-): Future[Response] {.async.} =
-  # https://httpwg.org/specs/rfc9113.html#n-complex-request
-  result = await request(
-    client, hmPost, path, data = data, contentType = contentType
-  )
-
-proc put*(
-  client: ClientContext,
-  path: string,
-  data: seq[byte],
-  contentType = defaultContentType
-): Future[Response] {.async.} =
-  result = await request(
-    client, hmPut, path, data = data, contentType = contentType
-  )
-
-proc delete*(
-  client: ClientContext,
-  path: string
-): Future[Response] {.async.} =
-  result = await request(client, hmDelete, path)
 
 type
   ClientStreamState = enum
@@ -897,16 +741,14 @@ proc sendHeaders*(
   template client: untyped = strm.client
   doAssert strm.state == csStateOpened
   strm.state = csStateSentHeaders
-  #if not client.isConnected:
-  #  raise newConnClosedError()
   var frm = newFrame()
   client.addHeader(frm, ":method", $httpMethod)
   client.addHeader(frm, ":scheme", "https")
   client.addHeader(frm, ":path", path)
   client.addHeader(frm, ":authority", client.hostname)
   client.addHeader(frm, "user-agent", userAgent)
-  client.addHeader(frm, "accept", accept)
   if httpMethod in {hmGet, hmHead}:
+    doAssert contentLen == 0
     client.addHeader(frm, "accept", accept)
   if httpMethod in {hmPost, hmPut, hmPatch}:
     client.addHeader(frm, "content-type", contentType)
@@ -979,6 +821,99 @@ template withStream*(strm: ClientStream, body: untyped): untyped =
     doAssert strm.state == csStateRecvEnded
   finally:
     strm.close()
+
+type
+  Payload* = ref object
+    s: seq[byte]
+  Response* = ref object
+    headers*: string
+    data*: Payload
+
+func newPayload(): Payload {.raises: [].} =
+  Payload()
+
+func newResponse*(): Response {.raises: [].} =
+  Response(
+    headers: "",
+    data: newPayload()
+  )
+
+func text*(r: Response): string {.raises: [].} =
+  result = ""
+  result.add r.data.s
+
+proc request(
+  client: ClientContext,
+  httpMethod: HttpMethod,
+  path: string,
+  data: seq[byte] = @[],
+  userAgent = defaultUserAgent,
+  accept = defaultAccept,
+  contentType = defaultContentType
+): Future[Response] {.async.} =
+  result = newResponse()
+  let strm = client.newClientStream()
+  withStream strm:
+    await strm.sendHeaders(
+      httpMethod, path,
+      userAgent = userAgent,
+      accept = accept,
+      contentType = contentType,
+      contentLen = data.len
+    )
+    let body = new string
+    body[] = ""
+    body[].add data
+    if data.len > 0:
+      await strm.sendBody(body, finish = true)
+    body[].setLen 0
+    await strm.recvHeaders(body)
+    result.headers.add body[]
+    body[].setLen 0
+    while not strm.ended:
+      await strm.recvBody(body)
+    result.data.s.add body[]
+
+proc get*(
+  client: ClientContext,
+  path: string,
+  accept = defaultAccept
+): Future[Response] {.async.} =
+  result = await request(client, hmGet, path, accept = accept)
+
+proc head*(
+  client: ClientContext,
+  path: string,
+  accept = defaultAccept
+): Future[Response] {.async.} =
+  result = await request(client, hmHead, path, accept = accept)
+
+proc post*(
+  client: ClientContext,
+  path: string,
+  data: seq[byte],
+  contentType = defaultContentType
+): Future[Response] {.async.} =
+  # https://httpwg.org/specs/rfc9113.html#n-complex-request
+  result = await request(
+    client, hmPost, path, data = data, contentType = contentType
+  )
+
+proc put*(
+  client: ClientContext,
+  path: string,
+  data: seq[byte],
+  contentType = defaultContentType
+): Future[Response] {.async.} =
+  result = await request(
+    client, hmPut, path, data = data, contentType = contentType
+  )
+
+proc delete*(
+  client: ClientContext,
+  path: string
+): Future[Response] {.async.} =
+  result = await request(client, hmDelete, path)
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =

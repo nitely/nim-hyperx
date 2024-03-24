@@ -384,7 +384,6 @@ testAsync "request stream":
     ":path: /foo\r\L" &
     ":authority: foo.bar\r\L" &
     "user-agent: " & userAgent & "\r\L" &
-    "accept: */*\r\L" &
     "content-type: application/json\r\L" &
     "content-length: 10\r\L"
   doAssert frmfEndStream notin frm1.flags
