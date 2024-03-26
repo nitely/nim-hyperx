@@ -3,11 +3,16 @@
 
 {.define: ssl.}
 
-from std/openssl import 
+from std/openssl import
+  DLLSSLName,
   SSL_CTX_set_alpn_select_cb,
   SSL_TLSEXT_ERR_NOACK,
-  SSL_TLSEXT_ERR_OK
+  SSL_TLSEXT_ERR_OK,
+  SSL_OP_ALL,
+  SSL_OP_NO_SSLv2,
+  SSL_OP_NO_SSLv3
 
+import ./clientserver
 import ./frame
 import ./stream
 import ./queue
@@ -37,6 +42,11 @@ proc sslContextCallback(
     i += inProto[i].int + 1
   return SSL_TLSEXT_ERR_NOACK
 
+# https://www.openssl.org/docs/man1.0.2/man3/SSL_CTX_set_options.html
+proc SSL_CTX_set_options(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
+const SSL_OP_NO_RENEGOTIATION = 1073741824
+const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
+
 proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   if not sslContext.isNil:
     return sslContext
@@ -49,14 +59,18 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   except Exception as err:
     raise newException(Defect, err.msg)
   doAssert sslContext != nil, "failure to initialize the SSL context"
+  # https://httpwg.org/specs/rfc9113.html#tls12features
+  discard SSL_CTX_set_options(
+    sslContext.context,
+    SSL_OP_ALL or SSL_OP_NO_SSLv2 or SSL_OP_NO_SSLv3 or
+    SSL_OP_NO_RENEGOTIATION or
+    SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
+  )
   discard SSL_CTX_set_alpn_select_cb(
     sslContext.context, sslContextCallback, nil
   )
   addQuitProc(destroySslContext)
   return sslContext
-
-type
-  MyAsyncSocket = AsyncSocket
 
 proc newMySocket(): MyAsyncSocket {.raises: [InternalOsError].} =
   try:
@@ -72,54 +86,24 @@ type
     port: Port
     isConnected: bool
 
-func newServerContext(
-  hostname: string,
-  port = Port 443
-): ServerContext =
-  ServerContext(
-    sock: newMySocket(),
-    hostname: hostname,
-    port: port
-  )
-
-type
-  ClientContext = ref object
-    sock: MyAsyncSocket
-    hostname: string
-    isConnected: bool
-    headersEnc, headersDec: DynHeaders
-    streams: Streams
-    sendMsgs, recvMsgs: QueueAsync[Frame]
-
-func newClientContext(
-  sock: MyAsyncSocket,
-  hostname: string
-): ClientContext =
-  ClientContext(
-    sock: sock,
-    hostname: hostname,
-    isConnected: true,
-    headersEnc: initDynHeaders(4096),
-    headersDec: initDynHeaders(4096),
-    streams: initStreams(),
-    recvMsgs: newQueue[Frame](10),
-    sendMsgs: newQueue[Frame](10),
-  )
-
 func listen(server: ServerContext) =
   server.sock.setSockOpt(OptReuseAddr, true)
   server.sock.bindAddr server.port
   server.sock.listen()
 
+# XXX dont allow receive push promise
+
 proc processPeer(
   sock: MyAsyncSocket,
   hostname: string  # ref
 ) {.async.} =
-  let client = newClientContext(sock, hostname)
+  let client = newClient(sock, hostname)
+  client.isConnected = true
+  client.handshake()
   var sendFut = client.sendTask()
   var recvFut = client.recvTask()
-  var reqFut = client.requestDispatcher()
-  await (sendFut and recvFut and reqFut)
+  var dispFut = client.recvDispatcher()
+  await (sendFut and recvFut and dispFut)
 
 proc serve(server: ServerContext) {.async.} =
   server.listen()

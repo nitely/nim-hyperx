@@ -422,6 +422,7 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         # maybe max table size should be a setting instead of 4096
         client.headersEnc.setSize min(value.int, stgHeaderTableSize.int)
       of frmsEnablePush:
+        # XXX servers can receive 1
         check value == 0, newConnError(errProtocolError)
       of frmsMaxConcurrentStreams:
         client.peerMaxConcurrentStreams = value
