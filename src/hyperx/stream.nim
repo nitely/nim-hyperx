@@ -1,4 +1,8 @@
+import std/tables
+
 import ./frame
+import ./queue
+import ./errors
 
 # Section 5.1
 type
@@ -146,6 +150,73 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
   of strmInvalid:
     doAssert false
     strmInvalid
+
+type
+  StreamId* = distinct uint32  # range[0 .. 31.ones.int]
+
+proc `==`*(a, b: StreamId): bool {.borrow.}
+proc `+=`*(a: var StreamId, b: StreamId) {.borrow.}
+
+type
+  Stream* = object
+    id*: StreamId
+    state*: StreamState
+    msgs*: QueueAsync[Frame]
+
+proc initStream(id: StreamId): Stream {.raises: [].} =
+  result = Stream(
+    id: id,
+    state: strmIdle,
+    msgs: newQueue[Frame](1)
+  )
+
+type
+  StreamsClosedError* = object of HyperxError
+  Streams* = object
+    t: Table[StreamId, Stream]
+    isClosed: bool
+
+func initStreams*(): Streams {.raises: [].} =
+  result = Streams(
+    t: initTable[StreamId, Stream](16),
+    isClosed: false
+  )
+
+func get*(s: var Streams, sid: StreamId): var Stream {.raises: [].} =
+  try:
+    result = s.t[sid]
+  except KeyError:
+    doAssert false, "sid is not a stream"
+
+func del*(s: var Streams, sid: StreamId) {.raises: [].} =
+  s.t.del sid
+
+func contains*(s: Streams, sid: StreamId): bool {.raises: [].} =
+  s.t.contains sid
+
+func open*(s: var Streams, sid: StreamId) {.raises: [StreamsClosedError].} =
+  doAssert sid notin s.t
+  if s.isClosed:
+    raise newException(StreamsClosedError, "Streams is closed")
+  s.t[sid] = initStream(sid)
+
+iterator values*(s: Streams): Stream {.inline.} =
+  for v in values s.t:
+    yield v
+
+proc close*(s: var Streams, sid: StreamId) {.raises: [].} =
+  if sid notin s:
+    return
+  let stream = s.get sid
+  stream.msgs.close()
+  s.del sid
+
+proc close*(s: var Streams) {.raises: [].} =
+  if s.isClosed:
+    return
+  s.isClosed = true
+  for stream in values s:
+    stream.msgs.close()
 
 when isMainModule:
   import ./utils

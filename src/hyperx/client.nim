@@ -47,12 +47,6 @@ func add(s: var string, ss: openArray[byte]) {.raises: [].} =
   for c in ss:
     s.add c.char
 
-type
-  StreamId = distinct uint32  # range[0 .. 31.ones.int]
-
-proc `==`(a, b: StreamId): bool {.borrow.}
-proc `+=`(a: var StreamId, b: StreamId) {.borrow.}
-
 from std/openssl import SSL_CTX_set_alpn_protos
 import std/tables
 import std/net
@@ -102,67 +96,6 @@ when defined(hyperxTest):
   type MyAsyncSocket = TestSocket
 else:
   type MyAsyncSocket = AsyncSocket
-
-type
-  Stream = object
-    id: StreamId
-    state: StreamState
-    msgs: QueueAsync[Frame]
-
-proc initStream(id: StreamId): Stream {.raises: [].} =
-  result = Stream(
-    id: id,
-    state: strmIdle,
-    msgs: newQueue[Frame](1)
-  )
-
-type
-  StreamsClosedError* = object of HyperxError
-  Streams = object
-    t: Table[StreamId, Stream]
-    isClosed: bool
-
-func initStreams(): Streams {.raises: [].} =
-  result = Streams(
-    t: initTable[StreamId, Stream](16),
-    isClosed: false
-  )
-
-func get(s: var Streams, sid: StreamId): var Stream {.raises: [].} =
-  try:
-    result = s.t[sid]
-  except KeyError:
-    doAssert false, "sid is not a stream"
-
-func del(s: var Streams, sid: StreamId) {.raises: [].} =
-  s.t.del sid
-
-func contains(s: Streams, sid: StreamId): bool {.raises: [].} =
-  s.t.contains sid
-
-func open(s: var Streams, sid: StreamId) {.raises: [StreamsClosedError].} =
-  doAssert sid notin s.t
-  if s.isClosed:
-    raise newException(StreamsClosedError, "Streams is closed")
-  s.t[sid] = initStream(sid)
-
-iterator values(s: Streams): Stream {.inline.} =
-  for v in values s.t:
-    yield v
-
-proc close(s: var Streams, sid: StreamId) {.raises: [].} =
-  if sid notin s:
-    return
-  let stream = s.get sid
-  stream.msgs.close()
-  s.del sid
-
-proc close(s: var Streams) {.raises: [].} =
-  if s.isClosed:
-    return
-  s.isClosed = true
-  for stream in values s:
-    stream.msgs.close()
 
 type
   ClientContext* = ref object
@@ -564,6 +497,9 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       continue
     let stream = client.streams.get frm.sid.StreamId
     try:
+      # XXX a stream can block all streams here,
+      #     no way around it. Maybe it can be avoided with
+      #     window update deafult or min size?
       await stream.msgs.put frm
     except QueueClosedError:
       debugInfo "stream is closed " & $frm.sid.int
