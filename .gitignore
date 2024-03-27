@@ -2,6 +2,7 @@ nimcache/
 nimble.develop
 tests/tests
 tests/testclient
+tests/testclientserver
 src/hyperx/client
 src/hyperx/server
 src/hyperx/queue

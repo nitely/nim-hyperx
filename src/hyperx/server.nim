@@ -3,20 +3,22 @@
 
 {.define: ssl.}
 
-from std/openssl import
-  DLLSSLName,
-  SSL_CTX_set_alpn_select_cb,
-  SSL_TLSEXT_ERR_NOACK,
-  SSL_TLSEXT_ERR_OK,
-  SSL_OP_ALL,
-  SSL_OP_NO_SSLv2,
-  SSL_OP_NO_SSLv3
+import std/asyncdispatch
+import std/asyncnet
+import std/openssl
+import std/net
 
 import ./clientserver
 import ./frame
 import ./stream
 import ./queue
 import ./errors
+
+export
+  withStream,
+  recvBody,
+  sendBody,
+  recvEnded
 
 var sslContext {.threadvar.}: SslContext
 
@@ -34,8 +36,8 @@ proc sslContextAlpnSelect(
   const h2Alpn = "\x02h2"  # len + proto_name
   const h2AlpnL = h2Alpn.len
   var i = 0
-  while i+h2AlpnL-1 < inlen:
-    if h2SslAlpn == toOpenArray(inProto, i, i+h2AlpnL-1):
+  while i+h2AlpnL-1 < inlen.int:
+    if h2Alpn == toOpenArray(inProto, i, i+h2AlpnL-1):
       outProto[] = addr inProto[i+1]
       cast[ptr char](outlen)[] = inProto[i]
       return SSL_TLSEXT_ERR_OK
@@ -50,7 +52,12 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   if not sslContext.isNil:
     return sslContext
   try:
-    sslContext = newContext(protSSLv23, verifyMode=CVerifyNone)
+    sslContext = newContext(
+      protSSLv23,
+      verifyMode = CVerifyNone,
+      certFile = "/home/esteban/example.com+5.pem",
+      keyFile = "/home/esteban/example.com+5-key.pem"
+    )
   except CatchableError as err:
     raise newException(InternalSslError, err.msg)
   except Defect as err:
@@ -85,7 +92,7 @@ type
     port: Port
     isConnected: bool
 
-func newServer(hostname: string, port: Port): ServerContext =
+proc newServer*(hostname: string, port: Port): ServerContext =
   ServerContext(
     sock: newMySocket(),
     hostname: hostname,
@@ -93,38 +100,63 @@ func newServer(hostname: string, port: Port): ServerContext =
     isConnected: false
   )
 
-func listen(server: ServerContext) =
+proc close(server: ServerContext) =
+  if not server.isConnected:
+    return
+  server.sock.close()
+  server.isConnected = false
+
+proc listen(server: ServerContext) =
   server.sock.setSockOpt(OptReuseAddr, true)
   server.sock.bindAddr server.port
   server.sock.listen()
 
 # XXX dont allow receive push promise
 
-proc processClient(
-  sock: MyAsyncSocket,
-  hostname: string  # ref
-) {.async.} =
-  let client = newClient(sock, hostname)
-  client.isConnected = true
-  client.handshake()
-  var sendFut = client.sendTask()
-  var recvFut = client.recvTask()
-  var dispFut = client.recvDispatcher()
-  await (sendFut and recvFut and dispFut)
+proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
+  # XXX limit number of active clients
+  let sock = await server.sock.accept()
+  wrapConnectedSocket(
+    defaultSslContext(), sock, handshakeAsServer, server.hostname
+  )
+  result = newClient(sock, server.hostname)
 
-proc serve(server: ServerContext) {.async.} =
-  server.listen()
-  server.isConnected = true
-  while server.isConnected:
-    let sock = await server.accept()
-    # XXX limit number of peer tasks
-    asyncCheck processClient(sock)
+# XXX remove same as withConnect
+template withClient*(client: ClientContext, body: untyped) =
+  doAssert not client.isConnected
+  var sendFut, recvFut, dispFut: Future[void]
+  try:
+    client.isConnected = true
+    await client.handshake()
+    sendFut = client.sendTask()
+    recvFut = client.recvTask()
+    dispFut = client.recvDispatcher()
+    block:
+      body
+  finally:
+    client.close()
+    for fut in [sendFut, recvFut, dispFut]:
+      try:
+        if fut != nil:
+          await fut
+      except HyperxError as err:
+        debugInfo err.msg
 
-proc recvStream(client: ClientContext): Future[ClientStream] {.async.} =
-  let sid = await client.strmCreatedEvents.pop()
+template withServer*(server: ServerContext, body: untyped): untyped =
+  var serveFut: Future[void]
+  try:
+    server.isConnected = true
+    server.listen()
+    block:
+      body
+  finally:
+    server.close()
+
+proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
+  let sid = await client.streamOpenedMsgs.pop()
   result = newClientStream(client, sid)
 
-proc recvHeaders(strm: ClientStream, data: ref string) {.async.} =
+proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   let frm = await strm.client.read(strm.sid)
   check frm.typ == frmtHeaders, newStrmError(errProtocolError)
   data[].add frm.payload

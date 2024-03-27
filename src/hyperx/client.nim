@@ -66,7 +66,7 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   # lower than the min protocol defined
   # in openssl.config, usually +TLSv1.2
   try:
-    sslContext = newContext(protSSLv23, verifyMode=CVerifyNone)
+    sslContext = newContext(protSSLv23, verifyMode = CVerifyNone)
   except CatchableError as err:
     raise newException(InternalSslError, err.msg)
   except Defect as err:
@@ -441,7 +441,8 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
       else:
         # ignore unknown setting
         debugInfo "unknown setting received"
-    await client.write newSettingsFrame(ack = true)
+    if frmfAck notin frm.flags:
+      await client.write newSettingsFrame(ack = true)
   of frmtPing:
     if frmfAck notin frm.flags:
       await client.write newPingFrame(ackPayload = frm.payload)
@@ -571,38 +572,37 @@ template withConnection*(
   client: ClientContext,
   body: untyped
 ) =
-  block:
-    var sendFut, recvFut, respFut: Future[void]
-    try:
-      debugInfo "connecting"
-      await client.connect()
-      debugInfo "connected"
-      sendFut = client.sendTask()
-      recvFut = client.recvTask()
-      respFut = client.responseDispatcher()
-      block:
-        body
-    except QueueClosedError as err:
-      doAssert not client.isConnected
-      raise err
-    except CatchableError as err:
-      debugInfo err.msg
-      raise err
-    finally:
-      debugInfo "exit"
-      client.close()
-      # XXX do gracefull shutdown with timeout,
-      #     wait for send/recv to drain the queue
-      #     before closing
-      
-      # do not bother the user with hyperx errors
-      # at this point body completed or errored out
-      for fut in [sendFut, recvFut, respFut]:
-        try:
-          if fut != nil:
-            await fut
-        except HyperxError as err:
-          debugInfo err.msg
+  var sendFut, recvFut, respFut: Future[void]
+  try:
+    debugInfo "connecting"
+    await client.connect()
+    debugInfo "connected"
+    sendFut = client.sendTask()
+    recvFut = client.recvTask()
+    respFut = client.responseDispatcher()
+    block:
+      body
+  except QueueClosedError as err:
+    doAssert not client.isConnected
+    raise err
+  except CatchableError as err:
+    debugInfo err.msg
+    raise err
+  finally:
+    debugInfo "exit"
+    client.close()
+    # XXX do gracefull shutdown with timeout,
+    #     wait for send/recv to drain the queue
+    #     before closing
+    
+    # do not bother the user with hyperx errors
+    # at this point body completed or errored out
+    for fut in [sendFut, recvFut, respFut]:
+      try:
+        if fut != nil:
+          await fut
+      except HyperxError as err:
+        debugInfo err.msg
 
 type
   HttpMethod* = enum

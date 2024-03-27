@@ -1,3 +1,9 @@
+## Functionality shared beetwen client and server
+
+import std/asyncdispatch
+import std/asyncnet
+
+import pkg/hpack
 
 import ./frame
 import ./stream
@@ -40,6 +46,17 @@ func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
   for c in ss:
     s.add c.char
 
+func decode(
+  payload: openArray[byte],
+  ds: var DecodedStr,
+  dh: var DynHeaders
+) {.raises: [ConnError].} =
+  try:
+    hdecodeAll(payload, dh, ds)
+  except HpackError as err:
+    debugInfo err.msg
+    raise newConnError(errCompressionError)
+
 when defined(hyperxTest):
   type MyAsyncSocket* = TestSocket
 else:
@@ -50,11 +67,12 @@ type
     sock: MyAsyncSocket
     hostname: string
     port: Port
-    isConnected: bool
+    isConnected*: bool
     headersEnc, headersDec: DynHeaders
     streams: Streams
     currStreamId: StreamId
     sendMsgs, recvMsgs: QueueAsync[Frame]
+    streamOpenedMsgs*: QueueAsync[StreamId]
     maxPeerStrmIdSeen: StreamId
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
@@ -76,6 +94,7 @@ proc newClient*(
     currStreamId: 1.StreamId,
     recvMsgs: newQueue[Frame](10),
     sendMsgs: newQueue[Frame](10),
+    streamOpenedMsgs: newQueue[StreamId](10),
     maxPeerStrmIdSeen: 0.StreamId,
     peerMaxConcurrentStreams: stgMaxConcurrentStreams,
     peerWindowSize: stgInitialWindowSize,
@@ -111,6 +130,19 @@ proc close*(client: ClientContext, sid: StreamId) {.raises: [].} =
   # This does nothing if the stream is already close
   client.streams.close sid
 
+func openMainStream(client: ClientContext): StreamId {.raises: [StreamsClosedError].} =
+  doAssert frmSidMain.StreamId notin client.streams
+  result = frmSidMain.StreamId
+  client.streams.open result
+
+func openStream(client: ClientContext): StreamId {.raises: [StreamsClosedError].} =
+  # XXX some error if max sid is reached
+  # XXX error if maxStreams is reached
+  result = client.currStreamId
+  client.streams.open result
+  # client uses odd numbers, and server even numbers
+  client.currStreamId += 2.StreamId
+
 proc handshake*(client: ClientContext) {.async.} =
   doAssert client.isConnected
   debugInfo "handshake"
@@ -123,10 +155,15 @@ proc handshake*(client: ClientContext) {.async.} =
   frm.addSetting frmsEnablePush, stgDisablePush
   frm.addSetting frmsInitialWindowSize, stgMaxWindowSize
   var blob = newSeqOfCap[byte](preface.len+frm.len)
-  blob.add preface
+  # XXX no preface for server + has to check the client preface
+  #blob.add preface
   blob.add frm.s
   check not client.sock.isClosed, newConnClosedError()
   await client.sock.send(addr blob[0], blob.len)
+  blob.setLen preface.len
+  check not client.sock.isClosed, newConnClosedError()
+  let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
+  check blobRln == blob.len, newConnClosedError()
 
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   doAssert frm.sid.StreamId == s.id
@@ -156,6 +193,150 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
   if frm.sid != frmSidMain:
     client.stream(frm.sid).doTransitionSend frm
   await client.sendMsgs.put frm
+
+proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
+  # do not send any debug information for security reasons
+  var frm = newGoAwayFrame(
+    client.maxPeerStrmIdSeen.int, errCode.int
+  )
+  try:
+    await client.write(frm)
+  except CatchableError as err:
+    debugInfo err.msg
+    raise err
+
+func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
+  doAssert frm.sid.StreamId == s.id
+  doAssert frm.sid != frmSidMain
+  doAssert s.state != strmInvalid
+  check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
+  let nextState = toNextStateRecv(s.state, frm.toStreamEvent)
+  if nextState == strmInvalid:
+    if s.state == strmHalfClosedRemote:
+      raise newStrmError(errStreamClosed)
+    else:
+      raise newConnError(errProtocolError)
+  s.state = nextState
+  #if oldState == strmIdle:
+  #  # XXX do this elsewhere not here
+  #  # XXX close streams < s.id in idle state
+  #  discard
+
+proc readNaked(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
+  let frm = await client.stream(sid).msgs.pop()
+  doAssert sid == frm.sid.StreamId
+  # this may throw a conn error
+  client.stream(sid).doTransitionRecv frm
+  if frm.typ == frmtWindowUpdate:
+    check frm.payload.len > 0, newStrmError(errProtocolError)
+  if frm.typ == frmtData and
+      frm.payloadLen.int > 0 and
+      frmfEndStream notin frm.flags:
+    await client.write newWindowUpdateFrame(sid.FrmSid, frm.payloadLen.int)
+  return frm
+
+proc read*(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
+  try:
+    result = await client.readNaked(sid)
+  except QueueClosedError as err:
+    doAssert not client.isConnected
+    if client.exitError != nil:
+      raise newHyperxConnectionError(client.exitError.msg)
+    raise err
+  except StrmError as err:
+    #client.close(sid)
+    if client.isConnected:
+      await client.write newRstStreamFrame(sid.FrmSid, err.code.int)
+    raise err
+  except ConnError as err:
+    debugInfo err.msg
+    client.close()
+    raise err
+
+proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
+  ## Read continuation frames until ``END_HEADERS`` flag is set
+  doAssert frm.typ in {frmtHeaders, frmtPushPromise}
+  doAssert frmfEndHeaders notin frm.flags
+  var frm2 = newFrame()
+  while frmfEndHeaders notin frm2.flags:
+    check not client.sock.isClosed, newConnClosedError()
+    let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm2.len)
+    check headerRln == frmHeaderSize, newConnClosedError()
+    debugInfo $frm2
+    check frm2.sid == frm.sid, newConnError(errProtocolError)
+    check frm2.typ == frmtContinuation, newConnError(errProtocolError)
+    check frm2.payloadLen <= stgInitialMaxFrameSize, newConnError(errProtocolError)
+    check frm2.payloadLen >= 0
+    if frm2.payloadLen == 0:
+      continue
+    # XXX the spec does not limit total headers size,
+    #     but there needs to be a limit unless we stream
+    let totalPayloadLen = frm2.payloadLen.int + frm.payload.len
+    check totalPayloadLen <= stgInitialMaxFrameSize.int, newConnError(errProtocolError)
+    let oldFrmLen = frm.len
+    frm.grow frm2.payloadLen.int
+    check not client.sock.isClosed, newConnClosedError()
+    let payloadRln = await client.sock.recvInto(
+      addr frm.s[oldFrmLen], frm2.payloadLen.int
+    )
+    check payloadRln == frm2.payloadLen.int, newConnClosedError()
+  frm.setPayloadLen frm.payload.len.FrmPayloadLen
+  frm.flags.incl frmfEndHeaders
+
+proc read(client: ClientContext, frm: Frame) {.async.} =
+  ## Read a frame + payload. If read frame is a ``Header`` or
+  ## ``PushPromise``, read frames until ``END_HEADERS`` flag is set
+  ## Frames cannot be interleaved here
+  ##
+  ## Unused flags MUST be ignored on receipt
+  check not client.sock.isClosed, newConnClosedError()
+  let headerRln = await client.sock.recvInto(frm.rawBytesPtr, frm.len)
+  check headerRln == frmHeaderSize, newConnClosedError()
+  debugInfo $frm
+  var payloadLen = frm.payloadLen.int
+  check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errProtocolError)
+  var paddingLen = 0
+  if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
+    debugInfo "Padding"
+    check payloadLen >= frmPaddingSize, newConnError(errProtocolError)
+    check not client.sock.isClosed, newConnClosedError()
+    let paddingRln = await client.sock.recvInto(addr paddingLen, frmPaddingSize)
+    check paddingRln == frmPaddingSize, newConnClosedError()
+    paddingLen *= 8
+    payloadLen -= frmPaddingSize
+  # prio is deprecated so do nothing with it
+  if frmfPriority in frm.flags and frm.typ == frmtHeaders:
+    debugInfo "Priority"
+    check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
+    var prio = 0'i64
+    check not client.sock.isClosed, newConnClosedError()
+    let prioRln = await client.sock.recvInto(addr prio, frmPrioritySize)
+    check prioRln == frmPrioritySize, newConnClosedError()
+    payloadLen -= frmPrioritySize
+  # padding can be equal at this point, because we don't count frmPaddingSize
+  check payloadLen >= paddingLen, newConnError(errProtocolError)
+  payloadLen -= paddingLen
+  check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
+  if payloadLen > 0:
+    frm.grow payloadLen
+    check not client.sock.isClosed, newConnClosedError()
+    let payloadRln = await client.sock.recvInto(
+      frm.rawPayloadBytesPtr, payloadLen
+    )
+    check payloadRln == payloadLen, newConnClosedError()
+    debugInfo frm.debugPayload
+  if paddingLen > 0:
+    let oldFrmLen = frm.len
+    frm.grow paddingLen
+    check not client.sock.isClosed, newConnClosedError()
+    let paddingRln = await client.sock.recvInto(
+      addr frm.s[oldFrmLen], paddingLen
+    )
+    check paddingRln == paddingLen, newConnClosedError()
+    frm.shrink paddingLen
+  if frmfEndHeaders notin frm.flags and frm.typ in {frmtHeaders, frmtPushPromise}:
+    debugInfo "Continuation"
+    await client.readUntilEnd(frm)
 
 proc sendTaskNaked(client: ClientContext) {.async.} =
   ## Send frames
@@ -269,7 +450,8 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
       else:
         # ignore unknown setting
         debugInfo "unknown setting received"
-    await client.write newSettingsFrame(ack = true)
+    if frmfAck notin frm.flags:
+      await client.write newSettingsFrame(ack = true)
   of frmtPing:
     if frmfAck notin frm.flags:
       await client.write newPingFrame(ackPayload = frm.payload)
@@ -281,17 +463,6 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   else:
     doAssert frm.typ notin connFrmAllowed
     raise newConnError(errProtocolError)
-
-proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
-  # do not send any debug information for security reasons
-  var frm = newGoAwayFrame(
-    client.maxPeerStrmIdSeen.int, errCode.int
-  )
-  try:
-    await client.write(frm)
-  except CatchableError as err:
-    debugInfo err.msg
-    raise err
 
 proc recvDispatcherNaked(client: ClientContext) {.async.} =
   ## Dispatch messages to open streams.
@@ -372,9 +543,9 @@ type
     csStateRecvData,
     csStateRecvEnded
   ClientStream* = ref object
-    client: ClientContext
-    sid: StreamId
-    state: ClientStreamState
+    client*: ClientContext
+    sid*: StreamId
+    state*: ClientStreamState
 
 func newClientStream*(client: ClientContext, sid: StreamId): ClientStream =
   ClientStream(
@@ -390,8 +561,21 @@ func newClientStream*(client: ClientContext): ClientStream =
 proc close*(strm: ClientStream) =
   strm.client.close(strm.sid)
 
-func ended*(strm: ClientStream): bool =
+func recvEnded*(strm: ClientStream): bool =
   strm.state == csStateRecvEnded
+
+# XXX remove, change to encode(dyn)
+func addHeader*(
+  client: ClientContext,
+  frm: Frame,
+  n, v: string
+) {.raises: [HyperxError].} =
+  ## headers must be added synchronously, no await in between,
+  ## or else a table resize could occur in the meantime
+  try:
+    discard hencode(n, v, client.headersEnc, frm.s, huffman = false)
+  except HpackError as err:
+    raise newException(HyperxError, err.msg)
 
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
@@ -431,6 +615,6 @@ template withStream*(strm: ClientStream, body: untyped): untyped =
   try:
     block:
       body
-    doAssert strm.state == csStateRecvEnded
+    #doAssert strm.state == csStateRecvEnded
   finally:
     strm.close()
