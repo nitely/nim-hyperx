@@ -1,18 +1,17 @@
 # HyperX
 
-> [!WARNING]
-> Do not use. This lib is in pre-alpha state.
-
 Pure Nim Http2 client/server implementation.
+
+> [!WARNING]
+> This library is in alpha state and as such there won't be a
+> deprecation period for breaking changes. You are adviced to
+> pin the version/commit if you use it.
 
 ## Compatibility
 
 > Latest Nim only
 
 ## Client
-
-While the client is not stable, it should be functional as
-most of the spec is implemented.
 
 ```nim
 {.define: ssl.}
