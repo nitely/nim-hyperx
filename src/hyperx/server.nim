@@ -23,7 +23,7 @@ var sslContext {.threadvar.}: SslContext
 proc destroySslContext() {.noconv.} =
   sslContext.destroyContext()
 
-proc sslContextCallback(
+proc sslContextAlpnSelect(
   ssl: SslPtr;
   outProto: ptr cstring;
   outlen: cstring;  # ptr char
@@ -42,7 +42,6 @@ proc sslContextCallback(
     i += inProto[i].int + 1
   return SSL_TLSEXT_ERR_NOACK
 
-# https://www.openssl.org/docs/man1.0.2/man3/SSL_CTX_set_options.html
 proc SSL_CTX_set_options(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
 const SSL_OP_NO_RENEGOTIATION = 1073741824
 const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
@@ -67,7 +66,7 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
     SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
   )
   discard SSL_CTX_set_alpn_select_cb(
-    sslContext.context, sslContextCallback, nil
+    sslContext.context, sslContextAlpnSelect, nil
   )
   addQuitProc(destroySslContext)
   return sslContext
@@ -86,6 +85,14 @@ type
     port: Port
     isConnected: bool
 
+func newServer(hostname: string, port: Port): ServerContext =
+  ServerContext(
+    sock: newMySocket(),
+    hostname: hostname,
+    port: port,
+    isConnected: false
+  )
+
 func listen(server: ServerContext) =
   server.sock.setSockOpt(OptReuseAddr, true)
   server.sock.bindAddr server.port
@@ -93,7 +100,7 @@ func listen(server: ServerContext) =
 
 # XXX dont allow receive push promise
 
-proc processPeer(
+proc processClient(
   sock: MyAsyncSocket,
   hostname: string  # ref
 ) {.async.} =
@@ -111,4 +118,55 @@ proc serve(server: ServerContext) {.async.} =
   while server.isConnected:
     let sock = await server.accept()
     # XXX limit number of peer tasks
-    asyncCheck processPeer(sock)
+    asyncCheck processClient(sock)
+
+proc recvStream(client: ClientContext): Future[ClientStream] {.async.} =
+  let sid = await client.strmCreatedEvents.pop()
+  result = newClientStream(client, sid)
+
+proc recvHeaders(strm: ClientStream, data: ref string) {.async.} =
+  let frm = await strm.client.read(strm.sid)
+  check frm.typ == frmtHeaders, newStrmError(errProtocolError)
+  data[].add frm.payload
+  if frmfEndStream in frm.flags:
+    strm.state = csStateRecvEnded
+
+proc sendHeaders*(
+  strm: ClientStream,
+  status: int,
+  contentType = "",
+  contentLen = -1
+) {.async.} =
+  template client: untyped = strm.client
+  doAssert strm.state == csStateOpened
+  strm.state = csStateSentHeaders
+  var frm = newFrame()
+  client.addHeader(frm, ":status", $status)
+  if contentType.len > 0:
+    client.addHeader(frm, "content-type", contentType)
+  if contentLen > -1:
+    client.addHeader(frm, "content-length", $contentLen)
+  frm.setTyp frmtHeaders
+  frm.setSid strm.sid.FrmSid
+  frm.setPayloadLen frm.payloadSize.FrmPayloadLen
+  frm.flags.incl frmfEndHeaders
+  if contentLen <= 0:
+    frm.flags.incl frmfEndStream
+    strm.state = csStateSentEnded
+  await client.write frm
+
+when false:
+  let server = newServer("foobar.com", Port 443)
+  withServer server:
+    while server.isConnected:
+      let client = await server.recvClient()
+      withClient client:
+        while client.isConnected:
+          let strm = await client.recvStream()
+          withStream strm:
+            let data = newStringref()
+            await strm.recvHeaders(data)
+            await strm.recvBody(data)
+            # process
+            await strm.sendHeaders(data)
+            await strm.sendBody(data)

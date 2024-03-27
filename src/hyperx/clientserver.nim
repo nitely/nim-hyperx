@@ -305,6 +305,11 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       # Settings need to be applied before consuming following messages
       await consumeMainStream(client, frm)
       continue
+    # doAssert client.peerTyp in {peerServer, peerClient}
+    # if client.peerTyp == peerServer:
+    if frm.sid.StreamId < client.maxPeerStrmIdSeen:
+      # XXX close idle streams
+      client.streams.open(frm.sid.StreamId)
     if frm.sid.int mod 2 == 0:
       client.maxPeerStrmIdSeen = max(
         client.maxPeerStrmIdSeen.int, frm.sid.int
@@ -356,3 +361,76 @@ proc recvDispatcher*(client: ClientContext) {.async.} =
     debugInfo "responseDispatcher exited"
     client.close()
 
+type
+  ClientStreamState* = enum
+    csStateInitial,
+    csStateOpened,
+    csStateSentHeaders,
+    csStateSentData,
+    csStateSentEnded,
+    csStateRecvHeaders,
+    csStateRecvData,
+    csStateRecvEnded
+  ClientStream* = ref object
+    client: ClientContext
+    sid: StreamId
+    state: ClientStreamState
+
+func newClientStream*(client: ClientContext, sid: StreamId): ClientStream =
+  ClientStream(
+    client: client,
+    sid: sid,
+    state: csStateInitial
+  )
+
+func newClientStream*(client: ClientContext): ClientStream =
+  let sid = client.openStream()
+  newClientStream(client, sid)
+
+proc close*(strm: ClientStream) =
+  strm.client.close(strm.sid)
+
+func ended*(strm: ClientStream): bool =
+  strm.state == csStateRecvEnded
+
+proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
+  doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
+  strm.state = csStateRecvData
+  let frm = await strm.client.read(strm.sid)
+  # XXX store trailer headers
+  # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
+  if frm.typ == frmtHeaders:
+    check frmfEndStream in frm.flags, newStrmError(errProtocolError)
+    strm.state = csStateRecvEnded
+    return
+  check frm.typ == frmtData, newStrmError(errProtocolError)
+  data[].add frm.payload
+  if frmfEndStream in frm.flags:
+    strm.state = csStateRecvEnded
+
+proc sendBody*(
+  strm: ClientStream,
+  data: ref string,
+  finish = false
+) {.async.} =
+  doAssert strm.state in {csStateSentHeaders, csStateSentData}
+  strm.state = csStateSentData
+  var frm = newFrame()
+  frm.setTyp frmtData
+  frm.setSid strm.sid.FrmSid
+  frm.setPayloadLen data[].len.FrmPayloadLen
+  if finish:
+    frm.flags.incl frmfEndStream
+    strm.state = csStateSentEnded
+  frm.s.add data[]
+  await strm.client.write frm
+
+template withStream*(strm: ClientStream, body: untyped): untyped =
+  doAssert strm.state == csStateInitial
+  strm.state = csStateOpened
+  try:
+    block:
+      body
+    doAssert strm.state == csStateRecvEnded
+  finally:
+    strm.close()

@@ -156,6 +156,7 @@ type
 
 proc `==`*(a, b: StreamId): bool {.borrow.}
 proc `+=`*(a: var StreamId, b: StreamId) {.borrow.}
+proc `<`*(a, b: StreamId): bool {.borrow.}
 
 type
   Stream* = object
