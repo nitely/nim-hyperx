@@ -44,10 +44,6 @@ proc sslContextAlpnSelect(
     i += inProto[i].int + 1
   return SSL_TLSEXT_ERR_NOACK
 
-proc SSL_CTX_set_options(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
-const SSL_OP_NO_RENEGOTIATION = 1073741824
-const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
-
 proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   if not sslContext.isNil:
     return sslContext
@@ -72,9 +68,12 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
     SSL_OP_NO_RENEGOTIATION or
     SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
   )
+  # XXX server move
   discard SSL_CTX_set_alpn_select_cb(
     sslContext.context, sslContextAlpnSelect, nil
   )
+  # XXX client mode
+  #discard SSL_CTX_set_alpn_protos(sslContext.context, "\x02h2", 3)
   addQuitProc(destroySslContext)
   return sslContext
 

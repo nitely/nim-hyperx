@@ -2,6 +2,7 @@
 
 import std/asyncdispatch
 import std/asyncnet
+import std/openssl
 
 import pkg/hpack
 
@@ -9,6 +10,10 @@ import ./frame
 import ./stream
 import ./queue
 import ./errors
+
+proc SSL_CTX_set_options*(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
+const SSL_OP_NO_RENEGOTIATION* = 1073741824
+const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION* = 65536
 
 const
   preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"

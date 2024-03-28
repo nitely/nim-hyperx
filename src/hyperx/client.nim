@@ -47,7 +47,7 @@ func add(s: var string, ss: openArray[byte]) {.raises: [].} =
   for c in ss:
     s.add c.char
 
-from std/openssl import SSL_CTX_set_alpn_protos
+import std/openssl
 import std/tables
 import std/net
 import std/asyncdispatch
@@ -58,6 +58,10 @@ var sslContext {.threadvar.}: SslContext
 
 proc destroySslContext() {.noconv.} =
   sslContext.destroyContext()
+
+proc SSL_CTX_set_options(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
+const SSL_OP_NO_RENEGOTIATION = 1073741824
+const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
 
 proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   if not sslContext.isNil:
@@ -75,6 +79,12 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
     # workaround for newContext raising Exception
     raise newException(Defect, err.msg)
   doAssert sslContext != nil, "failure to initialize the SSL context"
+  discard SSL_CTX_set_options(
+    sslContext.context,
+    SSL_OP_ALL or SSL_OP_NO_SSLv2 or SSL_OP_NO_SSLv3 or
+    SSL_OP_NO_RENEGOTIATION or
+    SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
+  )
   # XXX OPENSSL_VERSION_NUMBER >= 0x10002000L
   discard SSL_CTX_set_alpn_protos(sslContext.context, "\x02h2", 3)
   # XXX catch EOutOfIndex
