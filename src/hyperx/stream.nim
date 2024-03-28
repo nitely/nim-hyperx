@@ -196,7 +196,7 @@ func contains*(s: Streams, sid: StreamId): bool {.raises: [].} =
   s.t.contains sid
 
 func open*(s: var Streams, sid: StreamId) {.raises: [StreamsClosedError].} =
-  doAssert sid notin s.t
+  doAssert sid notin s.t, $sid.int
   if s.isClosed:
     raise newException(StreamsClosedError, "Streams is closed")
   s.t[sid] = initStream(sid)

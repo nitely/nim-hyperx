@@ -30,12 +30,14 @@ template debugInfo(s: string): untyped =
     discard
 
 template check(cond: bool): untyped =
-  if not cond:
-    raise (ref HyperxError)()
+  {.line: instantiationInfo(fullPaths = true).}:
+    if not cond:
+      raise (ref HyperxError)()
 
 template check(cond: bool, errObj: untyped): untyped =
-  if not cond:
-    raise errObj
+  {.line: instantiationInfo(fullPaths = true).}:
+    if not cond:
+      raise errObj
 
 func add(s: var seq[byte], ss: string) {.raises: [].} =
   # XXX x_x
@@ -501,6 +503,9 @@ proc responseDispatcherNaked(client: ClientContext) {.async.} =
       frm.s.add $headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
       await client.write newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
+    # XXX implement flow control
+    if frm.typ == frmtWindowUpdate:
+      continue
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:

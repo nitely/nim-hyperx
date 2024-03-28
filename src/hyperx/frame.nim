@@ -382,6 +382,17 @@ func debugPayload*(frm: Frame): string {.raises: [].} =
       for x in frm.payload:
         value += x.int
       result.add fmt("\nPing {$value}")
+    of frmtData:
+      if frm.payload.len > 0:
+        result.add "\n"
+        var x = 0
+        for byt in frm.payload:
+          result.add byt.char
+          inc x
+          if x == 10:
+            break
+        if frm.payload.len > 10:
+          result.add "[truncated]"
     else:
       result.add "\nUnimplemented debug"
     result.add "\n============="

@@ -1,9 +1,10 @@
 import std/asyncdispatch
 import std/deques
 import ./utils
+import ./errors
 
 type
-  QueueError* = object of CatchableError
+  QueueError* = object of HyperxError
   QueueClosedError* = object of QueueError
 
 func newQueueClosedError(): ref QueueClosedError {.raises: [].} =

@@ -18,7 +18,8 @@ export
   withStream,
   recvBody,
   sendBody,
-  recvEnded
+  recvEnded,
+  ClientStream
 
 var sslContext {.threadvar.}: SslContext
 
@@ -169,7 +170,7 @@ proc sendHeaders*(
   contentLen = -1
 ) {.async.} =
   template client: untyped = strm.client
-  doAssert strm.state == csStateOpened
+  #doAssert strm.state == csStateOpened
   strm.state = csStateSentHeaders
   var frm = newFrame()
   client.addHeader(frm, ":status", $status)

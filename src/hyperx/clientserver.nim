@@ -34,12 +34,14 @@ template debugInfo*(s: string): untyped =
     discard
 
 template check*(cond: bool): untyped =
-  if not cond:
-    raise (ref HyperxError)()
+  {.line: instantiationInfo(fullPaths = true).}:
+    if not cond:
+      raise (ref HyperxError)()
 
 template check*(cond: bool, errObj: untyped): untyped =
-  if not cond:
-    raise errObj
+  {.line: instantiationInfo(fullPaths = true).}:
+    if not cond:
+      raise errObj
 
 func add*(s: var seq[byte], ss: string) {.raises: [].} =
   # XXX x_x
@@ -82,7 +84,7 @@ type
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
     peerMaxFrameSize: uint32
-    exitError: ref HyperxError
+    exitError*: ref HyperxError
 
 proc newClient*(
   sock: MyAsyncSocket,
@@ -167,6 +169,7 @@ proc handshake*(client: ClientContext) {.async.} =
   await client.sock.send(addr blob[0], blob.len)
   blob.setLen preface.len
   check not client.sock.isClosed, newConnClosedError()
+  # XXX server only
   let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
   check blobRln == blob.len, newConnClosedError()
 
@@ -483,10 +486,12 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       continue
     # doAssert client.peerTyp in {peerServer, peerClient}
     # if client.peerTyp == peerServer:
-    if frm.sid.StreamId < client.maxPeerStrmIdSeen:
-      # XXX close idle streams
+    if frm.sid.StreamId > client.maxPeerStrmIdSeen:
+      # we do not store idle streams, so no need to close them
       client.streams.open(frm.sid.StreamId)
-    if frm.sid.int mod 2 == 0:
+      await client.streamOpenedMsgs.put frm.sid.StreamId
+    # XXX mod 2 == 0 for client
+    if frm.sid.int mod 2 != 0:
       client.maxPeerStrmIdSeen = max(
         client.maxPeerStrmIdSeen.int, frm.sid.int
       ).StreamId
@@ -499,6 +504,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       frm.s.add $headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
       await client.write newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
+    # XXX implement flow control
+    if frm.typ == frmtWindowUpdate:
+      continue
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
@@ -515,6 +523,8 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       debugInfo "stream is closed " & $frm.sid.int
 
 proc recvDispatcher*(client: ClientContext) {.async.} =
+  # XXX always store exitError for all errors
+  #     everywhere where queues are closed
   try:
     await client.recvDispatcherNaked()
   except ConnError as err:
@@ -583,7 +593,7 @@ func addHeader*(
     raise newException(HyperxError, err.msg)
 
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
-  doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
+  #doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
   strm.state = csStateRecvData
   let frm = await strm.client.read(strm.sid)
   # XXX store trailer headers
@@ -602,7 +612,7 @@ proc sendBody*(
   data: ref string,
   finish = false
 ) {.async.} =
-  doAssert strm.state in {csStateSentHeaders, csStateSentData}
+  #doAssert strm.state in {csStateSentHeaders, csStateSentData}
   strm.state = csStateSentData
   var frm = newFrame()
   frm.setTyp frmtData
