@@ -1,7 +1,8 @@
 ## HTTP/2 server
 ## WIP
 
-{.define: ssl.}
+when not defined(ssl):
+  {.error: "this lib needs -d:ssl".}
 
 import std/asyncdispatch
 import std/asyncnet
@@ -14,12 +15,18 @@ import ./stream
 import ./queue
 import ./errors
 
+when defined(hyperxTest):
+  import ./testsocket
+
 export
+  withClient,
   withStream,
+  recvHeaders,
   recvBody,
   sendBody,
   recvEnded,
-  ClientStream
+  ClientStream,
+  newClientStream
 
 var sslContext {.threadvar.}: SslContext
 
@@ -45,15 +52,17 @@ proc sslContextAlpnSelect(
     i += inProto[i].int + 1
   return SSL_TLSEXT_ERR_NOACK
 
-proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
+proc defaultSslContext(
+  certFile, keyFile: string
+): SslContext {.raises: [InternalSslError].} =
   if not sslContext.isNil:
     return sslContext
   try:
     sslContext = newContext(
       protSSLv23,
       verifyMode = CVerifyNone,
-      certFile = "/home/esteban/example.com+5.pem",
-      keyFile = "/home/esteban/example.com+5-key.pem"
+      certFile = certFile,
+      keyFile = keyFile
     )
   except CatchableError as err:
     raise newException(InternalSslError, err.msg)
@@ -69,21 +78,22 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
     SSL_OP_NO_RENEGOTIATION or
     SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
   )
-  # XXX server move
   discard SSL_CTX_set_alpn_select_cb(
     sslContext.context, sslContextAlpnSelect, nil
   )
-  # XXX client mode
-  #discard SSL_CTX_set_alpn_protos(sslContext.context, "\x02h2", 3)
   addQuitProc(destroySslContext)
   return sslContext
 
-proc newMySocket(): MyAsyncSocket {.raises: [InternalOsError].} =
-  try:
-    result = newAsyncSocket()
-    wrapSocket(defaultSslContext(), result)
-  except CatchableError as err:
-    raise newInternalOsError(err.msg)
+when not defined(hyperxTest):
+  proc newMySocket(
+    certFile = "",
+    keyFile = ""
+  ): MyAsyncSocket {.raises: [InternalOsError].} =
+    try:
+      result = newAsyncSocket()
+      wrapSocket(defaultSslContext(certFile, keyFile), result)
+    except CatchableError as err:
+      raise newInternalOsError(err.msg)
 
 type
   ServerContext* = ref object
@@ -92,9 +102,17 @@ type
     port: Port
     isConnected: bool
 
-proc newServer*(hostname: string, port: Port): ServerContext =
+proc newServer*(
+  hostname: string,
+  port: Port,
+  sslCertFile = "",
+  sslKeyFile = ""
+): ServerContext =
   ServerContext(
-    sock: newMySocket(),
+    sock: newMySocket(
+      certFile = sslCertFile,
+      keyFile = sslKeyFile
+    ),
     hostname: hostname,
     port: port,
     isConnected: false
@@ -116,34 +134,13 @@ proc listen(server: ServerContext) =
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
   # XXX limit number of active clients
   let sock = await server.sock.accept()
+  doAssert not sslContext.isNil
   wrapConnectedSocket(
-    defaultSslContext(), sock, handshakeAsServer, server.hostname
+    sslContext, sock, handshakeAsServer, server.hostname
   )
-  result = newClient(sock, server.hostname)
-
-# XXX remove same as withConnect
-template withClient*(client: ClientContext, body: untyped) =
-  doAssert not client.isConnected
-  var sendFut, recvFut, dispFut: Future[void]
-  try:
-    client.isConnected = true
-    await client.handshake()
-    sendFut = client.sendTask()
-    recvFut = client.recvTask()
-    dispFut = client.recvDispatcher()
-    block:
-      body
-  finally:
-    client.close()
-    for fut in [sendFut, recvFut, dispFut]:
-      try:
-        if fut != nil:
-          await fut
-      except HyperxError as err:
-        debugInfo err.msg
+  result = newClient(ctServer, sock, server.hostname)
 
 template withServer*(server: ServerContext, body: untyped): untyped =
-  var serveFut: Future[void]
   try:
     server.isConnected = true
     server.listen()
@@ -156,13 +153,7 @@ proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
   let sid = await client.streamOpenedMsgs.pop()
   result = newClientStream(client, sid)
 
-proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
-  let frm = await strm.client.read(strm.sid)
-  check frm.typ == frmtHeaders, newStrmError(errProtocolError)
-  data[].add frm.payload
-  if frmfEndStream in frm.flags:
-    strm.state = csStateRecvEnded
-
+# XXX remove
 proc sendHeaders*(
   strm: ClientStream,
   status: int,
@@ -170,7 +161,7 @@ proc sendHeaders*(
   contentLen = -1
 ) {.async.} =
   template client: untyped = strm.client
-  #doAssert strm.state == csStateOpened
+  doAssert strm.state == csStateRecvEnded
   strm.state = csStateSentHeaders
   var frm = newFrame()
   client.addHeader(frm, ":status", $status)

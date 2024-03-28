@@ -12,7 +12,7 @@ func toBytes(s: string): seq[byte] =
 when isMainModule:
   proc main() {.async.} =
     var client = newClient("www.google.com")
-    withConnection(client):
+    withClient(client):
       echo "G"
       let r = await client.get("/")
       doAssert ":status: 200" in r.headers
@@ -22,7 +22,7 @@ when isMainModule:
 
   proc mainReqBin() {.async.} =
     var client = newClient("reqbin.com")
-    withConnection(client):
+    withClient(client):
       block:
         echo "GET"
         let r = await client.get(

@@ -1,5 +1,8 @@
 ## Functionality shared beetwen client and server
 
+when not defined(ssl):
+  {.error: "this lib needs -d:ssl".}
+
 import std/asyncdispatch
 import std/asyncnet
 import std/openssl
@@ -11,12 +14,21 @@ import ./stream
 import ./queue
 import ./errors
 
+when defined(hyperxTest):
+  import ./testsocket
+
 proc SSL_CTX_set_options*(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
 const SSL_OP_NO_RENEGOTIATION* = 1073741824
 const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION* = 65536
 
+# XXX remove
+func toBytes(s: string): seq[byte] {.compileTime.} =
+  result = newSeq[byte]()
+  for c in s:
+    result.add c.byte
+
 const
-  preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
+  preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".toBytes
   statusLineLen* = ":status: xxx\r\n".len
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize* = 4096'u32
@@ -70,31 +82,36 @@ else:
   type MyAsyncSocket* = AsyncSocket
 
 type
+  ClientTyp* = enum
+    ctServer, ctClient
   ClientContext* = ref object
-    sock: MyAsyncSocket
-    hostname: string
+    typ: ClientTyp
+    sock*: MyAsyncSocket
+    hostname*: string
     port: Port
     isConnected*: bool
     headersEnc, headersDec: DynHeaders
     streams: Streams
-    currStreamId: StreamId
     sendMsgs, recvMsgs: QueueAsync[Frame]
     streamOpenedMsgs*: QueueAsync[StreamId]
-    maxPeerStrmIdSeen: StreamId
+    currStreamId, maxPeerStrmIdSeen: StreamId
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
     peerMaxFrameSize: uint32
-    exitError*: ref HyperxError
+    exitError: ref HyperxError
 
 proc newClient*(
+  typ: ClientTyp,
   sock: MyAsyncSocket,
   hostname: string,
   port = Port 443
-): ClientContext {.raises: [InternalOsError].} =
+): ClientContext {.raises: [].} =
   result = ClientContext(
+    typ: typ,
     sock: sock,
     hostname: hostname,
     port: port,
+    isConnected: false,
     headersEnc: initDynHeaders(stgHeaderTableSize.int),
     headersDec: initDynHeaders(stgHeaderTableSize.int),
     streams: initStreams(),
@@ -158,20 +175,21 @@ proc handshake*(client: ClientContext) {.async.} =
   let sid = client.openMainStream()
   doAssert sid == frmSidMain.StreamId
   var frm = newSettingsFrame()
-  # XXX for servers this must be 0 (disabled) or not send it
-  frm.addSetting frmsEnablePush, stgDisablePush
+  if client.typ == ctClient:
+    frm.addSetting frmsEnablePush, stgDisablePush
   frm.addSetting frmsInitialWindowSize, stgMaxWindowSize
   var blob = newSeqOfCap[byte](preface.len+frm.len)
-  # XXX no preface for server + has to check the client preface
-  #blob.add preface
+  if client.typ == ctClient:
+    blob.add preface
   blob.add frm.s
   check not client.sock.isClosed, newConnClosedError()
   await client.sock.send(addr blob[0], blob.len)
-  blob.setLen preface.len
-  check not client.sock.isClosed, newConnClosedError()
-  # XXX server only
-  let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
-  check blobRln == blob.len, newConnClosedError()
+  if client.typ == ctServer:
+    blob.setLen preface.len
+    check not client.sock.isClosed, newConnClosedError()
+    let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
+    check blobRln == blob.len, newConnClosedError()
+    check blob == preface, newConnError(errProtocolError)
 
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   doAssert frm.sid.StreamId == s.id
@@ -439,8 +457,11 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         # maybe max table size should be a setting instead of 4096
         client.headersEnc.setSize min(value.int, stgHeaderTableSize.int)
       of frmsEnablePush:
-        # XXX servers can receive 1
-        check value == 0, newConnError(errProtocolError)
+        case client.typ
+        of ctClient:
+          check value == 0, newConnError(errProtocolError)
+        of ctServer:
+          check value == 0 or value == 1, newConnError(errProtocolError)
       of frmsMaxConcurrentStreams:
         client.peerMaxConcurrentStreams = value
       of frmsInitialWindowSize:
@@ -484,17 +505,17 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       # Settings need to be applied before consuming following messages
       await consumeMainStream(client, frm)
       continue
-    # doAssert client.peerTyp in {peerServer, peerClient}
-    # if client.peerTyp == peerServer:
-    if frm.sid.StreamId > client.maxPeerStrmIdSeen:
+    if client.typ == ctServer and
+        frm.sid.StreamId > client.maxPeerStrmIdSeen and
+        frm.sid.int mod 2 != 0:
+      client.maxPeerStrmIdSeen = frm.sid.StreamId
       # we do not store idle streams, so no need to close them
       client.streams.open(frm.sid.StreamId)
       await client.streamOpenedMsgs.put frm.sid.StreamId
-    # XXX mod 2 == 0 for client
-    if frm.sid.int mod 2 != 0:
-      client.maxPeerStrmIdSeen = max(
-        client.maxPeerStrmIdSeen.int, frm.sid.int
-      ).StreamId
+    if client.typ == ctClient and
+        frm.sid.StreamId > client.maxPeerStrmIdSeen and
+        frm.sid.int mod 2 == 0:
+      client.maxPeerStrmIdSeen = frm.sid.StreamId
     if frm.typ == frmtHeaders:
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
@@ -547,6 +568,41 @@ proc recvDispatcher*(client: ClientContext) {.async.} =
     debugInfo "responseDispatcher exited"
     client.close()
 
+# XXX remove same as withConnect
+template withClient*(client: ClientContext, body: untyped) =
+  doAssert not client.isConnected
+  var sendFut, recvFut, dispFut: Future[void]
+  try:
+    client.isConnected = true
+    if client.typ == ctClient:
+      await client.sock.connect(client.hostname, client.port)
+    await client.handshake()
+    sendFut = client.sendTask()
+    recvFut = client.recvTask()
+    dispFut = client.recvDispatcher()
+    block:
+      body
+  except QueueClosedError as err:
+    doAssert not client.isConnected
+    raise err
+  except CatchableError as err:
+    debugInfo err.msg
+    raise err
+  finally:
+    client.close()
+    # XXX do gracefull shutdown with timeout,
+    #     wait for send/recv to drain the queue
+    #     before closing
+    
+    # do not bother the user with hyperx errors
+    # at this point body completed or errored out
+    for fut in [sendFut, recvFut, dispFut]:
+      try:
+        if fut != nil:
+          await fut
+      except HyperxError as err:
+        debugInfo err.msg
+
 type
   ClientStreamState* = enum
     csStateInitial,
@@ -592,8 +648,30 @@ func addHeader*(
   except HpackError as err:
     raise newException(HyperxError, err.msg)
 
+proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
+  case strm.client.typ
+  of ctClient: doAssert strm.state == csStateSentEnded
+  of ctServer: doAssert strm.state == csStateOpened
+  strm.state = csStateRecvHeaders
+  # https://httpwg.org/specs/rfc9113.html#HttpFraming
+  var frm: Frame
+  while true:
+    frm = await strm.client.read(strm.sid)
+    check frm.typ == frmtHeaders, newStrmError(errProtocolError)
+    if strm.client.typ == ctServer:
+      break
+    check frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
+    #check frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
+    if frm.payload[9] == '1'.byte:
+      check frmfEndStream notin frm.flags, newStrmError(errProtocolError)
+    else:
+      break
+  data[].add frm.payload
+  if frmfEndStream in frm.flags:
+    strm.state = csStateRecvEnded
+
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
-  #doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
+  doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
   strm.state = csStateRecvData
   let frm = await strm.client.read(strm.sid)
   # XXX store trailer headers
@@ -612,7 +690,7 @@ proc sendBody*(
   data: ref string,
   finish = false
 ) {.async.} =
-  #doAssert strm.state in {csStateSentHeaders, csStateSentData}
+  doAssert strm.state in {csStateSentHeaders, csStateSentData}
   strm.state = csStateSentData
   var frm = newFrame()
   frm.setTyp frmtData
@@ -630,6 +708,34 @@ template withStream*(strm: ClientStream, body: untyped): untyped =
   try:
     block:
       body
-    #doAssert strm.state == csStateRecvEnded
+    case strm.client.typ
+    of ctClient: doAssert strm.state == csStateRecvEnded
+    of ctServer: doAssert strm.state == csStateSentEnded
   finally:
     strm.close()
+
+when defined(hyperxTest):
+  proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =
+    await client.sock.putRecvData data
+
+  proc sentTestData*(client: ClientContext, size: int): Future[seq[byte]] {.async.}  =
+    result = newSeq[byte](size)
+    let sz = await client.sock.sentInto(addr result[0], size)
+    result.setLen sz
+
+when isMainModule:
+  when not defined(hyperxTest):
+    {.error: "tests need -d:hyperxTest".}
+
+  import std/net
+
+  block default_settings:
+    doAssert stgHeaderTableSize == 4096'u32
+    doAssert stgMaxConcurrentStreams == uint32.high
+    doAssert stgInitialWindowSize == 65_535'u32
+    doAssert stgMaxWindowSize == 2_147_483_647'u32
+    doAssert stgInitialMaxFrameSize == 16_384'u32
+    doAssert stgMaxFrameSize == 16_777_215'u32
+    doAssert stgDisablePush == 0'u32
+
+  echo "ok"

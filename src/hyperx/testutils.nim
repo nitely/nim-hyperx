@@ -1,12 +1,14 @@
 when not defined(hyperxTest):
   {.error: "tests need -d:hyperxTest".}
 
-{.define: ssl.}
+when not defined(ssl):
+  {.error: "this lib needs -d:ssl".}
 
 import std/strutils
 import std/asyncdispatch
 import pkg/hpack
 import ./frame
+import ./clientserver
 import ./client
 
 template testAsync*(name: string, body: untyped): untyped =

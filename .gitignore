@@ -5,6 +5,7 @@ tests/testclient
 tests/testclientserver
 src/hyperx/client
 src/hyperx/server
+src/hyperx/clientserver
 src/hyperx/queue
 src/hyperx/lock
 src/hyperx/untestable

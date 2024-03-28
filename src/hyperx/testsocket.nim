@@ -1,4 +1,11 @@
+
+when not defined(ssl):
+  {.error: "this lib needs -d:ssl".}
+
 import std/asyncdispatch
+import std/asyncnet
+import std/net
+
 import ./queue
 
 type
@@ -11,7 +18,7 @@ type
     hostname*: string
     port*: Port
 
-proc newMySocket*(): TestSocket =
+proc newMySocket*(certFile = "", keyFile = ""): TestSocket =
   TestSocket(
     recvData: newQueue[seq[byte]](1000),
     sentData: newQueue[seq[byte]](1000),
@@ -80,3 +87,26 @@ proc close*(s: TestSocket) =
     asyncCheck s.recvData.put newSeq[byte]()
     s.sentData.close()
   callSoon terminate
+
+# XXX untested server funcs
+
+proc setSockOpt*(s: TestSocket, opt = OptReuseAddr, x = true) =
+  discard
+
+proc bindAddr*(s: TestSocket, port = Port(0)) =
+  discard
+
+proc listen*(s: TestSocket) =
+  discard
+
+proc accept*(s: TestSocket): Future[TestSocket] {.async.} =
+  result = s
+
+proc wrapConnectedSocket*(
+  ctx: SslContext;
+  socket: TestSocket;
+  handshake: SslHandshakeType;
+  hostname = ""
+) =
+  discard
+

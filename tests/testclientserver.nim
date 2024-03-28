@@ -1,7 +1,6 @@
 {.define: ssl.}
 
 import std/asyncdispatch
-import pkg/hpack
 import ../src/hyperx/client
 import ../src/hyperx/server
 import ../src/hyperx/queue
@@ -20,13 +19,18 @@ func newStringRef(s = ""): ref string =
 
 const localPort = Port 4443
 const localHost = "127.0.0.1"
+# XXX this only works in my machine
+const certFile = "/home/esteban/example.com+5.pem"
+const keyFile = "/home/esteban/example.com+5-key.pem"
 
 testAsync "simple req/resp":
   let shutdownSignal = newQueue[bool](1)
   var serverRecvHeaders = ""
   var serverRecvBody = ""
   proc doServerWork() {.async.} =
-    let server = newServer(localHost, localPort)
+    let server = newServer(
+      localHost, localPort, certFile, keyFile
+    )
     withServer server:
       let client = await server.recvClient()
       withClient client:
@@ -53,7 +57,7 @@ testAsync "simple req/resp":
   var clientRecvBody = ""
   proc doClientWork() {.async.} =
     var client = newClient(localHost, localPort)
-    withConnection(client):
+    withClient client:
       let r = await client.get("/")
       clientRecvHeaders = r.headers
       clientRecvBody = r.text
@@ -97,7 +101,9 @@ testAsync "multiplex req/resp":
       )
       await strm.sendBody(dataOut, finish = true)
   proc doServerWork() {.async.} =
-    let server = newServer(localHost, localPort)
+    let server = newServer(
+      localHost, localPort, certFile, keyFile
+    )
     withServer server:
       let client = await server.recvClient()
       withClient client:
@@ -127,7 +133,7 @@ testAsync "multiplex req/resp":
   var clientRecvBodyStrm2 = ""
   proc doClientWork() {.async.} =
     var client = newClient(localHost, localPort)
-    withConnection(client):
+    withClient client:
       let strm1 = client.newClientStream()
       let strm2 = client.newClientStream()
       withStream strm1:
@@ -152,14 +158,14 @@ testAsync "multiplex req/resp":
           await strm1.recvHeaders(content)
           clientRecvHeadersStrm1 = content[]
           content[] = ""
-          while not strm1.ended:
+          while not strm1.recvEnded:
             await strm1.recvBody(content)
           clientRecvBodyStrm1 = content[]
           content[] = ""
           await strm2.recvHeaders(content)
           clientRecvHeadersStrm2 = content[]
           content[] = ""
-          while not strm2.ended:
+          while not strm2.recvEnded:
             await strm2.recvBody(content)
           clientRecvBodyStrm2 = content[]
 
