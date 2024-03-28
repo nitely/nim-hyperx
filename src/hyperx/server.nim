@@ -60,7 +60,7 @@ proc defaultSslContext(
   try:
     sslContext = newContext(
       protSSLv23,
-      verifyMode = CVerifyNone,
+      verifyMode = CVerifyPeer,
       certFile = certFile,
       keyFile = keyFile
     )

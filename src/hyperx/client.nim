@@ -47,7 +47,7 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   # lower than the min protocol defined
   # in openssl.config, usually +TLSv1.2
   try:
-    sslContext = newContext(protSSLv23, verifyMode = CVerifyNone)
+    sslContext = newContext(protSSLv23, verifyMode = CVerifyPeer)
   except CatchableError as err:
     raise newException(InternalSslError, err.msg)
   except Defect as err:
