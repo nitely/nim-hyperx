@@ -5,6 +5,9 @@ Pure Nim Http2 client/server implementation.
 Beware this library is in heavy development,
 and the API is not stable.
 
+> [!NOTE]
+> This library supports HTTP/2 only. Not HTTP/1, nor HTTP/3.
+
 ## Compatibility
 
 > Nim +2.0
