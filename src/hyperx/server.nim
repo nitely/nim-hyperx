@@ -26,7 +26,8 @@ export
   sendBody,
   recvEnded,
   ClientStream,
-  newClientStream
+  newClientStream,
+  ClientContext
 
 var sslContext {.threadvar.}: SslContext
 
@@ -46,7 +47,7 @@ proc sslContextAlpnSelect(
   var i = 0
   while i+h2AlpnL-1 < inlen.int:
     if h2Alpn == toOpenArray(inProto, i, i+h2AlpnL-1):
-      outProto[] = addr inProto[i+1]
+      outProto[] = cast[cstring](addr inProto[i+1])
       cast[ptr char](outlen)[] = inProto[i]
       return SSL_TLSEXT_ERR_OK
     i += inProto[i].int + 1

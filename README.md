@@ -2,47 +2,47 @@
 
 Pure Nim Http2 client/server implementation.
 
-> [!WARNING]
-> This library is in alpha state and as such there won't be a
-> deprecation period for breaking changes. You are adviced to
-> pin the version/commit if you use it.
+Beware this library is in heavy development,
+and the API is not stable.
 
 ## Compatibility
 
-> Latest Nim only
+> Nim +2.0
 
 ## Client
 
 ```nim
+
+# this define needs to be in the main nim file
+# or pass it as a compiler parameter `-d:ssl`
+# or define it in the nim.cfg file
 {.define: ssl.}
 
 import std/asyncdispatch
 import pkg/hyperx/client
 
-proc httpGet(client: ClientContext, query: string) {.async.} =
-  let r = await client.get("/search?q=" & query)
-  echo r.headers
-  echo r.text[0..100]
-
 proc main() {.async.} =
   var client = newClient("www.google.com")
-  withConnection(client):
+  withClient(client):
     let queries = [
       "john+wick",
       "winston",
       "ms+perkins"
     ]
-    var tasks = newSeq[Future[void]]()
+    var tasks = newSeq[Future[Response]]()
     for q in queries:
-      tasks.add client.httpGet(q)
-    await all(tasks)
+      tasks.add client.get("/search?q=" & q)
+    let responses = await all(tasks)
+    for r in responses:
+      doAssert ":status: 200" in r.headers
+      doAssert "doctype" in r.text
 waitFor main()
 echo "ok"
 ```
 
 ## Server
 
-WIP
+See [examples/localServer.nim](https://github.com/nitely/nim-hyperx/blob/master/examples/localServer.nim)
 
 ## Debugging
 

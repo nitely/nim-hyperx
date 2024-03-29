@@ -23,7 +23,9 @@ export
   recvHeaders,
   recvEnded,
   recvBody,
-  sendBody
+  sendBody,
+  ClientStream,
+  ClientContext
 
 func add(s: var seq[byte], ss: string) {.raises: [].} =
   # XXX x_x

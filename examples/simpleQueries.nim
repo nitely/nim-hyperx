@@ -2,7 +2,7 @@
 
 import std/strutils
 import std/asyncdispatch
-import ./client
+import ../src/hyperx/client
 
 func toBytes(s: string): seq[byte] =
   result = newSeq[byte]()

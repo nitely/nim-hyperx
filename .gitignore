@@ -13,3 +13,7 @@ src/hyperx/frame
 src/hyperx/stream
 src/hyperx/utils
 src/hyperx/testutils
+examples/simpleQueries
+examples/multipleGets
+examples/streamClient
+examples/localServer
