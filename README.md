@@ -44,6 +44,10 @@ echo "ok"
 
 See [examples/localServer.nim](https://github.com/nitely/nim-hyperx/blob/master/examples/localServer.nim)
 
+Beware HTTP/2 requires TLS, so if you want to test the server locally you'll
+need a local cert. I used [mkcert](https://github.com/FiloSottile/mkcert)
+to generate mine. Idk if there is an easier way to try this.
+
 ## Debugging
 
 This will print received frames, and some other
