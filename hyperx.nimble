@@ -5,7 +5,7 @@ author = "Esteban Castro Borsani (@nitely)"
 description = "Pure Nim Http2 client and server"
 license = "MIT"
 srcDir = "src"
-skipDirs = @["tests"]
+skipDirs = @["tests", "examples"]
 
 requires "nim >= 2.0.0"
 requires "hpack >= 0.3.0"
