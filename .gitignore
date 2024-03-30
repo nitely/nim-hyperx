@@ -1,3 +1,4 @@
+.env
 nimcache/
 nimble.develop
 tests/tests

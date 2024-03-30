@@ -1,15 +1,14 @@
 {.define: ssl.}
 
+from std/os import getEnv
 import std/strutils
 import std/asyncdispatch
 import ../src/hyperx/server
 
 const localHost* = "127.0.0.1"
 const localPort* = Port 4443
-# XXX this only works in my machine
-#     make it work in docker
-const certFile = "/home/esteban/example.com+5.pem"
-const keyFile = "/home/esteban/example.com+5-key.pem"
+const certFile = getEnv "HYPERX_TEST_CERTFILE"
+const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
 func newStringRef(s = ""): ref string =
   new result

@@ -1,5 +1,6 @@
 {.define: ssl.}
 
+from os import getEnv
 import std/asyncdispatch
 import ../src/hyperx/client
 import ../src/hyperx/server
@@ -19,9 +20,8 @@ func newStringRef(s = ""): ref string =
 
 const localPort = Port 4443
 const localHost = "127.0.0.1"
-# XXX this only works in my machine
-const certFile = "/home/esteban/example.com+5.pem"
-const keyFile = "/home/esteban/example.com+5-key.pem"
+const certFile = getEnv "HYPERX_TEST_CERTFILE"
+const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
 testAsync "simple req/resp":
   let shutdownSignal = newQueue[bool](1)

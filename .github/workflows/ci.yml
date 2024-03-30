@@ -18,7 +18,7 @@ jobs:
     - name: Run Tests
       run: |
         docker pull nimlang/nim:${{ matrix.nim }}
-        docker run --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
+        docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
         /bin/bash -c "git config --global --add safe.directory /usr/src/app && \ 
           apt update && \
           apt install -y curl libnss3-tools && \
