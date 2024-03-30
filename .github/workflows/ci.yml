@@ -20,10 +20,10 @@ jobs:
         docker pull nimlang/nim:${{ matrix.nim }}
         docker run --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
         /bin/bash -c "git config --global --add safe.directory /usr/src/app && \ 
-          sudo apt install libnss3-tools && \
+          apt install libnss3-tools && \
           curl -JLO \"https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-arm64\" && \
           chmod +x mkcert-v*-linux-amd64 && \
-          sudo cp mkcert-v*-linux-amd64 /usr/local/bin/mkcert && \
+          cp mkcert-v*-linux-amd64 /usr/local/bin/mkcert && \
           mkcert -install && \
           mkcert example.com \"*.example.com\" example.test localhost 127.0.0.1 ::1 && \
           nimble install -y && \
