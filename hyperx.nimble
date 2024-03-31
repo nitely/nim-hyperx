@@ -34,5 +34,10 @@ task untestable, "Test untesteable":
 task testclientserver, "Test client server":
   exec "nim c -r -f tests/testclientserver.nim"
 
+task test2, "Test2":
+  exec "nim c -r -f tests/testclient.nim"
+  exec "nim c -r -f tests/testclientserver.nim"
+  exec "nim c -r -f examples/streamClient.nim"
+
 task docs, "Docs":
   exec "nim doc2 -o:./docs --project ./src/hyperx.nim"

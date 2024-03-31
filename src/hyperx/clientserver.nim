@@ -65,17 +65,6 @@ func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
   for c in ss:
     s.add c.char
 
-func decode(
-  payload: openArray[byte],
-  ds: var DecodedStr,
-  dh: var DynHeaders
-) {.raises: [ConnError].} =
-  try:
-    hdecodeAll(payload, dh, ds)
-  except HpackError as err:
-    debugInfo err.msg
-    raise newConnError(errCompressionError)
-
 when defined(hyperxTest):
   type MyAsyncSocket* = TestSocket
 else:
@@ -166,6 +155,29 @@ func openStream(client: ClientContext): StreamId {.raises: [StreamsClosedError].
   client.streams.open result
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
+
+func hpackDecode(
+  client: ClientContext,
+  ds: var DecodedStr,
+  payload: openArray[byte]
+) {.raises: [ConnError].} =
+  try:
+    hdecodeAll(payload, client.headersDec, ds)
+  except HpackError as err:
+    debugInfo err.msg
+    raise newConnError(errCompressionError)
+
+func hpackEncode*(
+  client: ClientContext,
+  payload: var seq[byte],  # XXX var string
+  name, value: openArray[char]
+) {.raises: [HyperxError].} =
+  ## headers must be added synchronously, no await in between,
+  ## or else a table resize could occur in the meantime
+  try:
+    discard hencode(name, value, client.headersEnc, payload, huffman = false)
+  except HpackError as err:
+    raise newException(HyperxError, err.msg)
 
 proc handshake*(client: ClientContext) {.async.} =
   doAssert client.isConnected
@@ -520,7 +532,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       # XXX implement initDecodedBytes as seq[byte] in hpack
       var headers = initDecodedStr()
       # can raise a connError
-      decode(frm.payload, headers, client.headersDec)
+      client.hpackDecode(headers, frm.payload)
       frm.shrink frm.payload.len
       frm.s.add $headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
@@ -635,19 +647,6 @@ proc close*(strm: ClientStream) =
 func recvEnded*(strm: ClientStream): bool =
   strm.state == csStateRecvEnded
 
-# XXX remove, change to encode(dyn)
-func addHeader*(
-  client: ClientContext,
-  frm: Frame,
-  n, v: string
-) {.raises: [HyperxError].} =
-  ## headers must be added synchronously, no await in between,
-  ## or else a table resize could occur in the meantime
-  try:
-    discard hencode(n, v, client.headersEnc, frm.s, huffman = false)
-  except HpackError as err:
-    raise newException(HyperxError, err.msg)
-
 proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   case strm.client.typ
   of ctClient: doAssert strm.state == csStateSentEnded
@@ -684,6 +683,28 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   data[].add frm.payload
   if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
+
+proc sendHeaders*(
+  strm: ClientStream,
+  headers: ref seq[byte],  # XXX ref string
+  finish: bool
+) {.async.} =
+  ## Headers must be HPACK encoded
+  template client: untyped = strm.client
+  case strm.client.typ
+  of ctClient: doAssert strm.state == csStateOpened
+  of ctServer: doAssert strm.state == csStateRecvEnded
+  strm.state = csStateSentHeaders
+  var frm = newFrame()
+  frm.add headers[]
+  frm.setTyp frmtHeaders
+  frm.setSid strm.sid.FrmSid
+  frm.setPayloadLen frm.payloadSize.FrmPayloadLen
+  frm.flags.incl frmfEndHeaders
+  if finish:
+    frm.flags.incl frmfEndStream
+    strm.state = csStateSentEnded
+  await client.write frm
 
 proc sendBody*(
   strm: ClientStream,

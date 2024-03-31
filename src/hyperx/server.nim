@@ -10,7 +10,6 @@ import std/openssl
 import std/net
 
 import ./clientserver
-import ./frame
 import ./stream
 import ./queue
 import ./errors
@@ -23,6 +22,7 @@ export
   withStream,
   recvHeaders,
   recvBody,
+  #sendHeaders,
   sendBody,
   recvEnded,
   ClientStream,
@@ -154,7 +154,6 @@ proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
   let sid = await client.streamOpenedMsgs.pop()
   result = newClientStream(client, sid)
 
-# XXX remove
 proc sendHeaders*(
   strm: ClientStream,
   status: int,
@@ -162,35 +161,12 @@ proc sendHeaders*(
   contentLen = -1
 ) {.async.} =
   template client: untyped = strm.client
-  doAssert strm.state == csStateRecvEnded
-  strm.state = csStateSentHeaders
-  var frm = newFrame()
-  client.addHeader(frm, ":status", $status)
+  var headers = new(seq[byte])
+  headers[] = newSeq[byte]()
+  client.hpackEncode(headers[], ":status", $status)
   if contentType.len > 0:
-    client.addHeader(frm, "content-type", contentType)
+    client.hpackEncode(headers[], "content-type", contentType)
   if contentLen > -1:
-    client.addHeader(frm, "content-length", $contentLen)
-  frm.setTyp frmtHeaders
-  frm.setSid strm.sid.FrmSid
-  frm.setPayloadLen frm.payloadSize.FrmPayloadLen
-  frm.flags.incl frmfEndHeaders
-  if contentLen <= 0:
-    frm.flags.incl frmfEndStream
-    strm.state = csStateSentEnded
-  await client.write frm
-
-when false:
-  let server = newServer("foobar.com", Port 443)
-  withServer server:
-    while server.isConnected:
-      let client = await server.recvClient()
-      withClient client:
-        while client.isConnected:
-          let strm = await client.recvStream()
-          withStream strm:
-            let data = newStringref()
-            await strm.recvHeaders(data)
-            await strm.recvBody(data)
-            # process
-            await strm.sendHeaders(data)
-            await strm.sendBody(data)
+    client.hpackEncode(headers[], "content-length", $contentLen)
+  let finish = contentLen <= 0
+  await strm.sendHeaders(headers, finish)

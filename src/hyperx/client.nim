@@ -10,7 +10,6 @@ import std/asyncdispatch
 import std/asyncnet
 
 import ./clientserver
-import ./frame
 import ./errors
 
 when defined(hyperxTest):
@@ -23,6 +22,7 @@ export
   recvHeaders,
   recvEnded,
   recvBody,
+  #sendHeaders,
   sendBody,
   ClientStream,
   ClientContext
@@ -118,28 +118,21 @@ proc sendHeaders*(
   contentLen = 0
 ) {.async.} =
   template client: untyped = strm.client
-  doAssert strm.state == csStateOpened
-  strm.state = csStateSentHeaders
-  var frm = newFrame()
-  client.addHeader(frm, ":method", $httpMethod)
-  client.addHeader(frm, ":scheme", "https")
-  client.addHeader(frm, ":path", path)
-  client.addHeader(frm, ":authority", client.hostname)
-  client.addHeader(frm, "user-agent", userAgent)
+  var headers = new(seq[byte])
+  headers[] = newSeq[byte]()
+  client.hpackEncode(headers[], ":method", $httpMethod)
+  client.hpackEncode(headers[], ":scheme", "https")
+  client.hpackEncode(headers[], ":path", path)
+  client.hpackEncode(headers[], ":authority", client.hostname)
+  client.hpackEncode(headers[], "user-agent", userAgent)
   if httpMethod in {hmGet, hmHead}:
     doAssert contentLen == 0
-    client.addHeader(frm, "accept", accept)
+    client.hpackEncode(headers[], "accept", accept)
   if httpMethod in {hmPost, hmPut, hmPatch}:
-    client.addHeader(frm, "content-type", contentType)
-    client.addHeader(frm, "content-length", $contentLen)
-  frm.setTyp frmtHeaders
-  frm.setSid strm.sid.FrmSid
-  frm.setPayloadLen frm.payloadSize.FrmPayloadLen
-  frm.flags.incl frmfEndHeaders
-  if contentLen == 0:
-    frm.flags.incl frmfEndStream
-    strm.state = csStateSentEnded
-  await client.write frm
+    client.hpackEncode(headers[], "content-type", contentType)
+    client.hpackEncode(headers[], "content-length", $contentLen)
+  let finish = contentLen == 0
+  await strm.sendHeaders(headers, finish)
 
 type
   Payload* = ref object
