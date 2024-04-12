@@ -6,7 +6,7 @@ when not defined(ssl):
 
 import std/asyncdispatch
 import std/asyncnet
-import std/openssl
+import std/exitprocs
 import std/net
 
 import ./clientserver
@@ -34,55 +34,13 @@ var sslContext {.threadvar.}: SslContext
 proc destroySslContext() {.noconv.} =
   sslContext.destroyContext()
 
-proc sslContextAlpnSelect(
-  ssl: SslPtr;
-  outProto: ptr cstring;
-  outlen: cstring;  # ptr char
-  inProto: cstring;
-  inlen: cuint;
-  arg: pointer
-): cint {.cdecl.} =
-  const h2Alpn = "\x02h2"  # len + proto_name
-  const h2AlpnL = h2Alpn.len
-  var i = 0
-  while i+h2AlpnL-1 < inlen.int:
-    if h2Alpn == toOpenArray(inProto, i, i+h2AlpnL-1):
-      outProto[] = cast[cstring](addr inProto[i+1])
-      cast[ptr char](outlen)[] = inProto[i]
-      return SSL_TLSEXT_ERR_OK
-    i += inProto[i].int + 1
-  return SSL_TLSEXT_ERR_NOACK
-
 proc defaultSslContext(
   certFile, keyFile: string
 ): SslContext {.raises: [InternalSslError].} =
   if not sslContext.isNil:
     return sslContext
-  try:
-    sslContext = newContext(
-      protSSLv23,
-      verifyMode = CVerifyPeer,
-      certFile = certFile,
-      keyFile = keyFile
-    )
-  except CatchableError as err:
-    raise newException(InternalSslError, err.msg)
-  except Defect as err:
-    raise err
-  except Exception as err:
-    raise newException(Defect, err.msg)
-  doAssert sslContext != nil, "failure to initialize the SSL context"
-  # https://httpwg.org/specs/rfc9113.html#tls12features
-  discard SSL_CTX_set_options(
-    sslContext.context,
-    SSL_OP_ALL or SSL_OP_NO_SSLv2 or SSL_OP_NO_SSLv3 or
-    SSL_OP_NO_RENEGOTIATION or
-    SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
-  )
-  discard SSL_CTX_set_alpn_select_cb(
-    sslContext.context, sslContextAlpnSelect, nil
-  )
-  addQuitProc(destroySslContext)
+  sslContext = defaultSslContext(ctServer, certFile, keyFile)
+  addExitProc(destroySslContext)
   return sslContext
 
 when not defined(hyperxTest):

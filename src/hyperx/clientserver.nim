@@ -6,6 +6,7 @@ when not defined(ssl):
 import std/asyncdispatch
 import std/asyncnet
 import std/openssl
+import std/net
 
 import pkg/hpack
 
@@ -13,6 +14,7 @@ import ./frame
 import ./stream
 import ./queue
 import ./errors
+import ./utils
 
 when defined(hyperxTest):
   import ./testsocket
@@ -65,14 +67,79 @@ func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
   for c in ss:
     s.add c.char
 
+type
+  ClientTyp* = enum
+    ctServer, ctClient
+
+proc sslContextAlpnSelect(
+  ssl: SslPtr;
+  outProto: ptr cstring;
+  outlen: cstring;  # ptr char
+  inProto: cstring;
+  inlen: cuint;
+  arg: pointer
+): cint {.cdecl.} =
+  const h2Alpn = "\x02h2"  # len + proto_name
+  const h2AlpnL = h2Alpn.len
+  var i = 0
+  while i+h2AlpnL-1 < inlen.int:
+    if h2Alpn == toOpenArray(inProto, i, i+h2AlpnL-1):
+      outProto[] = cast[cstring](addr inProto[i+1])
+      cast[ptr char](outlen)[] = inProto[i]
+      return SSL_TLSEXT_ERR_OK
+    i += inProto[i].int + 1
+  return SSL_TLSEXT_ERR_NOACK
+
+proc defaultSslContext*(
+  clientTyp: ClientTyp,
+  certFile = "",
+  keyFile = ""
+): SslContext {.raises: [InternalSslError].} =
+  # protSSLv23 will disable all protocols
+  # lower than the min protocol defined
+  # in openssl.config, usually +TLSv1.2
+  try:
+    result = newContext(
+      protSSLv23,
+      verifyMode = CVerifyPeer,
+      certFile = certFile,
+      keyFile = keyFile
+    )
+  except CatchableError as err:
+    raise newException(InternalSslError, err.msg)
+  except Defect as err:
+    raise err
+  except Exception as err:
+    # workaround for newContext raising Exception
+    raise newException(Defect, err.msg)
+  doAssert result != nil, "failure to initialize the SSL context"
+  # https://httpwg.org/specs/rfc9113.html#tls12features
+  discard SSL_CTX_set_options(
+    result.context,
+    SSL_OP_ALL or SSL_OP_NO_SSLv2 or SSL_OP_NO_SSLv3 or
+    SSL_OP_NO_RENEGOTIATION or
+    SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
+  )
+  case clientTyp
+  of ctServer:
+    discard SSL_CTX_set_alpn_select_cb(
+      result.context, sslContextAlpnSelect, nil
+    )
+  of ctClient:
+    var openSslVersion = 0.culong
+    untrackExceptions:
+      openSslVersion = getOpenSSLVersion()
+    doAssert openSslVersion >= 0x10002000
+    discard SSL_CTX_set_alpn_protos(
+      result.context, "\x02h2", 3
+    )
+
 when defined(hyperxTest):
   type MyAsyncSocket* = TestSocket
 else:
   type MyAsyncSocket* = AsyncSocket
 
 type
-  ClientTyp* = enum
-    ctServer, ctClient
   ClientContext* = ref object
     typ: ClientTyp
     sock*: MyAsyncSocket

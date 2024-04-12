@@ -4,7 +4,7 @@
 when not defined(ssl):
   {.error: "this lib needs -d:ssl".}
 
-import std/openssl
+import std/exitprocs
 import std/net
 import std/asyncdispatch
 import std/asyncnet
@@ -45,30 +45,9 @@ proc destroySslContext() {.noconv.} =
 proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   if not sslContext.isNil:
     return sslContext
-  # protSSLv23 will disable all protocols
-  # lower than the min protocol defined
-  # in openssl.config, usually +TLSv1.2
-  try:
-    sslContext = newContext(protSSLv23, verifyMode = CVerifyPeer)
-  except CatchableError as err:
-    raise newException(InternalSslError, err.msg)
-  except Defect as err:
-    raise err  # raise original error
-  except Exception as err:
-    # workaround for newContext raising Exception
-    raise newException(Defect, err.msg)
-  doAssert sslContext != nil, "failure to initialize the SSL context"
-  discard SSL_CTX_set_options(
-    sslContext.context,
-    SSL_OP_ALL or SSL_OP_NO_SSLv2 or SSL_OP_NO_SSLv3 or
-    SSL_OP_NO_RENEGOTIATION or
-    SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
-  )
-  # XXX OPENSSL_VERSION_NUMBER >= 0x10002000L
-  discard SSL_CTX_set_alpn_protos(sslContext.context, "\x02h2", 3)
-  # XXX catch EOutOfIndex
-  addQuitProc(destroySslContext)
-  return sslContext  
+  sslContext = defaultSslContext(ctClient)
+  addExitProc(destroySslContext)
+  return sslContext
 
 when defined(hyperxTest):
   type MyAsyncSocket = TestSocket
