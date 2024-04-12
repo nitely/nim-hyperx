@@ -34,17 +34,38 @@ proc processStream(strm: ClientStream) {.async.} =
     )
     await strm.sendBody(dataEcho, finish = true)
 
-proc processClient(client: ClientContext) {.async.} =
-  withClient client:
-    while client.isConnected:
-      let strm = await client.recvStream()
-      asyncCheck processStream(strm)
+proc processStreamHandler(strm: ClientStream, propagateErr: bool) {.async.} =
+  try:
+    await processStream(strm)
+  except HyperxStrmError as err:
+    if propagateErr:
+      raise err
+    debugEcho err.msg
+  except HyperxConnError as err:
+    if propagateErr:
+      raise err
+    debugEcho err.msg
 
-proc serve*(server: ServerContext) {.async.} =
+proc processClient(client: ClientContext, propagateErr: bool) {.async.} =
+  withClient client:
+    while true:
+      let strm = await client.recvStream()
+      asyncCheck processStreamHandler(strm, propagateErr)
+
+proc processClientHandler(client: ClientContext, propagateErr: bool) {.async.} =
+  try:
+    await processClient(client, propagateErr)
+  except HyperxConnError as err:
+    if propagateErr:
+      raise err
+    debugEcho err.msg
+
+# xxx propagateErr = false
+proc serve*(server: ServerContext, propagateErr = true) {.async.} =
   withServer server:
-    while server.isConnected:
+    while true:
       let client = await server.recvClient()
-      asyncCheck processClient(client)
+      asyncCheck processClientHandler(client, propagateErr)
 
 proc newServer*(): ServerContext =
   newServer(
@@ -55,6 +76,6 @@ when isMainModule:
   proc main() {.async.} =
     echo "Serving forever"
     var server = newServer()
-    await server.serve()
+    await server.serve(propagateErr = false)
   waitFor main()
   echo "ok"

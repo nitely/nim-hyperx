@@ -25,7 +25,10 @@ export
   #sendHeaders,
   sendBody,
   ClientStream,
-  ClientContext
+  ClientContext,
+  HyperxConnError,
+  HyperxStrmError,
+  HyperxError
 
 func add(s: var seq[byte], ss: string) {.raises: [].} =
   # XXX x_x

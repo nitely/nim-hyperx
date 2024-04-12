@@ -154,7 +154,7 @@ type
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
     peerMaxFrameSize: uint32
-    exitError: ref HyperxError
+    exitError*: ref HyperxError
 
 proc newClient*(
   typ: ClientTyp,
@@ -197,6 +197,7 @@ proc close*(client: ClientContext) {.raises: [InternalOsError].} =
     client.sendMsgs.close()
     client.recvMsgs.close()
     client.streams.close()
+    client.streamOpenedMsgs.close()
 
 func stream*(client: ClientContext, sid: StreamId): var Stream {.raises: [].} =
   client.streams.get sid
@@ -346,6 +347,7 @@ proc read*(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
   except QueueClosedError as err:
     doAssert not client.isConnected
     if client.exitError != nil:
+      # xxx change to connError
       raise newHyperxConnectionError(client.exitError.msg)
     raise err
   except StrmError as err:

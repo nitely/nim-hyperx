@@ -27,7 +27,10 @@ export
   recvEnded,
   ClientStream,
   newClientStream,
-  ClientContext
+  ClientContext,
+  HyperxConnError,
+  HyperxStrmError,
+  HyperxError
 
 var sslContext {.threadvar.}: SslContext
 
@@ -110,8 +113,14 @@ template withServer*(server: ServerContext, body: untyped): untyped =
     server.close()
 
 proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
-  let sid = await client.streamOpenedMsgs.pop()
-  result = newClientStream(client, sid)
+  try:
+    let sid = await client.streamOpenedMsgs.pop()
+    result = newClientStream(client, sid)
+  except QueueClosedError as err:
+    doAssert not client.isConnected
+    if client.exitError != nil:
+      raise newHyperxConnectionError(client.exitError.msg)
+    raise err
 
 proc sendHeaders*(
   strm: ClientStream,
