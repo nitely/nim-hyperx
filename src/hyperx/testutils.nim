@@ -54,19 +54,15 @@ func newPeerContext(): PeerContext =
     headersDec: initDynHeaders(4096)
   )
 
-func newTestClient*(hostname: string): TestClientContext =
-  TestClientContext(
-    client: newClient(hostname, Port 443),
-    peer: newPeerContext(),
-    sid: 1
-  )
-
 func newTestClient*(client: ClientContext): TestClientContext =
   TestClientContext(
     client: client,
     peer: newPeerContext(),
-    sid: 2
+    sid: 1
   )
+
+func newTestClient*(hostname: string): TestClientContext =
+  newTestClient(newClient(hostname, Port 443))
 
 proc frame*(
   tc: TestClientContext,
@@ -107,8 +103,16 @@ proc reply*(
 ) {.async.} =
   await tc.client.putRecvTestData frm.s
 
-proc recv*(client: ClientContext, s: seq[byte]) {.async.} =
-  await client.putRecvTestData s
+proc recv*(tc: TestClientContext, headers: string) {.async.} =
+  var frm1 = frame(
+    frmtHeaders, tc.sid.FrmSid, @[frmfEndHeaders, frmfEndStream]
+  )
+  frm1.add hencode(tc, headers).toBytes
+  await tc.client.putRecvTestData frm1.s
+  tc.sid += 2
+
+proc recv*(tc: TestClientContext, s: seq[byte]) {.async.} =
+  await tc.client.putRecvTestData s
 
 proc sent*(tc: TestClientContext, size: int): Future[seq[byte]] {.async.} =
   result = await tc.client.sentTestData(size)
@@ -116,6 +120,7 @@ proc sent*(tc: TestClientContext, size: int): Future[seq[byte]] {.async.} =
 proc sent*(tc: TestClientContext): Future[Frame] {.async.} =
   result = newEmptyFrame()
   result.s = await tc.client.sentTestData(frmHeaderSize)
+  doAssert result.len > 0, "Client closed"
   doAssert result.len == frmHeaderSize
   var payload = newSeq[byte]()
   if result.payloadLen.int > 0:

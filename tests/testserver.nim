@@ -19,9 +19,9 @@ func toString(s: openArray[byte]): string =
   for c in s:
     result.add c.char
 
-func newStringRef(): ref string =
+func newStringRef(s = ""): ref string =
   new result
-  result[] = ""
+  result[] = s
 
 const
   userAgent = "Nim - HyperX"
@@ -33,14 +33,43 @@ proc checkHandshake(tc: TestClientContext) {.async.} =
   doAssert frm1.sid == frmSidMain
 
 testAsync "simple request":
+  var checked = false
+  const headers = ":method: GET\r\nfoo: foo\r\n"
+  const text = "0123456789"
   var server = newServer(
     "foo.bar", Port 443, "./cert", "./key"
   )
   withServer server:
     let client1 = await server.recvClient()
     let tc1 = newTestClient(client1)
-    let prefacefut = tc1.client.recv(preface)
+    await tc1.recv(preface)
     withClient tc1.client:
       await tc1.checkHandshake()
-      await prefacefut
-    #  let strm = await client.recvStream()
+      await tc1.recv(headers)
+      let strm = await client1.recvStream()
+      withStream strm:
+        var data = newStringRef()
+        await strm.recvHeaders(data)
+        doAssert data[] == headers
+        doAssert strm.recvEnded
+        await strm.sendHeaders(
+          status = 200,
+          contentType = "text/plain",
+          contentLen = text.len
+        )
+        await strm.sendBody(newStringRef(text), finish = true)
+      let frm1 = await tc1.sent()
+      doAssert frm1.sid.int == 1
+      doAssert frm1.typ == frmtHeaders
+      doAssert frm1.payload.toString ==
+        ":status: 200\r\L" &
+        "content-type: text/plain\r\L" &
+        "content-length: 10\r\L"
+      doAssert frmfEndStream notin frm1.flags
+      let frm2 = await tc1.sent()
+      doAssert frm2.sid.int == 1
+      doAssert frm2.typ == frmtData
+      doAssert frm2.payload.toString == text
+      doAssert frmfEndStream in frm2.flags
+      checked = true
+  doAssert checked
