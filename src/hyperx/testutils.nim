@@ -61,6 +61,13 @@ func newTestClient*(hostname: string): TestClientContext =
     sid: 1
   )
 
+func newTestClient*(client: ClientContext): TestClientContext =
+  TestClientContext(
+    client: client,
+    peer: newPeerContext(),
+    sid: 2
+  )
+
 proc frame*(
   tc: TestClientContext,
   typ: FrmTyp,
@@ -99,6 +106,9 @@ proc reply*(
   frm: Frame
 ) {.async.} =
   await tc.client.putRecvTestData frm.s
+
+proc recv*(client: ClientContext, s: seq[byte]) {.async.} =
+  await client.putRecvTestData s
 
 proc sent*(tc: TestClientContext, size: int): Future[seq[byte]] {.async.} =
   result = await tc.client.sentTestData(size)

@@ -49,11 +49,6 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   addExitProc(destroySslContext)
   return sslContext
 
-when defined(hyperxTest):
-  type MyAsyncSocket = TestSocket
-else:
-  type MyAsyncSocket = AsyncSocket
-
 when not defined(hyperxTest):
   proc newMySocket(): MyAsyncSocket {.raises: [InternalOsError].} =
     try:

@@ -647,7 +647,6 @@ proc recvDispatcher*(client: ClientContext) {.async.} =
     debugInfo "responseDispatcher exited"
     client.close()
 
-# XXX remove same as withConnect
 template withClient*(client: ClientContext, body: untyped) =
   doAssert not client.isConnected
   var sendFut, recvFut, dispFut: Future[void]

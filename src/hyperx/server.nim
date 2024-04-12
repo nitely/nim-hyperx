@@ -93,7 +93,8 @@ proc listen(server: ServerContext) =
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
   # XXX limit number of active clients
   let sock = await server.sock.accept()
-  doAssert not sslContext.isNil
+  when not defined(hyperxTest):
+    doAssert not sslContext.isNil
   wrapConnectedSocket(
     sslContext, sock, handshakeAsServer, server.hostname
   )

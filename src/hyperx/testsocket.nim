@@ -94,13 +94,16 @@ proc setSockOpt*(s: TestSocket, opt = OptReuseAddr, x = true) =
   discard
 
 proc bindAddr*(s: TestSocket, port = Port(0)) =
-  discard
+  doAssert not s.isConnected
+  s.port = port
 
 proc listen*(s: TestSocket) =
-  discard
+  doAssert not s.isConnected
+  s.isConnected = true
 
 proc accept*(s: TestSocket): Future[TestSocket] {.async.} =
-  result = s
+  result = newMySocket()
+  result.isConnected = true
 
 proc wrapConnectedSocket*(
   ctx: SslContext;
@@ -108,5 +111,6 @@ proc wrapConnectedSocket*(
   handshake: SslHandshakeType;
   hostname = ""
 ) =
-  discard
+  doAssert handshake == handshakeAsServer
+  socket.hostname = hostname
 

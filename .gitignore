@@ -4,6 +4,7 @@ nimble.develop
 tests/tests
 tests/testclient
 tests/testclientserver
+tests/testserver
 src/hyperx/client
 src/hyperx/server
 src/hyperx/clientserver
