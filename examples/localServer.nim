@@ -48,7 +48,7 @@ proc processStreamHandler(strm: ClientStream, propagateErr: bool) {.async.} =
 
 proc processClient(client: ClientContext, propagateErr: bool) {.async.} =
   withClient client:
-    while true:
+    while client.isConnected:
       let strm = await client.recvStream()
       asyncCheck processStreamHandler(strm, propagateErr)
 
@@ -63,7 +63,7 @@ proc processClientHandler(client: ClientContext, propagateErr: bool) {.async.} =
 # xxx propagateErr = false
 proc serve*(server: ServerContext, propagateErr = true) {.async.} =
   withServer server:
-    while true:
+    while server.isConnected:
       let client = await server.recvClient()
       asyncCheck processClientHandler(client, propagateErr)
 
