@@ -13,6 +13,7 @@ import pkg/hpack
 import ./frame
 import ./stream
 import ./queue
+import ./lock
 import ./errors
 import ./utils
 
@@ -154,6 +155,7 @@ type
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
     peerMaxFrameSize: uint32
+    sendLock: LockAsync
     exitError*: ref HyperxError
 
 proc newClient*(
@@ -178,7 +180,8 @@ proc newClient*(
     maxPeerStrmIdSeen: 0.StreamId,
     peerMaxConcurrentStreams: stgMaxConcurrentStreams,
     peerWindowSize: stgInitialWindowSize,
-    peerMaxFrameSize: stgInitialMaxFrameSize
+    peerMaxFrameSize: stgInitialMaxFrameSize,
+    sendLock: newLock()
   )
 
 proc close*(client: ClientContext) {.raises: [InternalOsError].} =
@@ -196,8 +199,9 @@ proc close*(client: ClientContext) {.raises: [InternalOsError].} =
   finally:
     client.sendMsgs.close()
     client.recvMsgs.close()
-    client.streams.close()
     client.streamOpenedMsgs.close()
+    client.streams.close()
+    client.sendLock.close()
 
 func stream*(client: ClientContext, sid: StreamId): var Stream {.raises: [].} =
   client.streams.get sid
@@ -246,6 +250,15 @@ func hpackEncode*(
     discard hencode(name, value, client.headersEnc, payload, huffman = false)
   except HpackError as err:
     raise newException(HyperxError, err.msg)
+
+proc send*(client: ClientContext, frm: Frame) {.async.} =
+  doAssert frm.payloadLen.int == frm.payload.len
+  doAssert frm.payload.len <= client.peerMaxFrameSize.int
+  # this lock exists because of GoAways. We need to send directly
+  # if we close the conn right after
+  withLock client.sendLock:
+    check not client.sock.isClosed, newConnClosedError()
+    await client.sock.send(frm.rawBytesPtr, frm.len)
 
 proc handshake*(client: ClientContext) {.async.} =
   doAssert client.isConnected
@@ -300,17 +313,6 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
     client.stream(frm.sid).doTransitionSend frm
   await client.sendMsgs.put frm
 
-proc sendGoAway(client: ClientContext, errCode: ErrorCode) {.async.} =
-  # do not send any debug information for security reasons
-  var frm = newGoAwayFrame(
-    client.maxPeerStrmIdSeen.int, errCode.int
-  )
-  try:
-    await client.write(frm)
-  except CatchableError as err:
-    debugInfo err.msg
-    raise err
-
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
   doAssert frm.sid != frmSidMain
@@ -357,6 +359,7 @@ proc read*(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
       await client.write newRstStreamFrame(sid.FrmSid, err.code.int)
     raise err
   except ConnError as err:
+    # XXX go away
     debugInfo err.msg
     client.close()
     raise err
@@ -402,7 +405,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
-  check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errProtocolError)
+  check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errFrameSizeError)
   var paddingLen = 0
   if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
     debugInfo "Padding"
@@ -451,10 +454,7 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   doAssert client.isConnected
   while client.isConnected:
     let frm = await client.sendMsgs.pop()
-    doAssert frm.payloadLen.int == frm.payload.len
-    doAssert frm.payload.len <= client.peerMaxFrameSize.int
-    check not client.sock.isClosed, newConnClosedError()
-    await client.sock.send(frm.rawBytesPtr, frm.len)
+    await client.send(frm)
 
 proc sendTask*(client: ClientContext) {.async.} =
   try:
@@ -496,8 +496,12 @@ proc recvTask*(client: ClientContext) {.async.} =
   except ConnError as err:
     if client.isConnected:
       # XXX close all streams
+      # XXX close queues
       client.exitError = err
-      await client.sendGoAway(err.code)
+      await client.send(newGoAwayFrame(
+        client.maxPeerStrmIdSeen.int, err.code.int
+      ))
+      #client.close()
     raise err
   except HyperxError as err:
     if client.isConnected:
@@ -519,6 +523,8 @@ proc recvTask*(client: ClientContext) {.async.} =
     raise err
   finally:
     debugInfo "recvTask exited"
+    # xxx send goaway NO_ERROR
+    # await client.sendGoAway(NO_ERROR)
     client.close()
 
 const connFrmAllowed = {
@@ -584,14 +590,13 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
   while client.isConnected:
     let frm = await client.recvMsgs.pop()
     debugInfo "recv data on stream " & $frm.sid.int
+    # XXX implement flow control
+    if not frm.typ.isKnown or
+        frm.typ in {frmtPriority, frmtWindowUpdate}:
+      continue
     if frm.sid == frmSidMain:
       # Settings need to be applied before consuming following messages
       await consumeMainStream(client, frm)
-      continue
-    if frm.typ == frmtPriority:
-      continue
-    # XXX implement flow control
-    if frm.typ == frmtWindowUpdate:
       continue
     if client.typ == ctServer and
         frm.sid.StreamId > client.maxPeerStrmIdSeen and
@@ -636,7 +641,9 @@ proc recvDispatcher*(client: ClientContext) {.async.} =
   except ConnError as err:
     if client.isConnected:
       client.exitError = err
-      await client.sendGoAway(err.code)
+      await client.send(newGoAwayFrame(
+        client.maxPeerStrmIdSeen.int, err.code.int
+      ))
     raise err
   except HyperxError as err:
     if client.isConnected:

@@ -35,6 +35,9 @@ const
 const
   frmPaddedTypes* = {frmtHeaders, frmtPushPromise, frmtData}
 
+func isKnown*(typ: FrmTyp): bool {.inline.} =
+  typ.uint8 in 0x00'u8 .. 0x09'u8
+
 type
   FrmFlags* = distinct uint8
   FrmFlag* = distinct uint8

@@ -1,36 +1,48 @@
 import std/asyncdispatch
 import std/deques
 
+import ./utils
+import ./queue
+
+func newLockClosedError*(): ref QueueClosedError {.raises: [].} =
+  result = (ref QueueClosedError)(msg: "Lock is closed")
+
 type
   LockAsync* = ref object
     ## Akin to a queue of size one
     used: bool
     # XXX use/reuse FutureVars
     relEv: Deque[Future[void]]
+    isClosed: bool
 
-proc newLock*(): LockAsync =
+proc newLock*(): LockAsync {.raises: [].} =
   new result
   result = LockAsync(
     used: false,
     relEv: initDeque[Future[void]](2)
   )
 
-proc relEvent(lck: LockAsync): Future[void] =
+proc relEvent(lck: LockAsync): Future[void] {.raises: [].} =
   result = newFuture[void]()
   lck.relEv.addLast result
 
-proc relDone(lck: LockAsync) =
+proc relDone(lck: LockAsync) {.raises: [].} =
   if lck.relEv.len > 0:
-    lck.relEv.popFirst().complete()
+    untrackExceptions:
+      lck.relEv.popFirst().complete()
 
 proc acquire(lck: LockAsync): Future[void] {.async.} =
+  if lck.isClosed:
+    raise newLockClosedError()
   if lck.used:
     await lck.relEvent()
   doAssert(not lck.used)
   lck.used = true
 
-proc release(lck: LockAsync) =
+proc release(lck: LockAsync) {.raises: [QueueClosedError].} =
   doAssert lck.used
+  if lck.isClosed:
+    raise newLockClosedError()
   lck.used = false
   lck.relDone()
 
@@ -40,6 +52,17 @@ template withLock*(lck: LockAsync, body: untyped): untyped =
     body
   finally:
     lck.release()
+
+func isClosed*(lck: LockAsync): bool {.raises: [].} =
+  lck.isClosed
+
+proc close*(lck: LockAsync) {.raises: [].}  =
+  if lck.isClosed:
+    return
+  lck.isClosed = true
+  while lck.relEv.len > 0:
+    untrackExceptions:
+      lck.relEv.popFirst().fail newLockClosedError()
 
 when isMainModule:
   block:
