@@ -348,6 +348,7 @@ proc read*(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
     doAssert not client.isConnected
     if client.exitError != nil:
       # xxx change to connError
+      debugInfo client.exitError.getStackTrace()
       raise newHyperxConnectionError(client.exitError.msg)
     raise err
   except StrmError as err:
@@ -409,7 +410,6 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     check not client.sock.isClosed, newConnClosedError()
     let paddingRln = await client.sock.recvInto(addr paddingLen, frmPaddingSize)
     check paddingRln == frmPaddingSize, newConnClosedError()
-    paddingLen *= 8
     payloadLen -= frmPaddingSize
   # prio is deprecated so do nothing with it
   if frmfPriority in frm.flags and frm.typ == frmtHeaders:
@@ -469,6 +469,7 @@ proc sendTask*(client: ClientContext) {.async.} =
     doAssert not client.isConnected
   except OSError as err:  # XXX remove
     if client.isConnected:
+      debugInfo err.getStackTrace()
       client.exitError = newInternalOsError(err.msg)
       raise client.exitError
     else:
@@ -508,6 +509,7 @@ proc recvTask*(client: ClientContext) {.async.} =
     doAssert not client.isConnected
   except OSError as err:
     if client.isConnected:
+      debugInfo err.getStackTrace()
       client.exitError = newInternalOsError(err.msg)
       raise client.exitError
     else:

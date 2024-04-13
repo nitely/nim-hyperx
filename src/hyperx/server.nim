@@ -119,6 +119,8 @@ proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
   except QueueClosedError as err:
     doAssert not client.isConnected
     if client.exitError != nil:
+      # https://github.com/nim-lang/Nim/issues/15182
+      debugInfo client.exitError.getStackTrace()
       raise newHyperxConnectionError(client.exitError.msg)
     raise err
 
