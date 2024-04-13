@@ -588,6 +588,11 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       # Settings need to be applied before consuming following messages
       await consumeMainStream(client, frm)
       continue
+    if frm.typ == frmtPriority:
+      continue
+    # XXX implement flow control
+    if frm.typ == frmtWindowUpdate:
+      continue
     if client.typ == ctServer and
         frm.sid.StreamId > client.maxPeerStrmIdSeen and
         frm.sid.int mod 2 != 0:
@@ -608,9 +613,6 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       frm.s.add $headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
       await client.write newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
-    # XXX implement flow control
-    if frm.typ == frmtWindowUpdate:
-      continue
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
