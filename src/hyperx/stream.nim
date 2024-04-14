@@ -17,22 +17,24 @@ type
     strmInvalid
   StreamEvent* = enum
     seHeaders
+    seHeadersEndStream
     sePushPromise
-    seEndStream
     seRstStream
     sePriority
     seWindowUpdate
     seData
+    seDataEndStream
     seUnknown
 
 const streamEvents* = {
   seHeaders,
+  seHeadersEndStream,
   sePushPromise,
-  seEndStream,
   seRstStream,
   sePriority,
   seWindowUpdate,
-  seData
+  seData,
+  seDataEndStream
 }
 
 const frmStreamAllowed* = {
@@ -50,12 +52,12 @@ func toStreamEvent*(frm: Frame): StreamEvent {.raises: [].} =
   case frm.typ
   of frmtData:
     if frmfEndStream in frm.flags:
-      seEndStream
+      seDataEndStream
     else:
       seData
   of frmtHeaders:
     if frmfEndStream in frm.flags:
-      seEndStream
+      seHeadersEndStream
     else:
       seHeaders
   of frmtPriority:
@@ -78,12 +80,13 @@ func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     case e:
     of seHeaders: strmOpen
     of sePushPromise: strmReservedRemote
-    of seEndStream: strmHalfClosedRemote
+    of seHeadersEndStream: strmHalfClosedRemote
     of sePriority: strmIdle
     else: strmInvalid
   of strmOpen:
     case e
-    of seEndStream: strmHalfClosedRemote
+    of seHeadersEndStream,
+      seDataEndStream: strmHalfClosedRemote
     of seRstStream: strmClosed
     else: strmOpen
   of strmClosed:
@@ -101,7 +104,9 @@ func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     else: strmInvalid
   of strmHalfClosedLocal:
     case e
-    of seEndStream, seRstStream: strmClosed
+    of seHeadersEndStream,
+      seDataEndStream,
+      seRstStream: strmClosed
     else: strmHalfClosedLocal
   of strmHalfClosedRemote, strmReservedLocal:
     case e
@@ -120,12 +125,13 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     case e:
     of seHeaders: strmOpen
     of sePushPromise: strmReservedLocal
-    of seEndStream: strmHalfClosedLocal
+    of seHeadersEndStream: strmHalfClosedLocal
     of sePriority: strmIdle
     else: strmInvalid
   of strmOpen:
     case e
-    of seEndStream: strmHalfClosedLocal
+    of seHeadersEndStream,
+      seDataEndStream: strmHalfClosedLocal
     of seRstStream: strmClosed
     else: strmOpen
   of strmClosed:
@@ -140,7 +146,9 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     else: strmInvalid
   of strmHalfClosedRemote:
     case e
-    of seEndStream, seRstStream: strmClosed
+    of seHeadersEndStream,
+      seDataEndStream,
+      seRstStream: strmClosed
     else: strmHalfClosedRemote
   of strmHalfClosedLocal, strmReservedRemote:
     case e
@@ -227,12 +235,13 @@ when isMainModule:
     result.setFlags flags
   const allEvents = {
     seHeaders,
+    seHeadersEndStream,
     sePushPromise,
-    seEndStream,
     seRstStream,
     sePriority,
     seWindowUpdate,
     seData,
+    seDataEndStream,
     seUnknown
   }
   const allFrames = {
@@ -256,14 +265,15 @@ when isMainModule:
   block:
     doAssert toNextStateRecv(strmIdle, seHeaders) == strmOpen
     doAssert toNextStateRecv(strmIdle, sePushPromise) == strmReservedRemote
-    doAssert toNextStateRecv(strmIdle, seEndStream) == strmHalfClosedRemote
+    doAssert toNextStateRecv(strmIdle, seHeadersEndStream) == strmHalfClosedRemote
     doAssert toNextStateRecv(strmIdle, sePriority) == strmIdle
-    for ev in streamEvents-{seHeaders, sePushPromise, seEndStream, sePriority}:
+    for ev in streamEvents-{seHeaders, sePushPromise, seHeadersEndStream, sePriority}:
       doAssert toNextStateRecv(strmIdle, ev) == strmInvalid
-    doAssert toNextStateRecv(strmOpen, seEndStream) == strmHalfClosedRemote
+    doAssert toNextStateRecv(strmOpen, seHeadersEndStream) == strmHalfClosedRemote
+    doAssert toNextStateRecv(strmOpen, seDataEndStream) == strmHalfClosedRemote
     doAssert toNextStateRecv(strmOpen, seRstStream) == strmClosed
     doAssert toNextStateRecv(strmOpen, seData) == strmOpen
-    for ev in streamEvents-{seEndStream, seRstStream}:
+    for ev in streamEvents-{seHeadersEndStream, seDataEndStream, seRstStream}:
       doAssert toNextStateRecv(strmOpen, ev) == strmOpen
     doAssert toNextStateRecv(strmClosed, sePriority) == strmClosed
     doAssert toNextStateRecv(strmClosed, seWindowUpdate) == strmClosed
@@ -276,10 +286,11 @@ when isMainModule:
     doAssert toNextStateRecv(strmReservedRemote, sePriority) == strmReservedRemote
     for ev in streamEvents-{seHeaders,seRstStream,sePriority}:
       doAssert toNextStateRecv(strmReservedRemote, ev) == strmInvalid
-    doAssert toNextStateRecv(strmHalfClosedLocal, seEndStream) == strmClosed
+    doAssert toNextStateRecv(strmHalfClosedLocal, seHeadersEndStream) == strmClosed
+    doAssert toNextStateRecv(strmHalfClosedLocal, seDataEndStream) == strmClosed
     doAssert toNextStateRecv(strmHalfClosedLocal, seRstStream) == strmClosed
     doAssert toNextStateRecv(strmHalfClosedLocal, seData) == strmHalfClosedLocal
-    for ev in streamEvents-{seEndStream,seRstStream}:
+    for ev in streamEvents-{seHeadersEndStream,seDataEndStream,seRstStream}:
       doAssert toNextStateRecv(strmHalfClosedLocal, ev) == strmHalfClosedLocal
     doAssert toNextStateRecv(strmHalfClosedRemote, seRstStream) == strmClosed
     doAssert toNextStateRecv(strmHalfClosedRemote, seWindowUpdate) == strmHalfClosedRemote
@@ -299,9 +310,9 @@ when isMainModule:
       raisesAssertion:
         discard toStreamEvent(frmTyp.frame)
     doAssert toStreamEvent(frmtData.frame) == seData
-    doAssert toStreamEvent(frmtData.frame(frmfEndStream.FrmFlags)) == seEndStream
+    doAssert toStreamEvent(frmtData.frame(frmfEndStream.FrmFlags)) == seDataEndStream
     doAssert toStreamEvent(frmtHeaders.frame) == seHeaders
-    doAssert toStreamEvent(frmtHeaders.frame(frmfEndStream.FrmFlags)) == seEndStream
+    doAssert toStreamEvent(frmtHeaders.frame(frmfEndStream.FrmFlags)) == seHeadersEndStream
     doAssert toStreamEvent(frmtPriority.frame) == sePriority
     doAssert toStreamEvent(frmtRstStream.frame) == seRstStream
     doAssert toStreamEvent(frmtPushPromise.frame) == sePushPromise

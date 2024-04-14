@@ -292,7 +292,7 @@ func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
     return
   doAssert frm.typ in frmStreamAllowed
   s.state = toNextStateSend(s.state, frm.toStreamEvent)
-  doAssert s.state != strmInvalid
+  doAssert s.state != strmInvalid  #, $frm
 
 # XXX continuations need a mechanism
 #     similar to a stream i.e: if frm without end is
@@ -320,6 +320,10 @@ func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError
   check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
   let nextState = toNextStateRecv(s.state, frm.toStreamEvent)
   if nextState == strmInvalid:
+    #if s.state == strmIdle:
+    #  raise newConnError(errProtocolError)
+    #if frm.typ == frmtData and s.state != strmIdle:
+    #  raise newStrmError(errStreamClosed)
     if s.state == strmHalfClosedRemote:
       raise newStrmError(errStreamClosed)
     else:
@@ -331,17 +335,19 @@ func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError
   #  discard
 
 proc readNaked(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
-  let frm = await client.stream(sid).msgs.pop()
-  doAssert sid == frm.sid.StreamId
-  # this may throw a conn error
-  client.stream(sid).doTransitionRecv frm
-  if frm.typ == frmtWindowUpdate:
-    check frm.payload.len > 0, newStrmError(errProtocolError)
-  if frm.typ == frmtData and
-      frm.payloadLen.int > 0 and
-      frmfEndStream notin frm.flags:
-    await client.write newWindowUpdateFrame(sid.FrmSid, frm.payloadLen.int)
-  return frm
+  while client.isConnected:
+    let frm = await client.stream(sid).msgs.pop()
+    doAssert sid == frm.sid.StreamId
+    # this may throw a conn error
+    client.stream(sid).doTransitionRecv frm
+    if frm.typ == frmtWindowUpdate:
+      check frm.payload.len > 0, newStrmError(errProtocolError)
+      continue
+    if frm.typ == frmtData and
+        frm.payloadLen.int > 0 and
+        frmfEndStream notin frm.flags:
+      await client.write newWindowUpdateFrame(sid.FrmSid, frm.payloadLen.int)
+    return frm
 
 proc read*(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
   try:
@@ -359,8 +365,11 @@ proc read*(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
       await client.write newRstStreamFrame(sid.FrmSid, err.code.int)
     raise err
   except ConnError as err:
-    # XXX go away
-    debugInfo err.msg
+    if client.isConnected:
+      client.exitError = err
+      await client.send newGoAwayFrame(
+        client.maxPeerStrmIdSeen.int, err.code.int
+      )
     client.close()
     raise err
 
@@ -498,9 +507,9 @@ proc recvTask*(client: ClientContext) {.async.} =
       # XXX close all streams
       # XXX close queues
       client.exitError = err
-      await client.send(newGoAwayFrame(
+      await client.send newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
-      ))
+      )
       #client.close()
     raise err
   except HyperxError as err:
@@ -590,9 +599,8 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
   while client.isConnected:
     let frm = await client.recvMsgs.pop()
     debugInfo "recv data on stream " & $frm.sid.int
-    # XXX implement flow control
-    if not frm.typ.isKnown or
-        frm.typ in {frmtPriority, frmtWindowUpdate}:
+    # Prio is deprecated and needs to be ignored here
+    if frm.typ.isUnknown or frm.typ == frmtPriority:
       continue
     if frm.sid == frmSidMain:
       # Settings need to be applied before consuming following messages
@@ -641,9 +649,9 @@ proc recvDispatcher*(client: ClientContext) {.async.} =
   except ConnError as err:
     if client.isConnected:
       client.exitError = err
-      await client.send(newGoAwayFrame(
+      await client.send newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
-      ))
+      )
     raise err
   except HyperxError as err:
     if client.isConnected:

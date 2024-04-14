@@ -4,8 +4,11 @@ import std/deques
 import ./utils
 import ./queue
 
-func newLockClosedError*(): ref QueueClosedError {.raises: [].} =
-  result = (ref QueueClosedError)(msg: "Lock is closed")
+type
+  LockClosedError* = QueueClosedError
+
+func newLockClosedError(): ref LockClosedError {.raises: [].} =
+  result = (ref LockClosedError)(msg: "Lock is closed")
 
 type
   LockAsync* = ref object
@@ -19,7 +22,8 @@ proc newLock*(): LockAsync {.raises: [].} =
   new result
   result = LockAsync(
     used: false,
-    relEv: initDeque[Future[void]](2)
+    relEv: initDeque[Future[void]](2),
+    isClosed: false
   )
 
 proc relEvent(lck: LockAsync): Future[void] {.raises: [].} =
@@ -39,7 +43,7 @@ proc acquire(lck: LockAsync): Future[void] {.async.} =
   doAssert(not lck.used)
   lck.used = true
 
-proc release(lck: LockAsync) {.raises: [QueueClosedError].} =
+proc release(lck: LockAsync) {.raises: [LockClosedError].} =
   doAssert lck.used
   if lck.isClosed:
     raise newLockClosedError()
