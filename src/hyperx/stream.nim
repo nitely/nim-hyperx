@@ -135,8 +135,12 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     of seRstStream: strmClosed
     else: strmOpen
   of strmClosed:
+    # XXX we need to avoid sending windows updates on closed
+    #     streams, there is a race between frms already processed by dispatcher
+    #     and reading the frames from queue, the strm may have been closed (even by us)
     case e
     of sePriority,
+      seWindowUpdate,
       seRstStream: strmClosed
     else: strmInvalid
   of strmReservedLocal:
