@@ -21,7 +21,7 @@ proc processStream(strm: ClientStream) {.async.} =
   withStream strm:
     var headers = newStringRef()
     await strm.recvHeaders(headers)
-    doAssert ":authority: " & localHost in headers[]
+    #doAssert ":authority: " & localHost in headers[]
     var dataEcho = newStringRef()
     while not strm.recvEnded:
       await strm.recvBody(dataEcho)

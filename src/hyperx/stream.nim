@@ -135,14 +135,13 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     of seRstStream: strmClosed
     else: strmOpen
   of strmClosed:
-    # XXX we need to avoid sending windows updates on closed
-    #     streams, there is a race between frms already processed by dispatcher
-    #     and reading the frames from queue, the strm may have been closed (even by us)
-    case e
-    of sePriority,
-      seWindowUpdate,
-      seRstStream: strmClosed
-    else: strmInvalid
+    #case e
+    #of sePriority,
+    #  seRstStream: strmClosed
+    #else: strmInvalid
+    # if peer closes the conn they still need
+    # to process anything we send
+    strmClosed
   of strmReservedLocal:
     case e
     of seHeaders: strmHalfClosedRemote
@@ -185,6 +184,10 @@ proc newStream(id: StreamId): Stream {.raises: [].} =
     msgs: newQueue[Frame](1)
   )
 
+proc close*(stream: Stream) {.raises: [].} =
+  stream.state = strmClosed
+  stream.msgs.close()
+
 type
   StreamsClosedError* = object of HyperxError
   Streams* = object
@@ -224,7 +227,7 @@ proc close*(s: var Streams, sid: StreamId) {.raises: [].} =
   if sid notin s:
     return
   let stream = s.get sid
-  stream.msgs.close()
+  stream.close()
   s.del sid
 
 proc close*(s: var Streams) {.raises: [].} =
@@ -232,7 +235,7 @@ proc close*(s: var Streams) {.raises: [].} =
     return
   s.isClosed = true
   for stream in values s:
-    stream.msgs.close()
+    stream.close()
 
 when isMainModule:
   import ./utils

@@ -282,7 +282,9 @@ proc handshake*(client: ClientContext) {.async.} =
     check blobRln == blob.len, newConnClosedError()
     check blob == preface, newConnError(errProtocolError)
 
-func doTransitionSend(s: var Stream, frm: Frame) {.raises: [StrmError].} =
+func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
+  # we cannot raise stream errors here because of
+  # hpack state the frame needs to be sent or close the conn
   doAssert frm.sid.StreamId == s.id
   doAssert frm.sid != frmSidMain
   doAssert s.state != strmInvalid
@@ -290,9 +292,6 @@ func doTransitionSend(s: var Stream, frm: Frame) {.raises: [StrmError].} =
     return
   doAssert frm.typ in frmStreamAllowed
   let nextState = toNextStateSend(s.state, frm.toStreamEvent)
-  if nextState == strmInvalid:
-    if s.state == strmClosed:
-      raise newStrmError(errStreamClosed)
   doAssert nextState != strmInvalid  #, $frm
   s.state = nextState
 
@@ -311,7 +310,8 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
     payload.add frm.payload
     frm.shrink frm.payload.len
     frm.add payload
-  if frm.sid != frmSidMain:
+  if frm.sid != frmSidMain and
+      frm.sid.StreamId in client.streams:
     # XXX pass stream to write as param
     client.stream(frm.sid).doTransitionSend frm
   await client.sendMsgs.put frm
@@ -327,8 +327,10 @@ func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError
     #  raise newConnError(errProtocolError)
     #if frm.typ == frmtData and s.state != strmIdle:
     #  raise newStrmError(errStreamClosed)
-    if s.state in {strmHalfClosedRemote, strmClosed}:
+    if s.state == strmHalfClosedRemote:
       raise newStrmError(errStreamClosed)
+    elif s.state == strmClosed:
+      raise newConnError(errStreamClosed)
     else:
       raise newConnError(errProtocolError)
   s.state = nextState
@@ -622,7 +624,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
-      await client.send newRstStreamFrame(frm.sid, errStreamClosed.int)
+      check frm.typ in {frmtRstStream, frmtWindowUpdate}, newConnError(errStreamClosed)
       debugInfo "stream not found " & $frm.sid.int
       continue
     var stream = client.streams.get frm.sid.StreamId
@@ -632,9 +634,11 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         check frm.payload.len > 0, newStrmError(errProtocolError)
     except StrmError as err:
       stream.error = err
-      stream.state = strmClosed
+      client.close(stream.id)
       # xxx use send? (conn may close before this is sent)
+      # xxx this is too easy to get wrong, try raise conn error instead
       await client.write newRstStreamFrame(frm.sid, err.code.int)
+    # XXX process window update even if stream is closed
     if frm.typ == frmtWindowUpdate:
       continue
     try:
@@ -742,7 +746,7 @@ proc close*(strm: ClientStream) =
 func recvEnded*(strm: ClientStream): bool =
   strm.state == csStateRecvEnded
 
-proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
+proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
   case strm.client.typ
   of ctClient: doAssert strm.state == csStateSentEnded
   of ctServer: doAssert strm.state == csStateOpened
@@ -764,7 +768,18 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
 
-proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
+proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
+  try:
+    await recvHeadersNaked(strm, data)
+  except StrmError as err:
+    strm.stream.error = err
+    strm.close()
+    await strm.client.write newRstStreamFrame(
+      strm.stream.id.FrmSid, err.code.int
+    )
+    raise err
+
+proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
   strm.state = csStateRecvData
   let frm = await strm.client.read(strm.stream)
@@ -778,6 +793,17 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   data[].add frm.payload
   if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
+
+proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
+  try:
+    await recvBodyNaked(strm, data)
+  except StrmError as err:
+    strm.stream.error = err
+    strm.close()
+    await strm.client.write newRstStreamFrame(
+      strm.stream.id.FrmSid, err.code.int
+    )
+    raise err
 
 proc sendHeaders*(
   strm: ClientStream,
