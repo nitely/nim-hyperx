@@ -114,14 +114,14 @@ template withServer*(server: ServerContext, body: untyped): untyped =
 
 proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
   try:
-    let sid = await client.streamOpenedMsgs.pop()
-    result = newClientStream(client, sid)
+    let strm = await client.streamOpenedMsgs.pop()
+    result = newClientStream(client, strm)
   except QueueClosedError as err:
     doAssert not client.isConnected
-    if client.exitError != nil:
+    if client.error != nil:
       # https://github.com/nim-lang/Nim/issues/15182
-      debugInfo client.exitError.getStackTrace()
-      raise newHyperxConnectionError(client.exitError.msg)
+      debugInfo client.error.getStackTrace()
+      raise newHyperxConnectionError(client.error.msg)
     raise err
 
 proc sendHeaders*(

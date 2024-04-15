@@ -329,6 +329,7 @@ func `$`*(frm: Frame): string {.raises: [].} =
       sid: {$frm.sid.int}
       typ: {$frm.typ.int}
       ack: {$(frmfAck in frm.flags)}
+      endStrm: {$(frmfEndStream in frm.flags)}
       payload len: {$frm.payloadLen.int}
       ===========""".unindent
 

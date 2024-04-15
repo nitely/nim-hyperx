@@ -150,13 +150,13 @@ type
     headersEnc, headersDec: DynHeaders
     streams: Streams
     sendMsgs, recvMsgs: QueueAsync[Frame]
-    streamOpenedMsgs*: QueueAsync[StreamId]
+    streamOpenedMsgs*: QueueAsync[Stream]
     currStreamId, maxPeerStrmIdSeen: StreamId
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
     peerMaxFrameSize: uint32
     sendLock: LockAsync
-    exitError*: ref HyperxError
+    error*: ref HyperxError
 
 proc newClient*(
   typ: ClientTyp,
@@ -176,7 +176,7 @@ proc newClient*(
     currStreamId: 1.StreamId,
     recvMsgs: newQueue[Frame](10),
     sendMsgs: newQueue[Frame](10),
-    streamOpenedMsgs: newQueue[StreamId](10),
+    streamOpenedMsgs: newQueue[Stream](10),
     maxPeerStrmIdSeen: 0.StreamId,
     peerMaxConcurrentStreams: stgMaxConcurrentStreams,
     peerWindowSize: stgInitialWindowSize,
@@ -215,16 +215,14 @@ proc close*(client: ClientContext, sid: StreamId) {.raises: [].} =
   # This does nothing if the stream is already close
   client.streams.close sid
 
-func openMainStream(client: ClientContext): StreamId {.raises: [StreamsClosedError].} =
+func openMainStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} =
   doAssert frmSidMain.StreamId notin client.streams
-  result = frmSidMain.StreamId
-  client.streams.open result
+  result = client.streams.open frmSidMain.StreamId
 
-func openStream(client: ClientContext): StreamId {.raises: [StreamsClosedError].} =
+func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} =
   # XXX some error if max sid is reached
   # XXX error if maxStreams is reached
-  result = client.currStreamId
-  client.streams.open result
+  result = client.streams.open client.currStreamId
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
 
@@ -265,8 +263,8 @@ proc handshake*(client: ClientContext) {.async.} =
   debugInfo "handshake"
   # we need to do this before sending any other frame
   # XXX: allow sending some params
-  let sid = client.openMainStream()
-  doAssert sid == frmSidMain.StreamId
+  let strm = client.openMainStream()
+  doAssert strm.id == frmSidMain.StreamId
   var frm = newSettingsFrame()
   if client.typ == ctClient:
     frm.addSetting frmsEnablePush, stgDisablePush
@@ -284,15 +282,19 @@ proc handshake*(client: ClientContext) {.async.} =
     check blobRln == blob.len, newConnClosedError()
     check blob == preface, newConnError(errProtocolError)
 
-func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
+func doTransitionSend(s: var Stream, frm: Frame) {.raises: [StrmError].} =
   doAssert frm.sid.StreamId == s.id
   doAssert frm.sid != frmSidMain
   doAssert s.state != strmInvalid
   if frm.typ == frmtContinuation:
     return
   doAssert frm.typ in frmStreamAllowed
-  s.state = toNextStateSend(s.state, frm.toStreamEvent)
-  doAssert s.state != strmInvalid  #, $frm
+  let nextState = toNextStateSend(s.state, frm.toStreamEvent)
+  if nextState == strmInvalid:
+    if s.state == strmClosed:
+      raise newStrmError(errStreamClosed)
+  doAssert nextState != strmInvalid  #, $frm
+  s.state = nextState
 
 # XXX continuations need a mechanism
 #     similar to a stream i.e: if frm without end is
@@ -310,6 +312,7 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
     frm.shrink frm.payload.len
     frm.add payload
   if frm.sid != frmSidMain:
+    # XXX pass stream to write as param
     client.stream(frm.sid).doTransitionSend frm
   await client.sendMsgs.put frm
 
@@ -324,7 +327,7 @@ func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError
     #  raise newConnError(errProtocolError)
     #if frm.typ == frmtData and s.state != strmIdle:
     #  raise newStrmError(errStreamClosed)
-    if s.state == strmHalfClosedRemote:
+    if s.state in {strmHalfClosedRemote, strmClosed}:
       raise newStrmError(errStreamClosed)
     else:
       raise newConnError(errProtocolError)
@@ -334,44 +337,34 @@ func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError
   #  # XXX close streams < s.id in idle state
   #  discard
 
-proc readNaked(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
-  while client.isConnected:
-    let frm = await client.stream(sid).msgs.pop()
-    doAssert sid == frm.sid.StreamId
-    # this may throw a conn error
-    client.stream(sid).doTransitionRecv frm
-    if frm.typ == frmtWindowUpdate:
-      check frm.payload.len > 0, newStrmError(errProtocolError)
-      continue
-    if frm.typ == frmtData and
-        frm.payloadLen.int > 0 and
-        frmfEndStream notin frm.flags:
-      await client.write newWindowUpdateFrame(sid.FrmSid, frm.payloadLen.int)
-    return frm
+proc readNaked(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
+  let frm = await strm.msgs.pop()
+  doAssert strm.id == frm.sid.StreamId
+  if frm.typ == frmtData and
+      frm.payloadLen.int > 0 and
+      frmfEndStream notin frm.flags:
+    await client.write newWindowUpdateFrame(frm.sid, frm.payloadLen.int)
+  return frm
 
-proc read*(client: ClientContext, sid: StreamId): Future[Frame] {.async.} =
+proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
   try:
-    result = await client.readNaked(sid)
+    result = await client.readNaked(strm)
   except QueueClosedError as err:
-    doAssert not client.isConnected
-    if client.exitError != nil:
+    #doAssert not client.isConnected
+    if client.error != nil:
       # xxx change to connError
-      debugInfo client.exitError.getStackTrace()
-      raise newHyperxConnectionError(client.exitError.msg)
+      debugInfo client.error.getStackTrace()
+      raise newHyperxConnectionError(client.error.msg)
+    if strm.error != nil:
+      debugInfo strm.error.getStackTrace()
+      raise newStrmError(strm.error.code)
     raise err
   except StrmError as err:
-    #client.close(sid)
-    if client.isConnected:
-      await client.write newRstStreamFrame(sid.FrmSid, err.code.int)
-    raise err
+    debugInfo err.getStackTrace()
+    doAssert false
   except ConnError as err:
-    if client.isConnected:
-      client.exitError = err
-      await client.send newGoAwayFrame(
-        client.maxPeerStrmIdSeen.int, err.code.int
-      )
-    client.close()
-    raise err
+    debugInfo err.getStackTrace()
+    doAssert false
 
 proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
@@ -468,19 +461,19 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
 proc sendTask*(client: ClientContext) {.async.} =
   try:
     await client.sendTaskNaked()
+  except QueueClosedError:
+    doAssert not client.isConnected
   except HyperxError as err:
     if client.isConnected:
-      client.exitError = err
+      client.error = err
       raise err
     else:
       debugInfo "not connected"
-  except QueueClosedError:
-    doAssert not client.isConnected
   except OSError as err:  # XXX remove
     if client.isConnected:
       debugInfo err.getStackTrace()
-      client.exitError = newInternalOsError(err.msg)
-      raise client.exitError
+      client.error = newInternalOsError(err.msg)
+      raise client.error
     else:
       debugInfo "not connected"
   except CatchableError as err:
@@ -506,25 +499,25 @@ proc recvTask*(client: ClientContext) {.async.} =
     if client.isConnected:
       # XXX close all streams
       # XXX close queues
-      client.exitError = err
+      client.error = err
       await client.send newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
       )
       #client.close()
     raise err
+  except QueueClosedError:
+    doAssert not client.isConnected
   except HyperxError as err:
     if client.isConnected:
-      client.exitError = err
+      client.error = err
       raise err
     else:
       debugInfo "not connected"
-  except QueueClosedError:
-    doAssert not client.isConnected
   except OSError as err:
     if client.isConnected:
       debugInfo err.getStackTrace()
-      client.exitError = newInternalOsError(err.msg)
-      raise client.exitError
+      client.error = newInternalOsError(err.msg)
+      raise client.error
     else:
       debugInfo "not connected"
   except CatchableError as err:
@@ -611,8 +604,8 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         frm.sid.int mod 2 != 0:
       client.maxPeerStrmIdSeen = frm.sid.StreamId
       # we do not store idle streams, so no need to close them
-      client.streams.open(frm.sid.StreamId)
-      await client.streamOpenedMsgs.put frm.sid.StreamId
+      let strm = client.streams.open(frm.sid.StreamId)
+      await client.streamOpenedMsgs.put strm
     if client.typ == ctClient and
         frm.sid.StreamId > client.maxPeerStrmIdSeen and
         frm.sid.int mod 2 == 0:
@@ -629,10 +622,21 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
-      # XXX need to reply as closed stream ?
+      await client.send newRstStreamFrame(frm.sid, errStreamClosed.int)
       debugInfo "stream not found " & $frm.sid.int
       continue
-    let stream = client.streams.get frm.sid.StreamId
+    var stream = client.streams.get frm.sid.StreamId
+    try:
+      stream.doTransitionRecv frm
+      if frm.typ == frmtWindowUpdate:
+        check frm.payload.len > 0, newStrmError(errProtocolError)
+    except StrmError as err:
+      stream.error = err
+      stream.state = strmClosed
+      # xxx use send? (conn may close before this is sent)
+      await client.write newRstStreamFrame(frm.sid, err.code.int)
+    if frm.typ == frmtWindowUpdate:
+      continue
     try:
       # XXX a stream can block all streams here,
       #     no way around it. Maybe it can be avoided with
@@ -642,25 +646,28 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       debugInfo "stream is closed " & $frm.sid.int
 
 proc recvDispatcher*(client: ClientContext) {.async.} =
-  # XXX always store exitError for all errors
+  # XXX always store error for all errors
   #     everywhere where queues are closed
   try:
     await client.recvDispatcherNaked()
   except ConnError as err:
     if client.isConnected:
-      client.exitError = err
+      client.error = err
       await client.send newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
       )
     raise err
+  except StrmError as err:
+    debugInfo err.getStackTrace()
+    doAssert false
+  except QueueClosedError:
+    doAssert not client.isConnected
   except HyperxError as err:
     if client.isConnected:
-      client.exitError = err
+      client.error = err
       raise err
     else:
       debugInfo "not connected"
-  except QueueClosedError:
-    doAssert not client.isConnected
   except CatchableError as err:
     debugInfo err.msg
     raise err
@@ -669,38 +676,39 @@ proc recvDispatcher*(client: ClientContext) {.async.} =
     client.close()
 
 template withClient*(client: ClientContext, body: untyped) =
-  doAssert not client.isConnected
-  var sendFut, recvFut, dispFut: Future[void]
-  try:
-    client.isConnected = true
-    if client.typ == ctClient:
-      await client.sock.connect(client.hostname, client.port)
-    await client.handshake()
-    sendFut = client.sendTask()
-    recvFut = client.recvTask()
-    dispFut = client.recvDispatcher()
-    block:
-      body
-  except QueueClosedError as err:
+  {.line: instantiationInfo(fullPaths = true).}:
     doAssert not client.isConnected
-    raise err
-  except CatchableError as err:
-    debugInfo err.msg
-    raise err
-  finally:
-    client.close()
-    # XXX do gracefull shutdown with timeout,
-    #     wait for send/recv to drain the queue
-    #     before closing
-    
-    # do not bother the user with hyperx errors
-    # at this point body completed or errored out
-    for fut in [sendFut, recvFut, dispFut]:
-      try:
-        if fut != nil:
-          await fut
-      except HyperxError as err:
-        debugInfo err.msg
+    var sendFut, recvFut, dispFut: Future[void]
+    try:
+      client.isConnected = true
+      if client.typ == ctClient:
+        await client.sock.connect(client.hostname, client.port)
+      await client.handshake()
+      sendFut = client.sendTask()
+      recvFut = client.recvTask()
+      dispFut = client.recvDispatcher()
+      block:
+        body
+    except QueueClosedError as err:
+      doAssert not client.isConnected
+      raise err
+    except CatchableError as err:
+      debugInfo err.msg
+      raise err
+    finally:
+      client.close()
+      # XXX do gracefull shutdown with timeout,
+      #     wait for send/recv to drain the queue
+      #     before closing
+      
+      # do not bother the user with hyperx errors
+      # at this point body completed or errored out
+      for fut in [sendFut, recvFut, dispFut]:
+        try:
+          if fut != nil:
+            await fut
+        except HyperxError as err:
+          debugInfo err.msg
 
 type
   ClientStreamState* = enum
@@ -714,22 +722,22 @@ type
     csStateRecvEnded
   ClientStream* = ref object
     client*: ClientContext
-    sid*: StreamId
+    stream*: Stream
     state*: ClientStreamState
 
-func newClientStream*(client: ClientContext, sid: StreamId): ClientStream =
+func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   ClientStream(
     client: client,
-    sid: sid,
+    stream: stream,
     state: csStateInitial
   )
 
 func newClientStream*(client: ClientContext): ClientStream =
-  let sid = client.openStream()
-  newClientStream(client, sid)
+  let stream = client.openStream()
+  newClientStream(client, stream)
 
 proc close*(strm: ClientStream) =
-  strm.client.close(strm.sid)
+  strm.client.close(strm.stream.id)
 
 func recvEnded*(strm: ClientStream): bool =
   strm.state == csStateRecvEnded
@@ -742,7 +750,7 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   # https://httpwg.org/specs/rfc9113.html#HttpFraming
   var frm: Frame
   while true:
-    frm = await strm.client.read(strm.sid)
+    frm = await strm.client.read(strm.stream)
     check frm.typ == frmtHeaders, newStrmError(errProtocolError)
     if strm.client.typ == ctServer:
       break
@@ -759,7 +767,7 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
   strm.state = csStateRecvData
-  let frm = await strm.client.read(strm.sid)
+  let frm = await strm.client.read(strm.stream)
   # XXX store trailer headers
   # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
   if frm.typ == frmtHeaders:
@@ -785,7 +793,7 @@ proc sendHeaders*(
   var frm = newFrame()
   frm.add headers[]
   frm.setTyp frmtHeaders
-  frm.setSid strm.sid.FrmSid
+  frm.setSid strm.stream.id.FrmSid
   frm.setPayloadLen frm.payloadSize.FrmPayloadLen
   frm.flags.incl frmfEndHeaders
   if finish:
@@ -802,7 +810,7 @@ proc sendBody*(
   strm.state = csStateSentData
   var frm = newFrame()
   frm.setTyp frmtData
-  frm.setSid strm.sid.FrmSid
+  frm.setSid strm.stream.id.FrmSid
   frm.setPayloadLen data[].len.FrmPayloadLen
   if finish:
     frm.flags.incl frmfEndStream
@@ -811,16 +819,17 @@ proc sendBody*(
   await strm.client.write frm
 
 template withStream*(strm: ClientStream, body: untyped): untyped =
-  doAssert strm.state == csStateInitial
-  strm.state = csStateOpened
-  try:
-    block:
-      body
-    case strm.client.typ
-    of ctClient: doAssert strm.state == csStateRecvEnded
-    of ctServer: doAssert strm.state == csStateSentEnded
-  finally:
-    strm.close()
+  {.line: instantiationInfo(fullPaths = true).}:
+    doAssert strm.state == csStateInitial
+    strm.state = csStateOpened
+    try:
+      block:
+        body
+      case strm.client.typ
+      of ctClient: doAssert strm.state == csStateRecvEnded
+      of ctServer: doAssert strm.state == csStateSentEnded
+    finally:
+      strm.close()
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =

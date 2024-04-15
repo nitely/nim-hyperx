@@ -136,7 +136,8 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     else: strmOpen
   of strmClosed:
     case e
-    of sePriority: strmClosed
+    of sePriority,
+      seRstStream: strmClosed
     else: strmInvalid
   of strmReservedLocal:
     case e
@@ -167,13 +168,14 @@ proc `+=`*(a: var StreamId, b: StreamId) {.borrow.}
 proc `<`*(a, b: StreamId): bool {.borrow.}
 
 type
-  Stream* = object
+  Stream* = ref object
     id*: StreamId
     state*: StreamState
     msgs*: QueueAsync[Frame]
+    error*: ref StrmError
 
-proc initStream(id: StreamId): Stream {.raises: [].} =
-  result = Stream(
+proc newStream(id: StreamId): Stream {.raises: [].} =
+  Stream(
     id: id,
     state: strmIdle,
     msgs: newQueue[Frame](1)
@@ -203,11 +205,12 @@ func del*(s: var Streams, sid: StreamId) {.raises: [].} =
 func contains*(s: Streams, sid: StreamId): bool {.raises: [].} =
   s.t.contains sid
 
-func open*(s: var Streams, sid: StreamId) {.raises: [StreamsClosedError].} =
+func open*(s: var Streams, sid: StreamId): Stream {.raises: [StreamsClosedError].} =
   doAssert sid notin s.t, $sid.int
   if s.isClosed:
     raise newException(StreamsClosedError, "Streams is closed")
-  s.t[sid] = initStream(sid)
+  result = newStream(sid)
+  s.t[sid] = result
 
 iterator values*(s: Streams): Stream {.inline.} =
   for v in values s.t:
