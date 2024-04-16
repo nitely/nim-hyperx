@@ -104,6 +104,9 @@ func `+=`*(a: var FrmSid, b: uint) {.inline, raises: [].} =
 proc clearBit(v: var FrmSid, bit: int) {.inline, raises: [].} =
   v = FrmSid(v.uint and not (1'u32 shl bit))
 
+proc clearBit(v: var uint, bit: int) {.inline, raises: [].} =
+  v = v and not (1'u32 shl bit)
+
 const
   frmSidMain* = 0x00'u32.FrmSid
 
@@ -310,6 +313,29 @@ iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline, raises: [].} =
         yield (id.FrmSetting, value)
     # else skip
     i += frmSettingsSize
+
+func prioDependency*(prio: openArray[byte]): FrmSid {.inline, raises: [].} =
+  result += prio[0].uint shl 24
+  result += prio[1].uint shl 16
+  result += prio[2].uint shl 8
+  result += prio[3].uint
+  result.clearBit 31  # clear reserved byte
+
+func strmDependency*(frm: Frame): FrmSid {.inline, raises: [].} =
+  doAssert frm.typ == frmtPriority
+  result += frm.s[frmHeaderSize+0].uint shl 24
+  result += frm.s[frmHeaderSize+1].uint shl 16
+  result += frm.s[frmHeaderSize+2].uint shl 8
+  result += frm.s[frmHeaderSize+3].uint
+  result.clearBit 31  # clear reserved byte
+
+func windowSizeInc*(frm: Frame): uint {.inline, raises: [].} =
+  doAssert frm.typ == frmtWindowUpdate
+  result += frm.s[frmHeaderSize+0].uint shl 24
+  result += frm.s[frmHeaderSize+1].uint shl 16
+  result += frm.s[frmHeaderSize+2].uint shl 8
+  result += frm.s[frmHeaderSize+3].uint
+  result.clearBit 31  # clear reserved byte
 
 # XXX add padding field and padding as payload
 #func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =

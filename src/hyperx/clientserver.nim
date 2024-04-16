@@ -422,10 +422,11 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   if frmfPriority in frm.flags and frm.typ == frmtHeaders:
     debugInfo "Priority"
     check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
-    var prio = 0'i64
+    var prio = [byte 0, 0, 0, 0, 0]
     check not client.sock.isClosed, newConnClosedError()
     let prioRln = await client.sock.recvInto(addr prio, frmPrioritySize)
     check prioRln == frmPrioritySize, newConnClosedError()
+    check prioDependency(prio) != frm.sid, newConnError(errProtocolError)
     payloadLen -= frmPrioritySize
   # padding can be equal at this point, because we don't count frmPaddingSize
   check payloadLen >= paddingLen, newConnError(errProtocolError)
@@ -541,7 +542,7 @@ const connFrmAllowed = {
 proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   case frm.typ
   of frmtWindowUpdate:
-    check frm.payload.len > 0, newConnError(errProtocolError)
+    check frm.windowSizeInc > 0, newConnError(errProtocolError)
   of frmtSettings:
     for (setting, value) in frm.settings:
       # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
@@ -594,8 +595,11 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
   while client.isConnected:
     let frm = await client.recvMsgs.pop()
     debugInfo "recv data on stream " & $frm.sid.int
+    if frm.typ.isUnknown:
+      continue
     # Prio is deprecated and needs to be ignored here
-    if frm.typ.isUnknown or frm.typ == frmtPriority:
+    if frm.typ == frmtPriority:
+      check frm.strmDependency != frm.sid, newConnError(errProtocolError)
       continue
     if frm.sid == frmSidMain:
       # Settings need to be applied before consuming following messages
@@ -621,6 +625,8 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       frm.s.add $headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
       await client.write newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
+    if frm.typ == frmtWindowUpdate:
+      check frm.windowSizeInc > 0, newConnError(errProtocolError)
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
@@ -630,8 +636,6 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     var stream = client.streams.get frm.sid.StreamId
     try:
       stream.doTransitionRecv frm
-      if frm.typ == frmtWindowUpdate:
-        check frm.payload.len > 0, newStrmError(errProtocolError)
     except StrmError as err:
       stream.error = err
       client.close(stream.id)
