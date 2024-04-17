@@ -236,7 +236,8 @@ func validateHeader(
   ss: string,
   nn, vv: Slice[int],
   typ: ClientTyp,
-  regularFieldCount: var int
+  regularFieldCount: var int,
+  hasMethod, hasScheme, hasPath: var bool
 ) {.raises: [ConnError].} =
   # https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.1
   # https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.2
@@ -272,6 +273,14 @@ func validateHeader(
       )
       if toOpenArray(ss, nn.a, nn.b) == ":path":
         check vv.len > 0, newConnError(errProtocolError)
+        check not hasPath, newConnError(errProtocolError)
+        hasPath = true
+      elif toOpenArray(ss, nn.a, nn.b) == ":method":
+        check not hasMethod, newConnError(errProtocolError)
+        hasMethod = true
+      elif toOpenArray(ss, nn.a, nn.b) == ":scheme":
+        check not hasScheme, newConnError(errProtocolError)
+        hasScheme = true
   of ctClient:
     if toOpenArray(ss, nn.a, nn.b) == "te":
       check toOpenArray(ss, vv.a, vv.b) == "trailers", newConnError(errProtocolError)
@@ -292,6 +301,9 @@ func hpackDecode(
   var nn = 0 .. -1
   var vv = 0 .. -1
   var regularFieldCount = 0
+  var hasMethod = false
+  var hasScheme = false
+  var hasPath = false
   var i = 0
   try:
     while i < payload.len:
@@ -302,11 +314,18 @@ func hpackDecode(
       if dhSize > -1:
         client.headersDec.setSize dhSize
       else:
-        validateHeader(ss, nn, vv, client.typ, regularFieldCount)
+        validateHeader(
+          ss, nn, vv, client.typ, regularFieldCount,
+          hasMethod, hasScheme, hasPath
+        )
     doAssert i == payload.len
   except HpackError as err:
     debugInfo err.msg
     raise newConnError(errCompressionError)
+  if client.typ == ctServer:
+    check hasMethod, newConnError(errProtocolError)
+    check hasScheme, newConnError(errProtocolError)
+    check hasPath, newConnError(errProtocolError)
 
 func hpackEncode*(
   client: ClientContext,

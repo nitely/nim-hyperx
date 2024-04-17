@@ -34,7 +34,11 @@ proc checkHandshake(tc: TestClientContext) {.async.} =
 
 testAsync "simple request":
   var checked = false
-  const headers = ":method: GET\r\nfoo: foo\r\n"
+  const headers =
+    ":method: GET\r\n" &
+    ":path: /\r\n" &
+    ":scheme: https\r\n" &
+    "foo: foo\r\n"
   const text = "0123456789"
   var server = newServer(
     "foo.bar", Port 443, "./cert", "./key"
