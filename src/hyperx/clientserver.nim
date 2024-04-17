@@ -68,6 +68,12 @@ func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
   for c in ss:
     s.add c.char
 
+func contains(s: openArray[string], item: openArray[char]): bool =
+  result = false
+  for x in s:
+    if item == x:
+      return true
+
 type
   ClientTyp* = enum
     ctServer, ctClient
@@ -226,13 +232,78 @@ func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} 
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
 
+func validateHeader(
+  ss: string,
+  nn, vv: Slice[int],
+  typ: ClientTyp,
+  regularFieldCount: var int
+) {.raises: [ConnError].} =
+  # https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.1
+  # https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.2
+  const badNameChars = {
+    0x00'u8 .. 0x20'u8,
+    0x41'u8 .. 0x5a'u8,
+    0x7f'u8 .. 0xff'u8
+  }
+  const pseudoHeadersServer = [
+    ":method", ":scheme", ":authority", ":path"
+  ]
+  const connSpecificHeaders = [
+    "connection", "proxy-connection", "keep-alive",
+    "transfer-encoding", "upgrade"
+  ]
+  var hasColon = false
+  for ii in nn:
+    hasColon = hasColon or ss[ii] == ':'
+    check ss[ii].uint8 notin badNameChars, newConnError(errProtocolError)
+  check nn.len > 0, newConnError(errProtocolError)
+  if ss[nn.a] != ':':
+    inc regularFieldCount
+  if ss[nn.a] == ':':
+    check regularFieldCount == 0, newConnError(errProtocolError)
+  check toOpenArray(ss, nn.a, nn.b) notin connSpecificHeaders, newConnError(errProtocolError)
+  case typ
+  of ctServer:
+    check toOpenArray(ss, nn.a, nn.b) != "te", newConnError(errProtocolError)
+    if hasColon:
+      check(
+        toOpenArray(ss, nn.a, nn.b) in pseudoHeadersServer,
+        newConnError(errProtocolError)
+      )
+      if toOpenArray(ss, nn.a, nn.b) == ":path":
+        check vv.len > 0, newConnError(errProtocolError)
+  of ctClient:
+    if toOpenArray(ss, nn.a, nn.b) == "te":
+      check toOpenArray(ss, vv.a, vv.b) == "trailers", newConnError(errProtocolError)
+    if hasColon:
+      check toOpenArray(ss, nn.a, nn.b) == ":status", newConnError(errProtocolError)
+  for ii in vv:
+    check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(errProtocolError)
+  if vv.len > 0:
+    check ss[vv.a].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
+    check ss[vv.b].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
+
 func hpackDecode(
   client: ClientContext,
-  ds: var DecodedStr,
+  ss: var string,
   payload: openArray[byte]
 ) {.raises: [ConnError].} =
+  var dhSize = -1
+  var nn = 0 .. -1
+  var vv = 0 .. -1
+  var regularFieldCount = 0
+  var i = 0
   try:
-    hdecodeAll(payload, client.headersDec, ds)
+    while i < payload.len:
+      i += hdecode(
+        toOpenArray(payload, i, payload.len-1),
+        client.headersDec, ss, nn, vv, dhSize
+      )
+      if dhSize > -1:
+        client.headersDec.setSize dhSize
+      else:
+        validateHeader(ss, nn, vv, client.typ, regularFieldCount)
+    doAssert i == payload.len
   except HpackError as err:
     debugInfo err.msg
     raise newConnError(errCompressionError)
@@ -617,12 +688,11 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         frm.sid.int mod 2 == 0:
       client.maxPeerStrmIdSeen = frm.sid.StreamId
     if frm.typ == frmtHeaders:
-      # XXX implement initDecodedBytes as seq[byte] in hpack
-      var headers = initDecodedStr()
+      var headers = ""
       # can raise a connError
       client.hpackDecode(headers, frm.payload)
       frm.shrink frm.payload.len
-      frm.s.add $headers
+      frm.s.add headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
       await client.write newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
     if frm.typ == frmtWindowUpdate:

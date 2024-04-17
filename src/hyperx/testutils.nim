@@ -127,9 +127,10 @@ proc sent*(tc: TestClientContext): Future[Frame] {.async.} =
     payload = await tc.client.sentTestData(result.payloadLen.int)
     doAssert payload.len == result.payloadLen.int
   if result.typ == frmtHeaders:
-    var ds = initDecodedStr()
-    hdecodeAll(payload, tc.peer.headersDec, ds)
-    result.add toBytes($ds)
+    var ss = ""
+    var bb = newSeq[HBounds]()
+    hdecodeAll(payload, tc.peer.headersDec, ss, bb)
+    result.add toBytes(ss)
   else:
     result.add payload
 
