@@ -821,6 +821,7 @@ type
     client*: ClientContext
     stream*: Stream
     state*: ClientStreamState
+    contentLen*: int64
 
 func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   ClientStream(
@@ -858,6 +859,10 @@ proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
     else:
       break
   data[].add frm.payload
+  try:
+    strm.contentLen = contentLen(frm.payload)
+  except ValueError:
+    raise newStrmError(errProtocolError)
   if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
 
@@ -960,11 +965,6 @@ when defined(hyperxTest):
     result.setLen sz
 
 when isMainModule:
-  when not defined(hyperxTest):
-    {.error: "tests need -d:hyperxTest".}
-
-  import std/net
-
   block default_settings:
     doAssert stgHeaderTableSize == 4096'u32
     doAssert stgMaxConcurrentStreams == uint32.high
