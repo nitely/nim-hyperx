@@ -68,7 +68,7 @@ func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
   for c in ss:
     s.add c.char
 
-func contains(s: openArray[string], item: openArray[char]): bool =
+func contains(s: openArray[seq[byte]], item: openArray[byte]): bool =
   result = false
   for x in s:
     if item == x:
@@ -231,124 +231,6 @@ func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} 
   result = client.streams.open client.currStreamId
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
-
-##[
-func validateTrailer(
-  ss: string,
-  nn, vv: Slice[int]
-) {.raises: [ConnError].} =
-  # XXX validate there are no pseudo headers
-  const badNameChars = {
-    0x00'u8 .. 0x20'u8,
-    0x41'u8 .. 0x5a'u8,
-    0x7f'u8 .. 0xff'u8
-  }
-  for ii in nn:
-    check ss[ii].uint8 notin badNameChars, newConnError(errProtocolError)
-  for ii in vv:
-    check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(errProtocolError)
-  if vv.len > 0:
-    check ss[vv.a].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
-    check ss[vv.b].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
-
-func validateHeader(
-  ss: string,
-  nn, vv: Slice[int],
-  typ: ClientTyp,
-  regularFieldCount: var int,
-  hasMethod, hasScheme, hasPath: var bool
-) {.raises: [ConnError].} =
-  # https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.1
-  # https://www.rfc-editor.org/rfc/rfc9113.html#section-8.2.2
-  const badNameChars = {
-    0x00'u8 .. 0x20'u8,
-    0x41'u8 .. 0x5a'u8,
-    0x7f'u8 .. 0xff'u8
-  }
-  const pseudoHeadersServer = [
-    ":method", ":scheme", ":authority", ":path"
-  ]
-  const connSpecificHeaders = [
-    "connection", "proxy-connection", "keep-alive",
-    "transfer-encoding", "upgrade"
-  ]
-  var hasColon = false
-  for ii in nn:
-    hasColon = hasColon or ss[ii] == ':'
-    check ss[ii].uint8 notin badNameChars, newConnError(errProtocolError)
-  check nn.len > 0, newConnError(errProtocolError)
-  if ss[nn.a] != ':':
-    inc regularFieldCount
-  if ss[nn.a] == ':':
-    check regularFieldCount == 0, newConnError(errProtocolError)
-  check toOpenArray(ss, nn.a, nn.b) notin connSpecificHeaders, newConnError(errProtocolError)
-  case typ
-  of ctServer:
-    check toOpenArray(ss, nn.a, nn.b) != "te", newConnError(errProtocolError)
-    if hasColon:
-      check(
-        toOpenArray(ss, nn.a, nn.b) in pseudoHeadersServer,
-        newConnError(errProtocolError)
-      )
-      if toOpenArray(ss, nn.a, nn.b) == ":path":
-        check vv.len > 0, newConnError(errProtocolError)
-        check not hasPath, newConnError(errProtocolError)
-        hasPath = true
-      elif toOpenArray(ss, nn.a, nn.b) == ":method":
-        check not hasMethod, newConnError(errProtocolError)
-        hasMethod = true
-      elif toOpenArray(ss, nn.a, nn.b) == ":scheme":
-        check not hasScheme, newConnError(errProtocolError)
-        hasScheme = true
-  of ctClient:
-    if toOpenArray(ss, nn.a, nn.b) == "te":
-      check toOpenArray(ss, vv.a, vv.b) == "trailers", newConnError(errProtocolError)
-    if hasColon:
-      check toOpenArray(ss, nn.a, nn.b) == ":status", newConnError(errProtocolError)
-  for ii in vv:
-    check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(errProtocolError)
-  if vv.len > 0:
-    check ss[vv.a].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
-    check ss[vv.b].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
-
-func hpackDecode(
-  client: ClientContext,
-  ss: var string,
-  payload: openArray[byte],
-  trailers = false
-) {.raises: [ConnError].} =
-  var dhSize = -1
-  var nn = 0 .. -1
-  var vv = 0 .. -1
-  var regularFieldCount = 0
-  var hasMethod = false
-  var hasScheme = false
-  var hasPath = false
-  var i = 0
-  try:
-    while i < payload.len:
-      i += hdecode(
-        toOpenArray(payload, i, payload.len-1),
-        client.headersDec, ss, nn, vv, dhSize
-      )
-      if dhSize > -1:
-        client.headersDec.setSize dhSize
-      elif not trailers:
-        validateHeader(
-          ss, nn, vv, client.typ, regularFieldCount,
-          hasMethod, hasScheme, hasPath
-        )
-      else:
-        validateTrailer(ss, nn, vv)
-    doAssert i == payload.len
-  except HpackError as err:
-    debugInfo err.msg
-    raise newConnError(errCompressionError)
-  if client.typ == ctServer and not trailers:
-    check hasMethod, newConnError(errProtocolError)
-    check hasScheme, newConnError(errProtocolError)
-    check hasPath, newConnError(errProtocolError)
-]##
 
 func validateHeader(
   ss: string,
@@ -913,6 +795,60 @@ proc close*(strm: ClientStream) =
 func recvEnded*(strm: ClientStream): bool =
   strm.state == csStateRecvEnded
 
+func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].} =
+  const connSpecificHeaders = [
+    "connection".toBytes,
+    "proxy-connection".toBytes,
+    "keep-alive".toBytes,
+    "transfer-encoding".toBytes,
+    "upgrade".toBytes
+  ]
+  var hasPath = false
+  var hasMethod = false
+  var hasScheme = false
+  var regularFieldCount = 0
+  for (nn, vv) in headersIt(s):
+    if s[nn.a].char == ':':
+      check regularFieldCount == 0, newStrmError(errProtocolError)
+    else:
+      inc regularFieldCount
+      check toOpenArray(s, nn.a, nn.b) notin connSpecificHeaders,
+        newStrmError(errProtocolError)
+    case typ
+    of ctServer:
+      check toOpenArray(s, nn.a, nn.b) != "te".toBytes,
+        newStrmError(errProtocolError)
+      if s[nn.a].char == ':':
+        check regularFieldCount == 0, newStrmError(errProtocolError)
+        if toOpenArray(s, nn.a, nn.b) == ":path".toBytes:
+          check vv.len > 0, newStrmError(errProtocolError)
+          check not hasPath, newStrmError(errProtocolError)
+          hasPath = true
+        elif toOpenArray(s, nn.a, nn.b) == ":method".toBytes:
+          check not hasMethod, newStrmError(errProtocolError)
+          hasMethod = true
+        elif toOpenArray(s, nn.a, nn.b) == ":scheme".toBytes:
+          check not hasScheme, newStrmError(errProtocolError)
+          hasScheme = true
+        else:
+          check toOpenArray(s, nn.a, nn.b) == ":authority".toBytes,
+            newStrmError(errProtocolError)
+    of ctClient:
+      if toOpenArray(s, nn.a, nn.b) == "te".toBytes:
+        check toOpenArray(s, vv.a, vv.b) == "trailers".toBytes,
+          newStrmError(errProtocolError)
+      if s[nn.a].char == ':':
+        check toOpenArray(s, nn.a, nn.b) == ":status".toBytes,
+          newStrmError(errProtocolError)
+  if typ == ctServer:
+    check hasMethod, newStrmError(errProtocolError)
+    check hasScheme, newStrmError(errProtocolError)
+    check hasPath, newStrmError(errProtocolError)
+
+func validateTrailers(s: openArray[byte]) {.raises: [StrmError].} =
+  for (nn, _) in headersIt(s):
+    check s[nn.a].char != ':', newStrmError(errProtocolError)
+
 proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
   case strm.client.typ
   of ctClient: doAssert strm.state == csStateSentEnded
@@ -923,6 +859,7 @@ proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
   while true:
     frm = await strm.client.read(strm.stream)
     check frm.typ == frmtHeaders, newStrmError(errProtocolError)
+    validateHeaders(frm.payload, strm.client.typ)
     if strm.client.typ == ctServer:
       break
     check frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
@@ -970,6 +907,7 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
     strm.state = csStateRecvEnded
     if strm.client.typ == ctServer:
       strm.contentLenCheck()
+    validateTrailers(frm.payload)
     return
   check frm.typ == frmtData, newStrmError(errProtocolError)
   data[].add frm.payload

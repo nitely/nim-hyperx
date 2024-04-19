@@ -48,7 +48,7 @@ func toBytes(s: string): seq[byte] =
   for c in s:
     result.add c.byte
 
-iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
+iterator headersIt*(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
   # this assumes field validity was done
   let L = s.len
   var na = 0
