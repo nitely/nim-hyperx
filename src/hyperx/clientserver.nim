@@ -362,8 +362,13 @@ func validateHeader(
     0x41'u8 .. 0x5a'u8,
     0x7f'u8 .. 0xff'u8
   }
+  check nn.len > 0, newConnError(errProtocolError)
+  var i = 0
   for ii in nn:
     check ss[ii].uint8 notin badNameChars, newConnError(errProtocolError)
+    if i > 0:
+      check ss[ii].uint8 != ':'.uint8, newConnError(errProtocolError)
+    inc i
   for ii in vv:
     check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(errProtocolError)
   if vv.len > 0:

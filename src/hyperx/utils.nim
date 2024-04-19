@@ -43,32 +43,45 @@ func find(s: openArray[byte], c: byte, i: int): int {.raises: [].} =
     inc i
 
 # XXX remove
-func toBytes(s: string): seq[byte] {.compileTime.} =
+func toBytes(s: string): seq[byte] =
   result = newSeq[byte]()
   for c in s:
     result.add c.byte
 
-func contentLen*(s: openArray[byte]): int {.raises: [ValueError].} =
-  const cBytes = "content-length:".toBytes
-  result = -1
+iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
+  # this assumes field validity was done
   let L = s.len
-  var start = -1
-  var i = 0
-  while i < L:
-    if toOpenArray(s, i, min(L-1, i+cBytes.len-1)) == cBytes:
-      if start != -1:
+  var na = 0
+  var nb = 0
+  var va = 0
+  var vb = 0
+  while na < L:
+    nb = na
+    nb += int(s[na].char == ':')  # pseudo-header
+    nb = find(s, ':'.byte, nb)
+    doAssert nb != -1
+    assert s[nb].char == ':'
+    assert s[nb+1].char == ' '
+    va = nb+2  # skip :\s
+    vb = find(s, '\r'.byte, va)
+    doAssert vb != -1
+    assert s[vb].char == '\r'
+    assert s[vb+1].char == '\n'
+    yield (na .. nb-1, va .. vb-1)
+    doAssert vb+2 > na
+    na = vb+2  # skip /r/n
+
+func contentLen*(s: openArray[byte]): int {.raises: [ValueError].} =
+  result = -1
+  const cBytes = "content-length".toBytes
+  var val = 0 .. -1
+  for (nn, vv) in headersIt(s):
+    if toOpenArray(s, nn.a, nn.b) == cBytes:
+      if val.b != -1:
         raise newException(ValueError, "more than one content-length")
-      start = i+cBytes.len
-    i = find(s, '\n'.byte, i)
-    if i == -1:
-      break
-    inc i
-  if start != -1:
-    i = find(s, '\r'.byte, start)
-    doAssert i != -1
-    doAssert start <= i-1
-    doAssert s[start] == ' '.byte
-    return parseBigInt toOpenArray(s, start+1, i-1)
+      val = vv
+  if val.b != -1:
+    return parseBigInt toOpenArray(s, val.a, val.b)
 
 when isMainModule:
   block:
@@ -118,5 +131,36 @@ when isMainModule:
       doAssert false
     except ValueError:
       discard
+  block headers_it:
+    func headersStr(s: string): seq[string] {.raises: [].} =
+      for (nn, vv) in headersIt(s.toBytes):
+        result.add s[nn]
+        result.add s[vv]
+    block:
+      doAssert headersStr("").len == 0
+      doAssert headersStr(":foo: bar\r\n") == @[":foo", "bar"]
+      doAssert headersStr(":foo: bar\r\n:foo: bar\r\n") ==
+        @[":foo", "bar", ":foo", "bar"]
+      doAssert headersStr(":foo: bar\r\n:baz: qux\r\n") ==
+        @[":foo", "bar", ":baz", "qux"]
+      doAssert headersStr(":foo: bar\r\nbaz: qux\r\n") ==
+        @[":foo", "bar", "baz", "qux"]
+      doAssert headersStr(":foo: bar 123\r\nbaz: qux abc\r\n") ==
+        @[":foo", "bar 123", "baz", "qux abc"]
+      doAssert headersStr(":foo: bar :\r\nbaz: qux : abc\r\n") ==
+        @[":foo", "bar :", "baz", "qux : abc"]
+      doAssert headersStr("foo: bar\r\n") == @["foo", "bar"]
+      doAssert headersStr("foo: bar\r\nfoo: bar\r\n") ==
+        @["foo", "bar", "foo", "bar"]
+      doAssert headersStr("foo: bar\r\nbaz: qux\r\n") ==
+        @["foo", "bar", "baz", "qux"]
+      doAssert headersStr("foo: \r\nbaz: qux\r\n") ==
+        @["foo", "", "baz", "qux"]
+      doAssert headersStr("foo: \r\nbaz: \r\n") ==
+        @["foo", "", "baz", ""]
+      doAssert headersStr("foo: bar\r\nbaz: \r\n") ==
+        @["foo", "bar", "baz", ""]
+      doAssert headersStr(":: \r\nx: \r\n") ==
+        @[":", "", "x", ""]
 
   echo "ok"
