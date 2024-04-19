@@ -232,6 +232,25 @@ func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} 
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
 
+##[
+func validateTrailer(
+  ss: string,
+  nn, vv: Slice[int]
+) {.raises: [ConnError].} =
+  # XXX validate there are no pseudo headers
+  const badNameChars = {
+    0x00'u8 .. 0x20'u8,
+    0x41'u8 .. 0x5a'u8,
+    0x7f'u8 .. 0xff'u8
+  }
+  for ii in nn:
+    check ss[ii].uint8 notin badNameChars, newConnError(errProtocolError)
+  for ii in vv:
+    check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(errProtocolError)
+  if vv.len > 0:
+    check ss[vv.a].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
+    check ss[vv.b].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
+
 func validateHeader(
   ss: string,
   nn, vv: Slice[int],
@@ -295,7 +314,8 @@ func validateHeader(
 func hpackDecode(
   client: ClientContext,
   ss: var string,
-  payload: openArray[byte]
+  payload: openArray[byte],
+  trailers = false
 ) {.raises: [ConnError].} =
   var dhSize = -1
   var nn = 0 .. -1
@@ -313,19 +333,67 @@ func hpackDecode(
       )
       if dhSize > -1:
         client.headersDec.setSize dhSize
-      else:
+      elif not trailers:
         validateHeader(
           ss, nn, vv, client.typ, regularFieldCount,
           hasMethod, hasScheme, hasPath
         )
+      else:
+        validateTrailer(ss, nn, vv)
     doAssert i == payload.len
   except HpackError as err:
     debugInfo err.msg
     raise newConnError(errCompressionError)
-  if client.typ == ctServer:
+  if client.typ == ctServer and not trailers:
     check hasMethod, newConnError(errProtocolError)
     check hasScheme, newConnError(errProtocolError)
     check hasPath, newConnError(errProtocolError)
+]##
+
+func validateHeader(
+  ss: string,
+  nn, vv: Slice[int]
+) {.raises: [ConnError].} =
+  # https://www.rfc-editor.org/rfc/rfc9113.html#name-field-validity
+  # field validity only because headers and trailers don't have
+  # the same validation
+  const badNameChars = {
+    0x00'u8 .. 0x20'u8,
+    0x41'u8 .. 0x5a'u8,
+    0x7f'u8 .. 0xff'u8
+  }
+  for ii in nn:
+    check ss[ii].uint8 notin badNameChars, newConnError(errProtocolError)
+  for ii in vv:
+    check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(errProtocolError)
+  if vv.len > 0:
+    check ss[vv.a].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
+    check ss[vv.b].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
+
+func hpackDecode(
+  client: ClientContext,
+  ss: var string,
+  payload: openArray[byte]
+) {.raises: [ConnError].} =
+  var dhSize = -1
+  var nn = 0 .. -1
+  var vv = 0 .. -1
+  var i = 0
+  try:
+    while i < payload.len:
+      i += hdecode(
+        toOpenArray(payload, i, payload.len-1),
+        client.headersDec, ss, nn, vv, dhSize
+      )
+      if dhSize > -1:
+        client.headersDec.setSize dhSize
+      else:
+        # note this validate headers and trailers
+        validateHeader(ss, nn, vv)
+    doAssert i == payload.len
+  except HpackError as err:
+    debugInfo err.msg
+    raise newConnError(errCompressionError)
 
 func hpackEncode*(
   client: ClientContext,
@@ -708,7 +776,6 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       client.maxPeerStrmIdSeen = frm.sid.StreamId
     if frm.typ == frmtHeaders:
       var headers = ""
-      # can raise a connError
       client.hpackDecode(headers, frm.payload)
       frm.shrink frm.payload.len
       frm.s.add headers
@@ -820,8 +887,9 @@ type
   ClientStream* = ref object
     client*: ClientContext
     stream*: Stream
-    state*: ClientStreamState
-    contentLen*: int64
+    state: ClientStreamState
+    contentLen: int64
+    contentLenRecv: int64
 
 func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   ClientStream(
@@ -865,6 +933,9 @@ proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
     raise newStrmError(errProtocolError)
   if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
+    # XXX dont do for no content status 1xx/204/304 and HEAD response
+    if strm.client.typ == ctServer:
+      check strm.contentLen <= 0, newStrmError(errProtocolError)
 
 proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   try:
@@ -877,6 +948,12 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
     )
     raise err
 
+func contentLenCheck(strm: ClientStream) {.raises: [StrmError].} =
+  check(
+    strm.contentLen == -1 or strm.contentLen == strm.contentLenRecv,
+    newStrmError(errProtocolError)
+  )
+
 proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
   strm.state = csStateRecvData
@@ -886,11 +963,18 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   if frm.typ == frmtHeaders:
     check frmfEndStream in frm.flags, newStrmError(errProtocolError)
     strm.state = csStateRecvEnded
+    if strm.client.typ == ctServer:
+      strm.contentLenCheck()
     return
   check frm.typ == frmtData, newStrmError(errProtocolError)
   data[].add frm.payload
+  strm.contentLenRecv += frm.payloadLen.int
   if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
+    # XXX dont do for no content status 1xx/204/304 and HEAD response
+    #     they could send empty data to close the stream so this is called
+    if strm.client.typ == ctServer:
+      strm.contentLenCheck()
 
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   try:

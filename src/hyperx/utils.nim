@@ -85,6 +85,12 @@ when isMainModule:
     doAssert contentLen("content-length: 100\r\n".toBytes) == 100
     doAssert contentLen("content-length: 00012345678\r\n".toBytes) == 12345678
     doAssert contentLen(":foo: abc\r\ncontent-length: 100\r\n".toBytes) == 100
+    doAssert contentLen(
+      ":foo: abc\r\ncontent-length-x: 123\r\ncontent-length: 100\r\n".toBytes
+    ) == 100
+    doAssert contentLen(
+      ":foo: abc\r\nontent-length: 123\r\ncontent-length: 100\r\n".toBytes
+    ) == 100
     try:
       discard contentLen(":foo: abc\r\ncontent-length: \r\n".toBytes)
       doAssert false
