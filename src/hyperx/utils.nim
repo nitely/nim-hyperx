@@ -1,3 +1,22 @@
+## Shared utilities
+
+import ./errors
+
+template debugInfo*(s: string): untyped =
+  when defined(hyperxDebug):
+    debugEcho s
+  else:
+    discard
+
+template check*(cond: bool): untyped =
+  {.line: instantiationInfo(fullPaths = true).}:
+    if not cond:
+      raise (ref HyperxError)()
+
+template check*(cond: bool, errObj: untyped): untyped =
+  {.line: instantiationInfo(fullPaths = true).}:
+    if not cond:
+      raise errObj
 
 template raisesAssertion*(exp: untyped): untyped =
   ## Checks the expression passed raises an assertion
@@ -48,7 +67,7 @@ func toBytes(s: string): seq[byte] =
   for c in s:
     result.add c.byte
 
-iterator headersIt*(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
+iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
   # this assumes field validity was done
   let L = s.len
   var na = 0
@@ -82,6 +101,69 @@ func contentLen*(s: openArray[byte]): int {.raises: [ValueError].} =
       val = vv
   if val.b != -1:
     return parseBigInt toOpenArray(s, val.a, val.b)
+
+func contains(s: openArray[seq[byte]], item: openArray[byte]): bool =
+  result = false
+  for x in s:
+    if item == x:
+      return true
+
+const connSpecificHeaders = [
+  "connection".toBytes,
+  "proxy-connection".toBytes,
+  "keep-alive".toBytes,
+  "transfer-encoding".toBytes,
+  "upgrade".toBytes
+]
+
+func serverHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
+  var hasPath = false
+  var hasMethod = false
+  var hasScheme = false
+  var regularFieldCount = 0
+  for (nn, vv) in headersIt(s):
+    if s[nn.a].char != ':':
+      inc regularFieldCount
+      check toOpenArray(s, nn.a, nn.b) notin connSpecificHeaders,
+        newStrmError(errProtocolError)
+      check toOpenArray(s, nn.a, nn.b) != "te".toBytes,
+        newStrmError(errProtocolError)
+    else:
+      check regularFieldCount == 0, newStrmError(errProtocolError)
+      if toOpenArray(s, nn.a, nn.b) == ":path".toBytes:
+        check vv.len > 0, newStrmError(errProtocolError)
+        check not hasPath, newStrmError(errProtocolError)
+        hasPath = true
+      elif toOpenArray(s, nn.a, nn.b) == ":method".toBytes:
+        check not hasMethod, newStrmError(errProtocolError)
+        hasMethod = true
+      elif toOpenArray(s, nn.a, nn.b) == ":scheme".toBytes:
+        check not hasScheme, newStrmError(errProtocolError)
+        hasScheme = true
+      else:
+        check toOpenArray(s, nn.a, nn.b) == ":authority".toBytes,
+          newStrmError(errProtocolError)
+  check hasMethod, newStrmError(errProtocolError)
+  check hasScheme, newStrmError(errProtocolError)
+  check hasPath, newStrmError(errProtocolError)
+
+func clientHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
+  var regularFieldCount = 0
+  for (nn, vv) in headersIt(s):
+    if s[nn.a].char != ':':
+      inc regularFieldCount
+      check toOpenArray(s, nn.a, nn.b) notin connSpecificHeaders,
+        newStrmError(errProtocolError)
+      check toOpenArray(s, nn.a, nn.b) != "te".toBytes,
+        newStrmError(errProtocolError)
+    else:
+      check regularFieldCount == 0, newStrmError(errProtocolError)
+      check toOpenArray(s, nn.a, nn.b) == ":status".toBytes,
+        newStrmError(errProtocolError)
+
+func validateTrailers*(s: openArray[byte]) {.raises: [StrmError].} =
+  for (nn, _) in headersIt(s):
+    check s[nn.a].char != ':', newStrmError(errProtocolError)
 
 when isMainModule:
   block:

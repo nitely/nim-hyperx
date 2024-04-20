@@ -42,22 +42,6 @@ const
   stgMaxFrameSize* = (1'u32 shl 24) - 1'u32
   stgDisablePush* = 0'u32
 
-template debugInfo*(s: string): untyped =
-  when defined(hyperxDebug):
-    debugEcho s
-  else:
-    discard
-
-template check*(cond: bool): untyped =
-  {.line: instantiationInfo(fullPaths = true).}:
-    if not cond:
-      raise (ref HyperxError)()
-
-template check*(cond: bool, errObj: untyped): untyped =
-  {.line: instantiationInfo(fullPaths = true).}:
-    if not cond:
-      raise errObj
-
 func add*(s: var seq[byte], ss: string) {.raises: [].} =
   # XXX x_x
   for c in ss:
@@ -67,12 +51,6 @@ func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
   # XXX x_x
   for c in ss:
     s.add c.char
-
-func contains(s: openArray[seq[byte]], item: openArray[byte]): bool =
-  result = false
-  for x in s:
-    if item == x:
-      return true
 
 type
   ClientTyp* = enum
@@ -796,58 +774,9 @@ func recvEnded*(strm: ClientStream): bool =
   strm.state == csStateRecvEnded
 
 func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].} =
-  const connSpecificHeaders = [
-    "connection".toBytes,
-    "proxy-connection".toBytes,
-    "keep-alive".toBytes,
-    "transfer-encoding".toBytes,
-    "upgrade".toBytes
-  ]
-  var hasPath = false
-  var hasMethod = false
-  var hasScheme = false
-  var regularFieldCount = 0
-  for (nn, vv) in headersIt(s):
-    if s[nn.a].char == ':':
-      check regularFieldCount == 0, newStrmError(errProtocolError)
-    else:
-      inc regularFieldCount
-      check toOpenArray(s, nn.a, nn.b) notin connSpecificHeaders,
-        newStrmError(errProtocolError)
-    case typ
-    of ctServer:
-      check toOpenArray(s, nn.a, nn.b) != "te".toBytes,
-        newStrmError(errProtocolError)
-      if s[nn.a].char == ':':
-        check regularFieldCount == 0, newStrmError(errProtocolError)
-        if toOpenArray(s, nn.a, nn.b) == ":path".toBytes:
-          check vv.len > 0, newStrmError(errProtocolError)
-          check not hasPath, newStrmError(errProtocolError)
-          hasPath = true
-        elif toOpenArray(s, nn.a, nn.b) == ":method".toBytes:
-          check not hasMethod, newStrmError(errProtocolError)
-          hasMethod = true
-        elif toOpenArray(s, nn.a, nn.b) == ":scheme".toBytes:
-          check not hasScheme, newStrmError(errProtocolError)
-          hasScheme = true
-        else:
-          check toOpenArray(s, nn.a, nn.b) == ":authority".toBytes,
-            newStrmError(errProtocolError)
-    of ctClient:
-      if toOpenArray(s, nn.a, nn.b) == "te".toBytes:
-        check toOpenArray(s, vv.a, vv.b) == "trailers".toBytes,
-          newStrmError(errProtocolError)
-      if s[nn.a].char == ':':
-        check toOpenArray(s, nn.a, nn.b) == ":status".toBytes,
-          newStrmError(errProtocolError)
-  if typ == ctServer:
-    check hasMethod, newStrmError(errProtocolError)
-    check hasScheme, newStrmError(errProtocolError)
-    check hasPath, newStrmError(errProtocolError)
-
-func validateTrailers(s: openArray[byte]) {.raises: [StrmError].} =
-  for (nn, _) in headersIt(s):
-    check s[nn.a].char != ':', newStrmError(errProtocolError)
+  case typ
+  of ctServer: serverHeadersValidation(s)
+  of ctClient: clientHeadersValidation(s)
 
 proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
   case strm.client.typ

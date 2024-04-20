@@ -13,6 +13,7 @@ import ./clientserver
 import ./stream
 import ./queue
 import ./errors
+import ./utils
 
 when defined(hyperxTest):
   import ./testsocket

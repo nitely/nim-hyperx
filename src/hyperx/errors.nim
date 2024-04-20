@@ -1,3 +1,4 @@
+## Exception types
 
 # https://httpwg.org/specs/rfc9113.html#ErrorCodes
 type
