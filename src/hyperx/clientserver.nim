@@ -244,18 +244,25 @@ func hpackDecode(
   var nn = 0 .. -1
   var vv = 0 .. -1
   var i = 0
+  var i2 = -1
+  let L = payload.len
+  var canResize = true
   try:
-    while i < payload.len:
+    while i < L:
+      doAssert i > i2; i2 = i
       i += hdecode(
-        toOpenArray(payload, i, payload.len-1),
+        toOpenArray(payload, i, L-1),
         client.headersDec, ss, nn, vv, dhSize
       )
       if dhSize > -1:
+        check canResize, newConnError(errCompressionError)
         client.headersDec.setSize dhSize
       else:
         # note this validate headers and trailers
         validateHeader(ss, nn, vv)
-    doAssert i == payload.len
+        # can resize multiple times before a header, but not after
+        canResize = false
+    doAssert i == L
   except HpackError as err:
     debugInfo err.msg
     raise newConnError(errCompressionError)
@@ -648,6 +655,8 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       await client.write newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
     if frm.typ == frmtWindowUpdate:
       check frm.windowSizeInc > 0, newConnError(errProtocolError)
+    if frm.typ == frmtPushPromise:
+      check client.typ == ctClient, newConnError(errProtocolError)
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:

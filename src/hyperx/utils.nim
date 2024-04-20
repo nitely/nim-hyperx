@@ -8,6 +8,7 @@ template debugInfo*(s: string): untyped =
   else:
     discard
 
+# XXX remove
 template check*(cond: bool): untyped =
   {.line: instantiationInfo(fullPaths = true).}:
     if not cond:
@@ -66,6 +67,10 @@ func toBytes(s: string): seq[byte] =
   result = newSeq[byte]()
   for c in s:
     result.add c.byte
+
+# XXX move headers stuff to its own module
+#     or back to clientserver, it's not used
+#     anywhere else
 
 iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
   # this assumes field validity was done
