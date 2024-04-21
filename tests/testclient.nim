@@ -207,7 +207,7 @@ testAsync "response with headers padding":
     var frm1 = tc.frame(
       frmtHeaders, @[frmfPadded, frmfEndHeaders]
     )
-    frm1.add ("\x01" & hencode(tc, headers) & "12345678").toBytes
+    frm1.add ("\x08" & hencode(tc, headers) & "12345678").toBytes
     await tc.reply(frm1)
     var frm2 = tc.frame(frmtData, @[frmfEndStream])
     frm2.add text.toBytes
