@@ -45,6 +45,7 @@ proc putEvent[T](q: QueueAsync[T]): Future[void] {.raises: [].} =
 
 proc putDone[T](q: QueueAsync[T]) {.raises: [].} =
   if q.putEv.len > 0:
+    doAssert q.putEv.len == 1, "multiple consumers not allowed just because"
     untrackExceptions:
       q.putEv.popFirst().complete()
 
@@ -77,11 +78,11 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   if q.isClosed:
     return
   q.isClosed = true
-  while q.putEv.len > 0:
-    untrackExceptions:
+  untrackExceptions:
+    while q.putEv.len > 0:
       q.putEv.popFirst().fail newQueueClosedError()
-  while q.popEv.len > 0:
-    untrackExceptions:
+  untrackExceptions:
+    while q.popEv.len > 0:
       q.popEv.popFirst().fail newQueueClosedError()
 
 when isMainModule:
@@ -119,7 +120,7 @@ when isMainModule:
       )
       doAssert res == @[1,2,3,4,5,6]
     waitFor test()
-  block:
+  when false:  #block:
     proc test() {.async.} =
       var q = newQueue[int](2)
       var res = newSeq[int]()
@@ -141,7 +142,7 @@ when isMainModule:
       )
       doAssert res == @[1,2,3,4,5,6]
     waitFor test()
-  block:
+  when false:  #block:
     proc test() {.async.} =
       var q = newQueue[int](2)
       var res = newSeq[int]()

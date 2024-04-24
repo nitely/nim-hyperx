@@ -138,6 +138,7 @@ type
     currStreamId, maxPeerStrmIdSeen: StreamId
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
+    peerWindow: int32  # can be negative
     peerMaxFrameSize: uint32
     sendLock: LockAsync
     error*: ref HyperxError
@@ -163,6 +164,7 @@ proc newClient*(
     streamOpenedMsgs: newQueue[Stream](10),
     maxPeerStrmIdSeen: 0.StreamId,
     peerMaxConcurrentStreams: stgMaxConcurrentStreams,
+    peerWindow: stgInitialWindowSize.int32,
     peerWindowSize: stgInitialWindowSize,
     peerMaxFrameSize: stgInitialMaxFrameSize,
     sendLock: newLock()
@@ -201,12 +203,12 @@ proc close*(client: ClientContext, sid: StreamId) {.raises: [].} =
 
 func openMainStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} =
   doAssert frmSidMain.StreamId notin client.streams
-  result = client.streams.open frmSidMain.StreamId
+  result = client.streams.open(frmSidMain.StreamId, client.peerWindowSize.int32)
 
 func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} =
   # XXX some error if max sid is reached
   # XXX error if maxStreams is reached
-  result = client.streams.open client.currStreamId
+  result = client.streams.open(client.currStreamId, client.peerWindowSize.int32)
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
 
@@ -573,6 +575,10 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   case frm.typ
   of frmtWindowUpdate:
     check frm.windowSizeInc > 0, newConnError(errProtocolError)
+    check frm.windowSizeInc <= stgMaxWindowSize, newConnError(errProtocolError)
+    check client.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32, newConnError(errProtocolError)
+    client.peerWindow += frm.windowSizeInc.int32
+    # XXX signal connWindowUpdate
   of frmtSettings:
     for (setting, value) in frm.settings:
       # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
@@ -590,8 +596,15 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         client.peerMaxConcurrentStreams = value
       of frmsInitialWindowSize:
         check value <= stgMaxWindowSize, newConnError(errFlowControlError)
-        # XXX update all open streams windows
-        #client.peerWindowSize = value
+        template negativeBoundCheck(a, b, err: untyped): untyped =
+          if b < 0 and a > int32.high + b: raise err
+          if b > 0 and a < int32.low + b: raise err
+        for strm in values client.streams:
+          negativeBoundCheck(client.peerWindowSize.int32, strm.peerWindow, newConnError(errFlowControlError))
+          strm.peerWindow = client.peerWindowSize.int32 - strm.peerWindow
+          negativeBoundCheck(value.int32, strm.peerWindow, newConnError(errFlowControlError))
+          strm.peerWindow = value.int32 - strm.peerWindow
+        client.peerWindowSize = value
       of frmsMaxFrameSize:
         check value >= stgInitialMaxFrameSize, newConnError(errProtocolError)
         check value <= stgMaxFrameSize, newConnError(errProtocolError)
@@ -640,7 +653,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         frm.sid.int mod 2 != 0:
       client.maxPeerStrmIdSeen = frm.sid.StreamId
       # we do not store idle streams, so no need to close them
-      let strm = client.streams.open(frm.sid.StreamId)
+      let strm = client.streams.open(frm.sid.StreamId, client.peerWindowSize.int32)
       await client.streamOpenedMsgs.put strm
     if client.typ == ctClient and
         frm.sid.StreamId > client.maxPeerStrmIdSeen and

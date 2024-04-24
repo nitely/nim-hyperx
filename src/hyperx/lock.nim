@@ -64,8 +64,8 @@ proc close*(lck: LockAsync) {.raises: [].}  =
   if lck.isClosed:
     return
   lck.isClosed = true
-  while lck.relEv.len > 0:
-    untrackExceptions:
+  untrackExceptions:
+    while lck.relEv.len > 0:
       lck.relEv.popFirst().fail newLockClosedError()
 
 when isMainModule:

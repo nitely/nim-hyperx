@@ -175,13 +175,16 @@ type
     id*: StreamId
     state*: StreamState
     msgs*: QueueAsync[Frame]
+    peerWindow*: int32
     error*: ref StrmError
 
-proc newStream(id: StreamId): Stream {.raises: [].} =
+proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
+  doAssert peerWindow >= 0
   Stream(
     id: id,
     state: strmIdle,
-    msgs: newQueue[Frame](1)
+    msgs: newQueue[Frame](1),
+    peerWindow: peerWindow
   )
 
 proc close*(stream: Stream) {.raises: [].} =
@@ -212,11 +215,15 @@ func del*(s: var Streams, sid: StreamId) {.raises: [].} =
 func contains*(s: Streams, sid: StreamId): bool {.raises: [].} =
   s.t.contains sid
 
-func open*(s: var Streams, sid: StreamId): Stream {.raises: [StreamsClosedError].} =
+func open*(
+  s: var Streams,
+  sid: StreamId,
+  peerWindow: int32
+): Stream {.raises: [StreamsClosedError].} =
   doAssert sid notin s.t, $sid.int
   if s.isClosed:
     raise newException(StreamsClosedError, "Streams is closed")
-  result = newStream(sid)
+  result = newStream(sid, peerWindow)
   s.t[sid] = result
 
 iterator values*(s: Streams): Stream {.inline.} =
