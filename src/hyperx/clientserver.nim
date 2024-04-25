@@ -14,6 +14,7 @@ import ./frame
 import ./stream
 import ./queue
 import ./lock
+import ./signal
 import ./errors
 import ./utils
 
@@ -42,7 +43,7 @@ const
   stgMaxFrameSize* = (1'u32 shl 24) - 1'u32
   stgDisablePush* = 0'u32
 
-func add*(s: var seq[byte], ss: string) {.raises: [].} =
+func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
   # XXX x_x
   for c in ss:
     s.add c.byte
@@ -141,6 +142,7 @@ type
     peerWindow: int32  # can be negative
     peerMaxFrameSize: uint32
     sendLock: LockAsync
+    peerWindowUpdateSig: SignalAsync
     error*: ref HyperxError
 
 proc newClient*(
@@ -167,7 +169,8 @@ proc newClient*(
     peerWindow: stgInitialWindowSize.int32,
     peerWindowSize: stgInitialWindowSize,
     peerMaxFrameSize: stgInitialMaxFrameSize,
-    sendLock: newLock()
+    sendLock: newLock(),
+    peerWindowUpdateSig: newSignal()
   )
 
 proc close*(client: ClientContext) {.raises: [InternalOsError].} =
@@ -188,6 +191,7 @@ proc close*(client: ClientContext) {.raises: [InternalOsError].} =
     client.streamOpenedMsgs.close()
     client.streams.close()
     client.sendLock.close()
+    client.peerWindowUpdateSig.close()
 
 func stream*(client: ClientContext, sid: StreamId): var Stream {.raises: [].} =
   client.streams.get sid
@@ -576,9 +580,10 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   of frmtWindowUpdate:
     check frm.windowSizeInc > 0, newConnError(errProtocolError)
     check frm.windowSizeInc <= stgMaxWindowSize, newConnError(errProtocolError)
-    check client.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32, newConnError(errProtocolError)
+    check client.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
+      newConnError(errFlowControlError)
     client.peerWindow += frm.windowSizeInc.int32
-    # XXX signal connWindowUpdate
+    client.peerWindowUpdateSig.trigger()
   of frmtSettings:
     for (setting, value) in frm.settings:
       # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
@@ -596,14 +601,16 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         client.peerMaxConcurrentStreams = value
       of frmsInitialWindowSize:
         check value <= stgMaxWindowSize, newConnError(errFlowControlError)
-        template negativeBoundCheck(a, b, err: untyped): untyped =
-          if b < 0 and a > int32.high + b: raise err
-          if b > 0 and a < int32.low + b: raise err
+        template negativeBoundCheck(a, b: untyped): untyped =
+          if b < 0 and a > int32.high + b: raise newConnError(errFlowControlError)
+          if b > 0 and a < int32.low + b: raise newConnError(errFlowControlError)
         for strm in values client.streams:
-          negativeBoundCheck(client.peerWindowSize.int32, strm.peerWindow, newConnError(errFlowControlError))
+          negativeBoundCheck(client.peerWindowSize.int32, strm.peerWindow)
           strm.peerWindow = client.peerWindowSize.int32 - strm.peerWindow
-          negativeBoundCheck(value.int32, strm.peerWindow, newConnError(errFlowControlError))
+          negativeBoundCheck(value.int32, strm.peerWindow)
           strm.peerWindow = value.int32 - strm.peerWindow
+          if not strm.peerWindowUpdateSig.isClosed:
+            strm.peerWindowUpdateSig.trigger()
         client.peerWindowSize = value
       of frmsMaxFrameSize:
         check value >= stgInitialMaxFrameSize, newConnError(errProtocolError)
@@ -682,11 +689,21 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     except StrmError as err:
       stream.error = err
       client.close(stream.id)
-      # xxx use send? (conn may close before this is sent)
       # xxx this is too easy to get wrong, try raise conn error instead
-      await client.write newRstStreamFrame(frm.sid, err.code.int)
-    # XXX process window update even if stream is closed
+      await client.send newRstStreamFrame(frm.sid, err.code.int)
     if frm.typ == frmtWindowUpdate:
+      try:
+        check frm.windowSizeInc > 0, newConnError(errProtocolError)
+        check frm.windowSizeInc <= stgMaxWindowSize, newConnError(errProtocolError)
+        check stream.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
+          newStrmError(errFlowControlError)
+        stream.peerWindow += frm.windowSizeInc.int32
+        if not stream.peerWindowUpdateSig.isClosed:
+          stream.peerWindowUpdateSig.trigger()
+      except StrmError as err:
+        stream.error = err
+        client.close(stream.id)
+        await client.send newRstStreamFrame(frm.sid, err.code.int)
       continue
     try:
       # XXX a stream can block all streams here,
@@ -903,22 +920,49 @@ proc sendHeaders*(
     strm.state = csStateSentEnded
   await client.write frm
 
-proc sendBody*(
+proc sendBodyNaked(
   strm: ClientStream,
   data: ref string,
   finish = false
 ) {.async.} =
   doAssert strm.state in {csStateSentHeaders, csStateSentData}
   strm.state = csStateSentData
-  var frm = newFrame()
-  frm.setTyp frmtData
-  frm.setSid strm.stream.id.FrmSid
-  frm.setPayloadLen data[].len.FrmPayloadLen
-  if finish:
-    frm.flags.incl frmfEndStream
-    strm.state = csStateSentEnded
-  frm.s.add data[]
-  await strm.client.write frm
+  var dataIdxA = 0
+  var dataIdxB = 0
+  let L = data[].len
+  while dataIdxA < L:
+    while strm.stream.peerWindow <= 0:
+      await strm.stream.peerWindowUpdateSig.waitFor()
+    dataIdxB = min(dataIdxA+strm.stream.peerWindow-1, L-1)
+    var frm = newFrame()
+    frm.setTyp frmtData
+    frm.setSid strm.stream.id.FrmSid
+    frm.setPayloadLen (dataIdxB-dataIdxA+1).FrmPayloadLen
+    if finish and dataIdxB == L-1:
+      frm.flags.incl frmfEndStream
+      strm.state = csStateSentEnded
+    frm.s.add toOpenArray(data[], dataIdxA, dataIdxB)
+    strm.stream.peerWindow -= frm.payloadLen.int32
+    strm.client.peerWindow -= frm.payloadLen.int32
+    await strm.client.write frm
+    dataIdxA = dataIdxB+1
+
+proc sendBody*(
+  strm: ClientStream,
+  data: ref string,
+  finish = false
+) {.async.} =
+  try:
+    await sendBodyNaked(strm, data, finish)
+  except QueueClosedError as err:
+    if strm.client.error != nil:
+      # xxx change to connError
+      debugInfo strm.client.error.getStackTrace()
+      raise newHyperxConnectionError(strm.client.error.msg)
+    if strm.stream.error != nil:
+      debugInfo strm.stream.error.getStackTrace()
+      raise newStrmError(strm.stream.error.code)
+    raise err
 
 template withStream*(strm: ClientStream, body: untyped): untyped =
   {.line: instantiationInfo(fullPaths = true).}:
