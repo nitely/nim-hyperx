@@ -2,6 +2,7 @@ import std/tables
 
 import ./frame
 import ./queue
+import ./signal
 import ./errors
 
 # Section 5.1
@@ -176,6 +177,7 @@ type
     state*: StreamState
     msgs*: QueueAsync[Frame]
     peerWindow*: int32
+    peerWindowUpdateSig*: SignalAsync
     error*: ref StrmError
 
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
@@ -184,12 +186,14 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
     id: id,
     state: strmIdle,
     msgs: newQueue[Frame](1),
-    peerWindow: peerWindow
+    peerWindow: peerWindow,
+    peerWindowUpdateSig: newSignal()
   )
 
 proc close*(stream: Stream) {.raises: [].} =
   stream.state = strmClosed
   stream.msgs.close()
+  stream.peerWindowUpdateSig.close()
 
 type
   StreamsClosedError* = object of HyperxError
