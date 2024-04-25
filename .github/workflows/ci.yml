@@ -34,7 +34,6 @@ jobs:
           apt install -y make && \ 
           make install_mkcert && \
           nimble install -y && \
-          nimble serve & && \
           curl -JLO \"https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz\" && \
           tar -xvf h2spec_linux_amd64.tar.gz && \
           chmod +x h2spec && \
