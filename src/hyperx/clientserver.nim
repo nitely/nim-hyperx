@@ -581,7 +581,7 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
     check frm.windowSizeInc > 0, newConnError(errProtocolError)
     check frm.windowSizeInc <= stgMaxWindowSize, newConnError(errProtocolError)
     check client.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
-      newConnError(errProtocolError)
+      newConnError(errFlowControlError)
     client.peerWindow += frm.windowSizeInc.int32
     client.peerWindowUpdateSig.trigger()
   of frmtSettings:
@@ -689,17 +689,21 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     except StrmError as err:
       stream.error = err
       client.close(stream.id)
-      # xxx use send? (conn may close before this is sent)
       # xxx this is too easy to get wrong, try raise conn error instead
-      await client.write newRstStreamFrame(frm.sid, err.code.int)
+      await client.send newRstStreamFrame(frm.sid, err.code.int)
     if frm.typ == frmtWindowUpdate:
-      check frm.windowSizeInc > 0, newConnError(errProtocolError)
-      check frm.windowSizeInc <= stgMaxWindowSize, newConnError(errProtocolError)
-      check stream.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
-        newConnError(errProtocolError)
-      stream.peerWindow += frm.windowSizeInc.int32
-      if not stream.peerWindowUpdateSig.isClosed:
-        stream.peerWindowUpdateSig.trigger()
+      try:
+        check frm.windowSizeInc > 0, newConnError(errProtocolError)
+        check frm.windowSizeInc <= stgMaxWindowSize, newConnError(errProtocolError)
+        check stream.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
+          newStrmError(errFlowControlError)
+        stream.peerWindow += frm.windowSizeInc.int32
+        if not stream.peerWindowUpdateSig.isClosed:
+          stream.peerWindowUpdateSig.trigger()
+      except StrmError as err:
+        stream.error = err
+        client.close(stream.id)
+        await client.send newRstStreamFrame(frm.sid, err.code.int)
       continue
     try:
       # XXX a stream can block all streams here,
@@ -929,7 +933,7 @@ proc sendBodyNaked(
   while dataIdxA < L:
     while strm.stream.peerWindow <= 0:
       await strm.stream.peerWindowUpdateSig.waitFor()
-    dataIdxB = min(dataIdxA+strm.stream.peerWindow, L-1)
+    dataIdxB = min(dataIdxA+strm.stream.peerWindow-1, L-1)
     var frm = newFrame()
     frm.setTyp frmtData
     frm.setSid strm.stream.id.FrmSid
