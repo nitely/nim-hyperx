@@ -31,13 +31,11 @@ jobs:
         docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
         /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
           apt update && \
-          apt install -y curl && \
+          apt install -y make && \ 
+          make install_mkcert && \
           nimble install -y && \
           (nimble serve &) && \
           sleep 10s && \
-	        cp mkcert-v*-linux-amd64 /usr/local/bin/mkcert && \
-	        mkcert -install && \
-	        mkcert example.com "*.example.com" example.test localhost 127.0.0.1 ::1
           curl -JLO \"https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz\" && \
           tar -xvf h2spec_linux_amd64.tar.gz && \
           chmod +x ./h2spec && \
