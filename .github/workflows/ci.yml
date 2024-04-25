@@ -31,9 +31,10 @@ jobs:
         docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
         /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
           apt update && \
-          apt install -y make && \ 
-          make install_mkcert && \
+          apt install -y curl && \
           nimble install -y && \
+          (nimble serve &) && \
+          sleep 10s && \
           curl -JLO \"https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz\" && \
           tar -xvf h2spec_linux_amd64.tar.gz && \
           chmod +x h2spec && \
