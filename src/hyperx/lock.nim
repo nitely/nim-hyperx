@@ -2,7 +2,7 @@ import std/asyncdispatch
 import std/deques
 
 import ./utils
-import ./queue
+import ./errors
 
 type
   LockClosedError* = QueueClosedError
@@ -15,31 +15,25 @@ type
     ## Akin to a queue of size one
     used: bool
     # XXX use/reuse FutureVars
-    relEv: Deque[Future[void]]
+    waiters: Deque[Future[void]]
     isClosed: bool
 
 proc newLock*(): LockAsync {.raises: [].} =
   new result
   result = LockAsync(
     used: false,
-    relEv: initDeque[Future[void]](2),
+    waiters: initDeque[Future[void]](2),
     isClosed: false
   )
 
-proc relEvent(lck: LockAsync): Future[void] {.raises: [].} =
-  result = newFuture[void]()
-  lck.relEv.addLast result
-
-proc relDone(lck: LockAsync) {.raises: [].} =
-  if lck.relEv.len > 0:
-    untrackExceptions:
-      lck.relEv.popFirst().complete()
-
-proc acquire(lck: LockAsync): Future[void] {.async.} =
+proc acquire(lck: LockAsync) {.async.} =
   if lck.isClosed:
     raise newLockClosedError()
-  if lck.used:
-    await lck.relEvent()
+  if lck.used or lck.waiters.len > 0:
+    lck.waiters.addFirst newFuture[void]()
+    await lck.waiters.peekFirst()
+    if lck.isClosed: raise newLockClosedError()
+    discard lck.waiters.popLast()
   doAssert(not lck.used)
   lck.used = true
 
@@ -48,7 +42,9 @@ proc release(lck: LockAsync) {.raises: [LockClosedError].} =
   if lck.isClosed:
     raise newLockClosedError()
   lck.used = false
-  lck.relDone()
+  if lck.waiters.len > 0:
+    untrackExceptions:
+      lck.waiters.peekLast().complete()
 
 template withLock*(lck: LockAsync, body: untyped): untyped =
   await lck.acquire()
@@ -65,8 +61,10 @@ proc close*(lck: LockAsync) {.raises: [].}  =
     return
   lck.isClosed = true
   untrackExceptions:
-    while lck.relEv.len > 0:
-      lck.relEv.popFirst().fail newLockClosedError()
+    while lck.waiters.len > 0:
+      let fut = lck.waiters.popLast()
+      if not fut.finished:
+        fut.fail newLockClosedError()
 
 when isMainModule:
   block:
@@ -115,9 +113,10 @@ when isMainModule:
   block:
     proc test() {.async.} =
       var lck = newLock()
-      proc release() {.async.} =
-        lck.release()
       var puts = newSeq[int]()
+      proc release() {.async.} =
+        doAssert puts.len == 0
+        lck.release()
       proc putOne(i: int) {.async.} =
         withLock lck:
           puts.add i

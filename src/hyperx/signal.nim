@@ -2,7 +2,7 @@ import std/asyncdispatch
 import std/deques
 
 import ./utils
-import ./queue
+import ./errors
 
 type
   SignalClosedError* = QueueClosedError
@@ -26,12 +26,16 @@ proc newSignal*(): SignalAsync {.raises: [].} =
 
 proc sigEvent(sig: SignalAsync): Future[void] {.raises: [].} =
   result = newFuture[void]()
-  sig.sigEv.addLast result
+  sig.sigEv.addFirst result
+
+# XXX switch to wakeupNext like queue/lock
+#     otherwise we don't know async will
+#     run the futures in FIFO order
 
 proc sigDone(sig: SignalAsync) {.raises: [].} =
   untrackExceptions:
     while sig.sigEv.len > 0:
-      sig.sigEv.popFirst().complete()
+      sig.sigEv.popLast().complete()
 
 proc waitFor*(sig: SignalAsync): Future[void] {.async.} =
   if sig.isClosed:
@@ -52,7 +56,7 @@ proc close*(sig: SignalAsync) {.raises: [].}  =
   sig.isClosed = true
   untrackExceptions:
     while sig.sigEv.len > 0:
-      sig.sigEv.popFirst().fail newSignalClosedError()
+      sig.sigEv.popLast().fail newSignalClosedError()
 
 when isMainModule:
   block:

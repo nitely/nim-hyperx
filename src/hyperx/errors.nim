@@ -50,6 +50,8 @@ type
     code*: ErrorCode
   HyperxConnError* = HyperxConnectionError
   HyperxStrmError* = StrmError
+  QueueError* = object of HyperxError
+  QueueClosedError* = object of QueueError
 
 func newConnError*(errCode: ErrorCode): ref ConnError {.raises: [].} =
   result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)

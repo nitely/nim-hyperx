@@ -931,9 +931,13 @@ proc sendBodyNaked(
   var dataIdxB = 0
   let L = data[].len
   while dataIdxA < L:
-    while strm.stream.peerWindow <= 0:
-      await strm.stream.peerWindowUpdateSig.waitFor()
-    dataIdxB = min(dataIdxA+strm.stream.peerWindow-1, L-1)
+    while strm.stream.peerWindow <= 0 or strm.client.peerWindow <= 0:
+      while strm.stream.peerWindow <= 0:
+        await strm.stream.peerWindowUpdateSig.waitFor()
+      while strm.client.peerWindow <= 0:
+        await strm.client.peerWindowUpdateSig.waitFor()
+    let peerWindow = min(strm.client.peerWindow, strm.stream.peerWindow)
+    dataIdxB = min(dataIdxA+min(peerWindow, L)-1, L-1)
     var frm = newFrame()
     frm.setTyp frmtData
     frm.setSid strm.stream.id.FrmSid

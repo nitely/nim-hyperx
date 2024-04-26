@@ -3,19 +3,15 @@ import std/deques
 import ./utils
 import ./errors
 
-type
-  QueueError* = object of HyperxError
-  QueueClosedError* = object of QueueError
-
 func newQueueClosedError(): ref QueueClosedError {.raises: [].} =
   result = (ref QueueClosedError)(msg: "Queue is closed")
 
 type
   QueueAsync*[T] = ref object
     s: Deque[T]
-    size, used: int
+    size: int
     # XXX use/reuse FutureVars
-    putEv, popEv: Deque[Future[void]]
+    putWaiters, popWaiters: Deque[Future[void]]
     isClosed: bool
 
 proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
@@ -24,52 +20,54 @@ proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
   result = QueueAsync[T](
     s: initDeque[T](size),
     size: size,
-    used: 0,
-    putEv: initDeque[Future[void]](2),
-    popEv: initDeque[Future[void]](2),
+    putWaiters: initDeque[Future[void]](2),
+    popWaiters: initDeque[Future[void]](2),
     isClosed: false
   )
 
-proc popEvent[T](q: QueueAsync[T]): Future[void] {.raises: [].} =
-  result = newFuture[void]()
-  q.popEv.addLast result
+func used[T](q: QueueAsync[T]): int {.raises: [].} =
+  q.s.len
 
-proc popDone[T](q: QueueAsync[T]) {.raises: [].} =
-  if q.popEv.len > 0:
-    untrackExceptions:
-      q.popEv.popFirst().complete()
+proc wakeupNext(dq: Deque[Future[void]]) {.raises: [].} =
+  untrackExceptions:
+    if dq.len > 0:
+      let fut = dq.peekLast()
+      if not fut.finished:
+        fut.complete()
 
-proc putEvent[T](q: QueueAsync[T]): Future[void] {.raises: [].} =
-  result = newFuture[void]()
-  q.putEv.addLast result
-
-proc putDone[T](q: QueueAsync[T]) {.raises: [].} =
-  if q.putEv.len > 0:
-    doAssert q.putEv.len == 1, "multiple consumers not allowed just because"
-    untrackExceptions:
-      q.putEv.popFirst().complete()
-
+# XXX we cannot popLast putWaiters in pop()
+#     because another async func may run in between
+#     waiter complete() and waiter actual run
+#     add tests for it?
 proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   doAssert q.used <= q.size
   if q.isClosed:
     raise newQueueClosedError()
-  if q.used == q.size:
-    await q.popEvent()
+  if q.used == q.size or q.putWaiters.len > 0:
+    q.putWaiters.addFirst newFuture[void]()
+    await q.putWaiters.peekFirst()
+    if q.isClosed: raise newQueueClosedError()
+    discard q.putWaiters.popLast()
   q.s.addFirst v
-  inc q.used
   doAssert q.used <= q.size
-  q.putDone()
+  if q.used < q.size:
+    q.putWaiters.wakeupNext()
+  q.popWaiters.wakeupNext()
 
 proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
   if q.isClosed:
     raise newQueueClosedError()
-  if q.used == 0:
-    await q.putEvent()
+  if q.used == 0 or q.popWaiters.len > 0:
+    q.popWaiters.addFirst newFuture[void]()
+    await q.popWaiters.peekFirst()
+    if q.isClosed: raise newQueueClosedError()
+    discard q.popWaiters.popLast()
   result = q.s.popLast()
-  dec q.used
   doAssert q.used >= 0
-  q.popDone()
+  if q.used > 0:
+    q.popWaiters.wakeupNext()
+  q.putWaiters.wakeupNext()
 
 func isClosed*[T](q: QueueAsync[T]): bool {.raises: [].} =
   q.isClosed
@@ -79,11 +77,15 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
     return
   q.isClosed = true
   untrackExceptions:
-    while q.putEv.len > 0:
-      q.putEv.popFirst().fail newQueueClosedError()
+    while q.putWaiters.len > 0:
+      let fut = q.putWaiters.popLast()
+      if not fut.finished:
+        fut.fail newQueueClosedError()
   untrackExceptions:
-    while q.popEv.len > 0:
-      q.popEv.popFirst().fail newQueueClosedError()
+    while q.popWaiters.len > 0:
+      let fut = q.popWaiters.popLast()
+      if not fut.finished:
+        fut.fail newQueueClosedError()
 
 when isMainModule:
   block:
