@@ -28,7 +28,7 @@ proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
 func used[T](q: QueueAsync[T]): int {.raises: [].} =
   q.s.len
 
-proc wakeupNext(dq: Deque[Future[void]]) {.raises: [].} =
+proc wakeupLast(dq: Deque[Future[void]]) {.raises: [].} =
   untrackExceptions:
     if dq.len > 0:
       let fut = dq.peekLast()
@@ -51,8 +51,8 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   q.s.addFirst v
   doAssert q.used <= q.size
   if q.used < q.size:
-    q.putWaiters.wakeupNext()
-  q.popWaiters.wakeupNext()
+    q.putWaiters.wakeupLast()
+  q.popWaiters.wakeupLast()
 
 proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
@@ -66,8 +66,8 @@ proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   result = q.s.popLast()
   doAssert q.used >= 0
   if q.used > 0:
-    q.popWaiters.wakeupNext()
-  q.putWaiters.wakeupNext()
+    q.popWaiters.wakeupLast()
+  q.putWaiters.wakeupLast()
 
 func isClosed*[T](q: QueueAsync[T]): bool {.raises: [].} =
   q.isClosed

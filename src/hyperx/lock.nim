@@ -42,9 +42,11 @@ proc release(lck: LockAsync) {.raises: [LockClosedError].} =
   if lck.isClosed:
     raise newLockClosedError()
   lck.used = false
-  if lck.waiters.len > 0:
-    untrackExceptions:
-      lck.waiters.peekLast().complete()
+  untrackExceptions:
+    if lck.waiters.len > 0:
+      let fut = lck.waiters.peekLast()
+      if not fut.finished:
+        fut.complete()
 
 template withLock*(lck: LockAsync, body: untyped): untyped =
   await lck.acquire()
