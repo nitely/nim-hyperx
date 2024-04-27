@@ -12,6 +12,7 @@ type
     size: int
     # XXX use/reuse FutureVars
     putWaiters, popWaiters: Deque[Future[void]]
+    wakingPut, wakingPop: bool
     isClosed: bool
 
 proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
@@ -22,6 +23,8 @@ proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
     size: size,
     putWaiters: initDeque[Future[void]](2),
     popWaiters: initDeque[Future[void]](2),
+    wakingPut: false,
+    wakingPop: false,
     isClosed: false
   )
 
@@ -29,7 +32,14 @@ func used[T](q: QueueAsync[T]): int {.raises: [].} =
   q.s.len
 
 proc wakeupLastPut[T](q: QueueAsync[T]) {.raises: [].} =
+  if q.used == q.size:
+    return
+  if q.putWaiters.len == 0:
+    return
+  if q.wakingPut:
+    return
   proc wakeup =
+    q.wakingPut = false
     if q.used == q.size:
       return
     if q.putWaiters.len > 0:
@@ -37,10 +47,18 @@ proc wakeupLastPut[T](q: QueueAsync[T]) {.raises: [].} =
       if not fut.finished:
         fut.complete()
   untrackExceptions:
+    q.wakingPut = true
     callSoon wakeup
 
 proc wakeupLastPop[T](q: QueueAsync[T]) {.raises: [].} =
+  if q.used == 0:
+    return
+  if q.popWaiters.len == 0:
+    return
+  if q.wakingPop:
+    return
   proc wakeup =
+    q.wakingPop = false
     if q.used == 0:
       return
     if q.popWaiters.len > 0:
@@ -48,12 +66,9 @@ proc wakeupLastPop[T](q: QueueAsync[T]) {.raises: [].} =
       if not fut.finished:
         fut.complete()
   untrackExceptions:
+    q.wakingPop = true
     callSoon wakeup
 
-# XXX we cannot popLast putWaiters in pop()
-#     because another async func may run in between
-#     waiter complete() and waiter actual run
-#     add tests for it?
 proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   doAssert q.used <= q.size
   if q.isClosed:
@@ -200,5 +215,18 @@ when isMainModule:
       )
       doAssert puts == @[1,2,3,4,5,6]
       doAssert pops == @[1,2,3,4,5,6]
+    waitFor test()
+  block race_condition:
+    proc test() {.async.} =
+      var q = newQueue[int](1)
+      let put1 = q.put 1
+      let put2 = q.put 2
+      doAssert (await q.pop()) == 1
+      let put3 = q.put 3
+      let put4 = q.put 4
+      doAssert (await q.pop()) == 2
+      doAssert (await q.pop()) == 3
+      await (put1 and put2 and put3 and put4)
+      doAssert (await q.pop()) == 4
     waitFor test()
   echo "ok"

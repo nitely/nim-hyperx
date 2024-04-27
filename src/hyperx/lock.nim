@@ -26,6 +26,19 @@ proc newLock*(): LockAsync {.raises: [].} =
     isClosed: false
   )
 
+proc wakeupLastWaiter(lck: LockAsync) =
+  if lck.waiters.len == 0:
+    return
+  proc weakup =
+    if lck.used:
+      return
+    if lck.waiters.len > 0:
+      let fut = lck.waiters.peekLast()
+      if not fut.finished:
+        fut.complete()
+  untrackExceptions:
+    callSoon weakup
+
 proc acquire(lck: LockAsync) {.async.} =
   if lck.isClosed:
     raise newLockClosedError()
@@ -45,13 +58,7 @@ proc release(lck: LockAsync) {.raises: [LockClosedError].} =
   if lck.isClosed:
     raise newLockClosedError()
   lck.used = false
-  proc weakupLast =
-    if lck.waiters.len > 0:
-      let fut = lck.waiters.peekLast()
-      if not fut.finished:
-        fut.complete()
-  untrackExceptions:
-    callSoon weakupLast
+  lck.wakeupLastWaiter()
 
 template withLock*(lck: LockAsync, body: untyped): untyped =
   await lck.acquire()

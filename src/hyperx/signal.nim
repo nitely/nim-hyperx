@@ -24,7 +24,9 @@ proc newSignal*(): SignalAsync {.raises: [].} =
     isClosed: false
   )
 
-proc wakeupLast(sig: SignalAsync) {.raises: [].} =
+proc wakeupLastWaiter(sig: SignalAsync) {.raises: [].} =
+  if sig.waiters.len == 0:
+    return
   proc wakeup =
     if sig.waiters.len > 0:
       let fut = sig.waiters.peekLast()
@@ -43,12 +45,12 @@ proc waitFor*(sig: SignalAsync): Future[void] {.async.} =
     raise newSignalClosedError()
   let fut2 = sig.waiters.popLast()
   doAssert fut == fut2
-  sig.wakeupLast()
+  sig.wakeupLastWaiter()
 
 proc trigger*(sig: SignalAsync) {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
-  sig.wakeupLast()
+  sig.wakeupLastWaiter()
 
 func isClosed*(sig: SignalAsync): bool {.raises: [].} =
   sig.isClosed
@@ -77,6 +79,7 @@ when isMainModule:
       proc atrigger(sig: SignalAsync) {.async.} =
         doAssert puts.len == 0
         sig.trigger()
+        doAssert puts.len == 0
       await (
         putOne(1) and
         putOne(2) and
