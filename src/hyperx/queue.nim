@@ -28,12 +28,27 @@ proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
 func used[T](q: QueueAsync[T]): int {.raises: [].} =
   q.s.len
 
-proc wakeupLast(dq: Deque[Future[void]]) {.raises: [].} =
-  untrackExceptions:
-    if dq.len > 0:
-      let fut = dq.peekLast()
+proc wakeupLastPut[T](q: QueueAsync[T]) {.raises: [].} =
+  proc wakeup =
+    if q.used == q.size:
+      return
+    if q.putWaiters.len > 0:
+      let fut = q.putWaiters.peekLast()
       if not fut.finished:
         fut.complete()
+  untrackExceptions:
+    callSoon wakeup
+
+proc wakeupLastPop[T](q: QueueAsync[T]) {.raises: [].} =
+  proc wakeup =
+    if q.used == 0:
+      return
+    if q.popWaiters.len > 0:
+      let fut = q.popWaiters.peekLast()
+      if not fut.finished:
+        fut.complete()
+  untrackExceptions:
+    callSoon wakeup
 
 # XXX we cannot popLast putWaiters in pop()
 #     because another async func may run in between
@@ -44,30 +59,34 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   if q.isClosed:
     raise newQueueClosedError()
   if q.used == q.size or q.putWaiters.len > 0:
-    q.putWaiters.addFirst newFuture[void]()
-    await q.putWaiters.peekFirst()
-    if q.isClosed: raise newQueueClosedError()
-    discard q.putWaiters.popLast()
+    let fut = newFuture[void]()
+    q.putWaiters.addFirst fut
+    await fut
+    if q.isClosed:
+      raise newQueueClosedError()
+    let fut2 = q.putWaiters.popLast()
+    doAssert fut == fut2
+  doAssert q.used < q.size
   q.s.addFirst v
-  doAssert q.used <= q.size
-  if q.used < q.size:
-    q.putWaiters.wakeupLast()
-  q.popWaiters.wakeupLast()
+  q.wakeupLastPut()
+  q.wakeupLastPop()
 
 proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
   if q.isClosed:
     raise newQueueClosedError()
   if q.used == 0 or q.popWaiters.len > 0:
-    q.popWaiters.addFirst newFuture[void]()
-    await q.popWaiters.peekFirst()
-    if q.isClosed: raise newQueueClosedError()
-    discard q.popWaiters.popLast()
+    let fut = newFuture[void]()
+    q.popWaiters.addFirst fut
+    await fut
+    if q.isClosed:
+      raise newQueueClosedError()
+    let fut2 = q.popWaiters.popLast()
+    doAssert fut == fut2
+  doAssert q.used > 0
   result = q.s.popLast()
-  doAssert q.used >= 0
-  if q.used > 0:
-    q.popWaiters.wakeupLast()
-  q.putWaiters.wakeupLast()
+  q.wakeupLastPop()
+  q.wakeupLastPut()
 
 func isClosed*[T](q: QueueAsync[T]): bool {.raises: [].} =
   q.isClosed
@@ -76,16 +95,17 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   if q.isClosed:
     return
   q.isClosed = true
-  untrackExceptions:
+  proc failWaiters =
     while q.putWaiters.len > 0:
       let fut = q.putWaiters.popLast()
       if not fut.finished:
         fut.fail newQueueClosedError()
-  untrackExceptions:
     while q.popWaiters.len > 0:
       let fut = q.popWaiters.popLast()
       if not fut.finished:
         fut.fail newQueueClosedError()
+  untrackExceptions:
+    callSoon failWaiters
 
 when isMainModule:
   block:
@@ -103,16 +123,20 @@ when isMainModule:
   block:
     proc test() {.async.} =
       var q = newQueue[int](2)
-      var res = newSeq[int]()
+      var puts = newSeq[int]()
+      var pops = newSeq[int]()
+      proc putOne(x: int) {.async.} =
+        await q.put(x)
+        puts.add x
       proc popOne() {.async.} =
-        res.add(await q.pop())
+        pops.add(await q.pop())
       await (
-        q.put(1) and
-        q.put(2) and
-        q.put(3) and
-        q.put(4) and
-        q.put(5) and
-        q.put(6) and
+        putOne(1) and
+        putOne(2) and
+        putOne(3) and
+        putOne(4) and
+        putOne(5) and
+        putOne(6) and
         popOne() and
         popOne() and
         popOne() and
@@ -120,14 +144,19 @@ when isMainModule:
         popOne() and
         popOne()
       )
-      doAssert res == @[1,2,3,4,5,6]
+      doAssert puts == @[1,2,3,4,5,6]
+      doAssert pops == @[1,2,3,4,5,6]
     waitFor test()
-  when false:  #block:
+  block:
     proc test() {.async.} =
       var q = newQueue[int](2)
-      var res = newSeq[int]()
+      var puts = newSeq[int]()
+      var pops = newSeq[int]()
+      proc putOne(x: int) {.async.} =
+        await q.put(x)
+        puts.add x
       proc popOne() {.async.} =
-        res.add(await q.pop())
+        pops.add(await q.pop())
       await (
         popOne() and
         popOne() and
@@ -135,35 +164,41 @@ when isMainModule:
         popOne() and
         popOne() and
         popOne() and
-        q.put(1) and
-        q.put(2) and
-        q.put(3) and
-        q.put(4) and
-        q.put(5) and
-        q.put(6)
+        putOne(1) and
+        putOne(2) and
+        putOne(3) and
+        putOne(4) and
+        putOne(5) and
+        putOne(6)
       )
-      doAssert res == @[1,2,3,4,5,6]
+      doAssert puts == @[1,2,3,4,5,6]
+      doAssert pops == @[1,2,3,4,5,6]
     waitFor test()
-  when false:  #block:
+  block:
     proc test() {.async.} =
       var q = newQueue[int](2)
-      var res = newSeq[int]()
+      var puts = newSeq[int]()
+      var pops = newSeq[int]()
+      proc putOne(x: int) {.async.} =
+        await q.put(x)
+        puts.add x
       proc popOne() {.async.} =
-        res.add(await q.pop())
+        pops.add(await q.pop())
       await (
         popOne() and
         popOne() and
-        q.put(1) and
+        putOne(1) and
         popOne() and
-        q.put(2) and
+        putOne(2) and
         popOne() and
-        q.put(3) and
+        putOne(3) and
         popOne() and
         popOne() and
-        q.put(4) and
-        q.put(5) and
-        q.put(6)
+        putOne(4) and
+        putOne(5) and
+        putOne(6)
       )
-      doAssert res == @[1,2,3,4,5,6]
+      doAssert puts == @[1,2,3,4,5,6]
+      doAssert pops == @[1,2,3,4,5,6]
     waitFor test()
   echo "ok"

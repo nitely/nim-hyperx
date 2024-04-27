@@ -14,38 +14,41 @@ type
   SignalAsync* = ref object
     ## Wait for a signal. When triggers wakes everyone up
     # XXX use/reuse FutureVars
-    sigEv: Deque[Future[void]]
+    waiters: Deque[Future[void]]
     isClosed: bool
 
 proc newSignal*(): SignalAsync {.raises: [].} =
   new result
   result = SignalAsync(
-    sigEv: initDeque[Future[void]](0),
+    waiters: initDeque[Future[void]](0),
     isClosed: false
   )
 
-proc sigEvent(sig: SignalAsync): Future[void] {.raises: [].} =
-  result = newFuture[void]()
-  sig.sigEv.addFirst result
-
-# XXX switch to wakeupNext like queue/lock
-#     otherwise we don't know async will
-#     run the futures in FIFO order
-
-proc sigDone(sig: SignalAsync) {.raises: [].} =
+proc wakeupLast(sig: SignalAsync) {.raises: [].} =
+  proc wakeup =
+    if sig.waiters.len > 0:
+      let fut = sig.waiters.peekLast()
+      if not fut.finished:
+        fut.complete()
   untrackExceptions:
-    while sig.sigEv.len > 0:
-      sig.sigEv.popLast().complete()
+    callSoon wakeup
 
 proc waitFor*(sig: SignalAsync): Future[void] {.async.} =
   if sig.isClosed:
     raise newSignalClosedError()
-  await sig.sigEvent()
+  let fut = newFuture[void]()
+  sig.waiters.addFirst fut
+  await fut
+  if sig.isClosed:
+    raise newSignalClosedError()
+  let fut2 = sig.waiters.popLast()
+  doAssert fut == fut2
+  sig.wakeupLast()
 
 proc trigger*(sig: SignalAsync) {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
-  sig.sigDone()
+  sig.wakeupLast()
 
 func isClosed*(sig: SignalAsync): bool {.raises: [].} =
   sig.isClosed
@@ -54,9 +57,13 @@ proc close*(sig: SignalAsync) {.raises: [].}  =
   if sig.isClosed:
     return
   sig.isClosed = true
+  proc failWaiters =
+    while sig.waiters.len > 0:
+      let fut = sig.waiters.popLast()
+      if not fut.finished:
+        fut.fail newSignalClosedError()
   untrackExceptions:
-    while sig.sigEv.len > 0:
-      sig.sigEv.popLast().fail newSignalClosedError()
+    callSoon failWaiters
 
 when isMainModule:
   block:
@@ -70,7 +77,6 @@ when isMainModule:
       proc atrigger(sig: SignalAsync) {.async.} =
         doAssert puts.len == 0
         sig.trigger()
-        doAssert puts.len == 6
       await (
         putOne(1) and
         putOne(2) and

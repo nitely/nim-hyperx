@@ -30,10 +30,13 @@ proc acquire(lck: LockAsync) {.async.} =
   if lck.isClosed:
     raise newLockClosedError()
   if lck.used or lck.waiters.len > 0:
-    lck.waiters.addFirst newFuture[void]()
-    await lck.waiters.peekFirst()
-    if lck.isClosed: raise newLockClosedError()
-    discard lck.waiters.popLast()
+    let fut = newFuture[void]()
+    lck.waiters.addFirst fut
+    await fut
+    if lck.isClosed:
+      raise newLockClosedError()
+    let fut2 = lck.waiters.popLast()
+    doAssert fut == fut2
   doAssert(not lck.used)
   lck.used = true
 
@@ -42,11 +45,13 @@ proc release(lck: LockAsync) {.raises: [LockClosedError].} =
   if lck.isClosed:
     raise newLockClosedError()
   lck.used = false
-  untrackExceptions:
+  proc weakupLast =
     if lck.waiters.len > 0:
       let fut = lck.waiters.peekLast()
       if not fut.finished:
         fut.complete()
+  untrackExceptions:
+    callSoon weakupLast
 
 template withLock*(lck: LockAsync, body: untyped): untyped =
   await lck.acquire()
@@ -62,11 +67,13 @@ proc close*(lck: LockAsync) {.raises: [].}  =
   if lck.isClosed:
     return
   lck.isClosed = true
-  untrackExceptions:
+  proc failWaiters =
     while lck.waiters.len > 0:
       let fut = lck.waiters.popLast()
       if not fut.finished:
         fut.fail newLockClosedError()
+  untrackExceptions:
+    callSoon failWaiters
 
 when isMainModule:
   block:
