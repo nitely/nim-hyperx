@@ -8,6 +8,12 @@ and the API is not stable.
 > [!NOTE]
 > This library supports HTTP/2 only. Not HTTP/1, nor HTTP/3.
 
+## Install
+
+```
+nimble install hyperx
+```
+
 ## Compatibility
 
 > Nim +2.0
