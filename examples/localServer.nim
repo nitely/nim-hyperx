@@ -17,7 +17,7 @@ func newStringRef(s = ""): ref string =
 proc processStream(strm: ClientStream) {.async.} =
   ## This receives the headers & body from a stream
   ## opened by the client, and sends back whatever
-  ## data it received. It's an echo server.
+  ## data it received (up to 16KB). It's an echo server.
   withStream strm:
     var headers = newStringRef()
     await strm.recvHeaders(headers)
@@ -25,6 +25,8 @@ proc processStream(strm: ClientStream) {.async.} =
     var dataEcho = newStringRef()
     while not strm.recvEnded:
       await strm.recvBody(dataEcho)
+      if dataEcho[].len >= (16 * 1024)-1:
+        dataEcho[].setLen 0
     if dataEcho[].len == 0:
       dataEcho[] = "Hello world!"
     await strm.sendHeaders(
