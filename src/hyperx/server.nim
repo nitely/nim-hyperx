@@ -89,13 +89,16 @@ proc close(server: ServerContext) =
 
 proc listen(server: ServerContext) =
   server.sock.setSockOpt(OptReuseAddr, true)
+  server.sock.setSockOpt(OptReusePort, true)
+  server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
   server.sock.bindAddr server.port
   server.sock.listen()
 
 # XXX dont allow receive push promise
 
+# XXX limit number of active clients
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
-  # XXX limit number of active clients
+  # note OptNoDelay is inherited from server.sock
   let sock = await server.sock.accept()
   when not defined(hyperxTest):
     doAssert not sslContext.isNil

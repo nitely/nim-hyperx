@@ -90,7 +90,7 @@ proc close*(s: TestSocket) =
 
 # XXX untested server funcs
 
-proc setSockOpt*(s: TestSocket, opt = OptReuseAddr, x = true) =
+proc setSockOpt*(s: TestSocket, opt = OptReuseAddr, x = true, level = 0) =
   discard
 
 proc bindAddr*(s: TestSocket, port = Port(0)) =
