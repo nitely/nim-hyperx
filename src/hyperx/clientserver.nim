@@ -143,6 +143,7 @@ type
     peerMaxFrameSize: uint32
     sendLock: LockAsync
     peerWindowUpdateSig: SignalAsync
+    window: int
     error*: ref HyperxError
 
 proc newClient*(
@@ -170,7 +171,8 @@ proc newClient*(
     peerWindowSize: stgInitialWindowSize,
     peerMaxFrameSize: stgInitialMaxFrameSize,
     sendLock: newLock(),
-    peerWindowUpdateSig: newSignal()
+    peerWindowUpdateSig: newSignal(),
+    window: 0
   )
 
 proc close*(client: ClientContext) {.raises: [InternalOsError].} =
@@ -305,10 +307,14 @@ proc handshake*(client: ClientContext) {.async.} =
   if client.typ == ctClient:
     frm.addSetting frmsEnablePush, stgDisablePush
   frm.addSetting frmsInitialWindowSize, stgMaxWindowSize
-  var blob = newSeqOfCap[byte](preface.len+frm.len)
+  let frmWu = newWindowUpdateFrame(
+    frmSidMain, (stgMaxWindowSize-stgInitialWindowSize).int
+  )
+  var blob = newSeqOfCap[byte](preface.len+frm.len+frmWu.len)
   if client.typ == ctClient:
     blob.add preface
   blob.add frm.s
+  blob.add frmWu.s
   check not client.sock.isClosed, newConnClosedError()
   await client.sock.send(addr blob[0], blob.len)
   if client.typ == ctServer:
@@ -381,7 +387,10 @@ proc readNaked(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
   if frm.typ == frmtData and
       frm.payloadLen.int > 0 and
       frmfEndStream notin frm.flags:
-    await client.write newWindowUpdateFrame(frm.sid, frm.payloadLen.int)
+    strm.window += frm.payloadLen.int
+    if strm.window > stgMaxWindowSize.int div 2:
+      await client.write newWindowUpdateFrame(frm.sid, strm.window)
+      strm.window = 0
   return frm
 
 proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
@@ -612,6 +621,8 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
           if not strm.peerWindowUpdateSig.isClosed:
             strm.peerWindowUpdateSig.trigger()
         client.peerWindowSize = value
+        if not client.peerWindowUpdateSig.isClosed:
+          client.peerWindowUpdateSig.trigger()
       of frmsMaxFrameSize:
         check value >= stgInitialMaxFrameSize, newConnError(errProtocolError)
         check value <= stgMaxFrameSize, newConnError(errProtocolError)
@@ -672,7 +683,10 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       frm.shrink frm.payload.len
       frm.s.add headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
-      await client.write newWindowUpdateFrame(frmSidMain, frm.payloadLen.int)
+      client.window += frm.payloadLen.int
+      if client.window > stgMaxWindowSize.int div 2:
+        await client.write newWindowUpdateFrame(frmSidMain, client.window)
+        client.window = 0
     if frm.typ == frmtWindowUpdate:
       check frm.windowSizeInc > 0, newConnError(errProtocolError)
     if frm.typ == frmtPushPromise:
@@ -937,19 +951,22 @@ proc sendBodyNaked(
       while strm.client.peerWindow <= 0:
         await strm.client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(strm.client.peerWindow, strm.stream.peerWindow)
-    dataIdxB = min(dataIdxA+min(peerWindow, L)-1, L-1)
+    dataIdxB = min(dataIdxA+min(peerWindow, L), L)
     var frm = newFrame()
     frm.setTyp frmtData
     frm.setSid strm.stream.id.FrmSid
-    frm.setPayloadLen (dataIdxB-dataIdxA+1).FrmPayloadLen
-    if finish and dataIdxB == L-1:
+    frm.setPayloadLen (dataIdxB-dataIdxA).FrmPayloadLen
+    if finish and dataIdxB == L:
       frm.flags.incl frmfEndStream
       strm.state = csStateSentEnded
-    frm.s.add toOpenArray(data[], dataIdxA, dataIdxB)
+    frm.s.add toOpenArray(data[], dataIdxA, dataIdxB-1)
     strm.stream.peerWindow -= frm.payloadLen.int32
     strm.client.peerWindow -= frm.payloadLen.int32
     await strm.client.write frm
-    dataIdxA = dataIdxB+1
+    dataIdxA = dataIdxB
+    # allow sending empty payload
+    if L == 0:
+      break
 
 proc sendBody*(
   strm: ClientStream,

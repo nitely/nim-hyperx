@@ -31,6 +31,9 @@ proc checkHandshake(tc: TestClientContext) {.async.} =
   let frm1 = await tc.sent()
   doAssert frm1.typ == frmtSettings
   doAssert frm1.sid == frmSidMain
+  let frm2 = await tc.sent()
+  doAssert frm2.typ == frmtWindowUpdate
+  doAssert frm2.sid == frmSidMain
 
 testAsync "simple request":
   var checked = false

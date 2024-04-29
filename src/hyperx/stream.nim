@@ -178,6 +178,7 @@ type
     msgs*: QueueAsync[Frame]
     peerWindow*: int32
     peerWindowUpdateSig*: SignalAsync
+    window*: int
     error*: ref StrmError
 
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
@@ -187,7 +188,8 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
     state: strmIdle,
     msgs: newQueue[Frame](1),
     peerWindow: peerWindow,
-    peerWindowUpdateSig: newSignal()
+    peerWindowUpdateSig: newSignal(),
+    window: 0
   )
 
 proc close*(stream: Stream) {.raises: [].} =

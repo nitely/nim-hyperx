@@ -86,10 +86,11 @@ testAsync "multiplex req/resp":
   let shutdownSignal = newQueue[bool](1)
   var serverRecvStrm1 = ""
   var serverRecvStrm2 = ""
-  proc processStream(
-    strm: server.ClientStream,
+  proc processStreamServer(
+    client: ClientContext,
     dataIn, dataOut: ref string
   ) {.async.} =
+    let strm = await client.recvStream()
     withStream strm:
       await strm.recvHeaders(dataIn)
       while not strm.recvEnded:
@@ -107,15 +108,13 @@ testAsync "multiplex req/resp":
     withServer server:
       let client = await server.recvClient()
       withClient client:
-        let strm1 = await client.recvStream()
-        let strm2 = await client.recvStream()
         let dataIn1 = newStringref()
         let dataOut1 = newStringref("foobar 1")
         let dataIn2 = newStringref()
         let dataOut2 = newStringref("foobar 2")
         await (
-          processStream(strm1, dataIn1, dataOut1) and
-          processStream(strm2, dataIn2, dataOut2)
+          processStreamServer(client, dataIn1, dataOut1) and
+          processStreamServer(client, dataIn2, dataOut2)
         )
         serverRecvStrm1 = dataIn1[]
         serverRecvStrm2 = dataIn2[]
@@ -154,20 +153,23 @@ testAsync "multiplex req/resp":
           await strm1.sendBody(content, finish = true)
           content[] = data2b
           await strm2.sendBody(content, finish = true)
-          content[] = ""
-          await strm1.recvHeaders(content)
-          clientRecvHeadersStrm1 = content[]
-          content[] = ""
-          while not strm1.recvEnded:
-            await strm1.recvBody(content)
-          clientRecvBodyStrm1 = content[]
-          content[] = ""
-          await strm2.recvHeaders(content)
-          clientRecvHeadersStrm2 = content[]
-          content[] = ""
-          while not strm2.recvEnded:
-            await strm2.recvBody(content)
-          clientRecvBodyStrm2 = content[]
+          let contentA = newStringRef()
+          proc recv1() {.async.} =
+            await strm1.recvHeaders(contentA)
+            clientRecvHeadersStrm1 = contentA[]
+            contentA[] = ""
+            while not strm1.recvEnded:
+              await strm1.recvBody(contentA)
+            clientRecvBodyStrm1 = contentA[]
+          let contentB = newStringRef()
+          proc recv2() {.async.} =
+            await strm2.recvHeaders(contentB)
+            clientRecvHeadersStrm2 = contentB[]
+            contentB[] = ""
+            while not strm2.recvEnded:
+              await strm2.recvBody(contentB)
+            clientRecvBodyStrm2 = contentB[]
+          await (recv1() and recv2())
 
   var serverFut = doServerWork()
   var clientFut = doClientWork()

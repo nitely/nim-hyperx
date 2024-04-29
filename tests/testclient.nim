@@ -33,6 +33,9 @@ proc checkHandshake(tc: TestClientContext) {.async.} =
   let frm1 = await tc.sent()
   doAssert frm1.typ == frmtSettings
   doAssert frm1.sid == frmSidMain
+  let frm2 = await tc.sent()
+  doAssert frm2.typ == frmtWindowUpdate
+  doAssert frm2.sid == frmSidMain
 
 proc checkTableSizeAck(tc: TestClientContext) {.async.} =
   let frm1 = await tc.sent()
@@ -110,7 +113,7 @@ testAsync "multiple requests":
       tc.reply(":status: 200\r\nbar: bar\r\n", "bar")
     )
     frm1 = await tc.sent()
-    frm2 = await tc.sent()
+    #frm2 = await tc.sent()
     frm3 = await tc.sent()
   doAssert frm1.sid.int == 1
   doAssert frm1.typ == frmtHeaders
