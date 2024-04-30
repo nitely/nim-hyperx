@@ -38,6 +38,18 @@ template untrackExceptions*(body: untyped): untyped =
   except Exception as err:
     raise newException(Defect, err.msg)
 
+func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
+  let L = s.len
+  s.setLen(L+ss.len)
+  for i in 0 .. ss.len-1:
+    s[L+i] = ss[i].byte
+
+func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
+  let L = s.len
+  s.setLen(L+ss.len)
+  for i in 0 .. ss.len-1:
+    s[L+i] = ss[i].char
+
 func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
   if s.len == 0:
     raise newException(ValueError, "not a number")

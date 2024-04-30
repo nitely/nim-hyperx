@@ -64,7 +64,7 @@ proc recvInto*(s: TestSocket, buff: pointer, size: int): Future[int] {.async.} =
   s.recvIdx += size
   return size
 
-proc send*(s: TestSocket, data: ptr byte, ln: int) {.async.} =
+proc send*(s: TestSocket, data: pointer, ln: int) {.async.} =
   doAssert ln > 0
   var dataCopy = newSeq[byte](ln)
   copyMem(addr dataCopy[0], data, ln)

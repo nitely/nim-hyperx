@@ -43,16 +43,6 @@ const
   stgMaxFrameSize* = (1'u32 shl 24) - 1'u32
   stgDisablePush* = 0'u32
 
-func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
-  # XXX x_x
-  for c in ss:
-    s.add c.byte
-
-func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
-  # XXX x_x
-  for c in ss:
-    s.add c.char
-
 type
   ClientTyp* = enum
     ctServer, ctClient
@@ -653,6 +643,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
   ## Note decoding headers must be done in message received order,
   ## so it needs to be done here. Same for processing the main
   ## stream messages.
+  var headers = ""
   while client.isConnected:
     let frm = await client.recvMsgs.pop()
     debugInfo "recv data on stream " & $frm.sid.int
@@ -678,7 +669,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         frm.sid.int mod 2 == 0:
       client.maxPeerStrmIdSeen = frm.sid.StreamId
     if frm.typ == frmtHeaders:
-      var headers = ""
+      headers.setLen 0
       client.hpackDecode(headers, frm.payload)
       frm.shrink frm.payload.len
       frm.s.add headers
