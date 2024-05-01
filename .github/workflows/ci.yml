@@ -55,8 +55,7 @@ jobs:
           curl -JLO \"https://github.com/nghttp2/nghttp2/releases/download/v1.61.0/nghttp2-1.61.0.tar.gz\" && \
           tar -xvf nghttp2-1.61.0.tar.gz && \
           cd /usr/src/app/nghttp2-1.61.0 && \
-          ./configure --enable-app && \
-          make && \
+          autoreconf -i && automake && autoconf && ./configure --enable-app && make && make install && \
           cd /usr/src/app/nghttp2-1.61.0/src && \
           chmod +x ./h2load && \
           ./h2load -n100000 -c100 -m10 https://127.0.0.1:4443 | tee /dev/tty | grep "100000 2xx""
