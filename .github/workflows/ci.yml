@@ -51,11 +51,6 @@ jobs:
           nimble install -y && \
           (nimble serve2 &) && \
           sleep 10s && \
-          apt install g++ make binutils autoconf automake autotools-dev libtool pkg-config zlib1g-dev libcunit1-dev libssl-dev libxml2-dev libev-dev libevent-dev libc-ares-dev -y --force-yes && \
-          curl -JLO \"https://github.com/nghttp2/nghttp2/releases/download/v1.61.0/nghttp2-1.61.0.tar.gz\" && \
-          tar -xvf nghttp2-1.61.0.tar.gz && \
-          cd /usr/src/app/nghttp2-1.61.0 && \
-          autoreconf -i && automake && autoconf && ./configure --enable-app && make && make install && \
-          cd /usr/src/app/nghttp2-1.61.0/src && \
-          chmod +x ./h2load && \
-          ./h2load -n100000 -c100 -m10 https://127.0.0.1:4443 | tee /dev/tty | grep "100000 2xx""
+          /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\" && \
+          brew install nghttp2 && \
+          h2load -n100000 -c100 -m10 https://127.0.0.1:4443 | tee /dev/tty | grep "100000 2xx""
