@@ -14,7 +14,7 @@ template check*(cond: bool): untyped =
     if not cond:
       raise (ref HyperxError)()
 
-template check*(cond: bool, errObj: untyped): untyped =
+template check*(cond, errObj: untyped): untyped =
   {.line: instantiationInfo(fullPaths = true).}:
     if not cond:
       raise errObj
@@ -74,11 +74,21 @@ func find(s: openArray[byte], c: byte, i: int): int {.raises: [].} =
       return i
     inc i
 
-# XXX remove
-func toBytes(s: string): seq[byte] =
-  result = newSeq[byte]()
-  for c in s:
-    result.add c.byte
+func `==`(a: openArray[byte], b: string): bool {.inline.} =
+  if a.len != b.len:
+    return false
+  var i = 0
+  while i < a.len:
+    if a[i] != b[i].byte:
+      return false
+    inc i
+  return true
+
+func contains(s: openArray[string], item: openArray[byte]): bool =
+  result = false
+  for x in s:
+    if item == x:
+      return true
 
 # XXX move headers stuff to its own module
 #     or back to clientserver, it's not used
@@ -109,28 +119,21 @@ iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
 
 func contentLen*(s: openArray[byte]): int {.raises: [ValueError].} =
   result = -1
-  const cBytes = "content-length".toBytes
   var val = 0 .. -1
   for (nn, vv) in headersIt(s):
-    if toOpenArray(s, nn.a, nn.b) == cBytes:
+    if toOpenArray(s, nn.a, nn.b) == "content-length":
       if val.b != -1:
         raise newException(ValueError, "more than one content-length")
       val = vv
   if val.b != -1:
     return parseBigInt toOpenArray(s, val.a, val.b)
 
-func contains(s: openArray[seq[byte]], item: openArray[byte]): bool =
-  result = false
-  for x in s:
-    if item == x:
-      return true
-
 const connSpecificHeaders = [
-  "connection".toBytes,
-  "proxy-connection".toBytes,
-  "keep-alive".toBytes,
-  "transfer-encoding".toBytes,
-  "upgrade".toBytes
+  "connection",
+  "proxy-connection",
+  "keep-alive",
+  "transfer-encoding",
+  "upgrade"
 ]
 
 func serverHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
@@ -143,22 +146,22 @@ func serverHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
       inc regularFieldCount
       check toOpenArray(s, nn.a, nn.b) notin connSpecificHeaders,
         newStrmError(errProtocolError)
-      check toOpenArray(s, nn.a, nn.b) != "te".toBytes,
+      check toOpenArray(s, nn.a, nn.b) != "te",
         newStrmError(errProtocolError)
     else:
       check regularFieldCount == 0, newStrmError(errProtocolError)
-      if toOpenArray(s, nn.a, nn.b) == ":path".toBytes:
+      if toOpenArray(s, nn.a, nn.b) == ":path":
         check vv.len > 0, newStrmError(errProtocolError)
         check not hasPath, newStrmError(errProtocolError)
         hasPath = true
-      elif toOpenArray(s, nn.a, nn.b) == ":method".toBytes:
+      elif toOpenArray(s, nn.a, nn.b) == ":method":
         check not hasMethod, newStrmError(errProtocolError)
         hasMethod = true
-      elif toOpenArray(s, nn.a, nn.b) == ":scheme".toBytes:
+      elif toOpenArray(s, nn.a, nn.b) == ":scheme":
         check not hasScheme, newStrmError(errProtocolError)
         hasScheme = true
       else:
-        check toOpenArray(s, nn.a, nn.b) == ":authority".toBytes,
+        check toOpenArray(s, nn.a, nn.b) == ":authority",
           newStrmError(errProtocolError)
   check hasMethod, newStrmError(errProtocolError)
   check hasScheme, newStrmError(errProtocolError)
@@ -171,11 +174,11 @@ func clientHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
       inc regularFieldCount
       check toOpenArray(s, nn.a, nn.b) notin connSpecificHeaders,
         newStrmError(errProtocolError)
-      check toOpenArray(s, nn.a, nn.b) != "te".toBytes,
+      check toOpenArray(s, nn.a, nn.b) != "te",
         newStrmError(errProtocolError)
     else:
       check regularFieldCount == 0, newStrmError(errProtocolError)
-      check toOpenArray(s, nn.a, nn.b) == ":status".toBytes,
+      check toOpenArray(s, nn.a, nn.b) == ":status",
         newStrmError(errProtocolError)
 
 func validateTrailers*(s: openArray[byte]) {.raises: [StrmError].} =
@@ -183,6 +186,10 @@ func validateTrailers*(s: openArray[byte]) {.raises: [StrmError].} =
     check s[nn.a].char != ':', newStrmError(errProtocolError)
 
 when isMainModule:
+  func toBytes(s: string): seq[byte] =
+    result = newSeq[byte]()
+    for c in s:
+      result.add c.byte
   block:
     raisesAssertion(doAssert false)
     var raised = false
