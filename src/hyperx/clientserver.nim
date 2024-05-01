@@ -284,8 +284,11 @@ proc send*(client: ClientContext, frm: Frame) {.async.} =
   # if we close the conn right after
   withLock client.sendLock:
     check not client.sock.isClosed, newConnClosedError()
-    await client.sock.send(frm.rawBytesPtr, frm.len)
-    doAssert frm.len > 0  # avoid GC before send
+    GC_ref frm
+    try:
+      await client.sock.send(frm.rawBytesPtr, frm.len)
+    finally:
+      GC_unref frm
 
 proc handshake*(client: ClientContext) {.async.} =
   doAssert client.isConnected
@@ -308,13 +311,15 @@ proc handshake*(client: ClientContext) {.async.} =
   blob.add frmWu.s
   check not client.sock.isClosed, newConnClosedError()
   await client.sock.send(addr blob[0], blob.len)
-  doAssert blob.len > 0  # avoid GC before send
   if client.typ == ctServer:
     blob.setLen preface.len
     check not client.sock.isClosed, newConnClosedError()
     let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
     check blobRln == blob.len, newConnClosedError()
     check blob == preface, newConnError(errProtocolError)
+  else:
+    # avoid blob GC before send completes
+    doAssert blob.len == preface.len+frm.len+frmWu.len
 
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   # we cannot raise stream errors here because of
