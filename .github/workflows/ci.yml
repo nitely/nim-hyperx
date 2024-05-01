@@ -26,7 +26,5 @@ jobs:
           nimble install -y && \
           (nimble serve2 &) && \
           sleep 10s && \
-          apt install -y build-essential procps curl file git && \
-          curl -fsSL \"https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh\" && \
-          brew install nghttp2 && \
+          apt install -y nghttp2-client && \
           h2load -n100000 -c100 -m10 https://127.0.0.1:4443 | tee /dev/tty | grep \"100000 2xx\""
