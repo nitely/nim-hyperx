@@ -55,7 +55,7 @@ jobs:
           curl -JLO \"https://github.com/nghttp2/nghttp2/releases/download/v1.61.0/nghttp2-1.61.0.tar.gz\" && \
           tar -xvf nghttp2-1.61.0.tar.gz && \
           cd nghttp2-1.61.0 && \
-          ./configure --enable-app && \
+          ./configure && \
           make && \
           cd src && \
           chmod +x ./h2load && \
