@@ -1,6 +1,8 @@
 # HyperX
 
-Pure Nim Http2 client/server implementation.
+Pure Nim Http2 client/server implementation. Tested with
+[h2spec](https://github.com/summerwind/h2spec), and
+[h2load](https://nghttp2.org/documentation/h2load-howto.html).
 
 Beware this library is in heavy development,
 and the API is not stable.

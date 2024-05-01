@@ -502,19 +502,17 @@ proc sendTask*(client: ClientContext) {.async.} =
   except QueueClosedError:
     doAssert not client.isConnected
   except HyperxError as err:
+    debugInfo err.getStackTrace()
     if client.isConnected:
       client.error = err
       raise err
-    else:
-      debugInfo "not connected"
   except OSError as err:  # XXX remove
+    debugInfo err.getStackTrace()
     if client.isConnected:
-      debugInfo err.getStackTrace()
       client.error = newInternalOsError(err.msg)
       raise client.error
-    else:
-      debugInfo "not connected"
   except CatchableError as err:
+    debugInfo err.getStackTrace()
     debugInfo err.msg
     raise err
   finally:
@@ -546,19 +544,17 @@ proc recvTask*(client: ClientContext) {.async.} =
   except QueueClosedError:
     doAssert not client.isConnected
   except HyperxError as err:
+    debugInfo err.getStackTrace()
     if client.isConnected:
       client.error = err
       raise err
-    else:
-      debugInfo "not connected"
   except OSError as err:
+    debugInfo err.getStackTrace()
     if client.isConnected:
-      debugInfo err.getStackTrace()
       client.error = newInternalOsError(err.msg)
       raise client.error
-    else:
-      debugInfo "not connected"
   except CatchableError as err:
+    debugInfo err.getStackTrace()
     debugInfo err.msg
     raise err
   finally:
@@ -736,12 +732,12 @@ proc recvDispatcher*(client: ClientContext) {.async.} =
   except QueueClosedError:
     doAssert not client.isConnected
   except HyperxError as err:
+    debugInfo err.getStackTrace()
     if client.isConnected:
       client.error = err
       raise err
-    else:
-      debugInfo "not connected"
   except CatchableError as err:
+    debugInfo err.getStackTrace()
     debugInfo err.msg
     raise err
   finally:
@@ -764,9 +760,6 @@ template withClient*(client: ClientContext, body: untyped) =
         body
     except QueueClosedError as err:
       doAssert not client.isConnected
-      raise err
-    except CatchableError as err:
-      debugInfo err.msg
       raise err
     finally:
       client.close()
@@ -903,7 +896,7 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
     )
     raise err
 
-proc sendHeaders*(
+proc sendHeadersNaked(
   strm: ClientStream,
   headers: ref seq[byte],  # XXX ref string
   finish: bool
@@ -924,6 +917,23 @@ proc sendHeaders*(
     frm.flags.incl frmfEndStream
     strm.state = csStateSentEnded
   await client.write frm
+
+proc sendHeaders*(
+  strm: ClientStream,
+  headers: ref seq[byte],  # XXX ref string
+  finish: bool
+) {.async.} =
+  try:
+    await sendHeadersNaked(strm, headers, finish)
+  except QueueClosedError as err:
+    if strm.client.error != nil:
+      # xxx change to connError
+      debugInfo strm.client.error.getStackTrace()
+      raise newHyperxConnectionError(strm.client.error.msg)
+    if strm.stream.error != nil:
+      debugInfo strm.stream.error.getStackTrace()
+      raise newStrmError(strm.stream.error.code)
+    raise err
 
 proc sendBodyNaked(
   strm: ClientStream,
