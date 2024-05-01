@@ -49,9 +49,9 @@ jobs:
           apt install -y make && \ 
           make install_mkcert && \
           nimble install -y && \
-          (nimble serve &) && \
+          (nimble serve2 &) && \
           sleep 10s && \
-          apt install libevent-dev libc-ares-dev && \
+          apt install -y libevent-dev libc-ares-dev && \
           curl -JLO \"https://github.com/nghttp2/nghttp2/releases/download/v1.61.0/nghttp2-1.61.0.tar.gz\" && \
           tar -xvf nghttp2-1.61.0.tar.gz && \
           cd nghttp2-1.61.0 && \

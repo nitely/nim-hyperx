@@ -45,5 +45,8 @@ task test2, "Test2":
 task serve, "Serve":
   exec "nim c -r examples/localServer.nim"
 
+task serve2, "Serve":
+  exec "nim c -r -d:release examples/localServer.nim"
+
 task docs, "Docs":
   exec "nim doc2 -o:./docs --project ./src/hyperx.nim"
