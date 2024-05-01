@@ -15,6 +15,31 @@ jobs:
         nim: [2.0.0]
     steps:
     - uses: actions/checkout@v2
+    - name: Run Tests
+      run: |
+        docker pull nimlang/nim:${{ matrix.nim }}
+        docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
+        /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
+          apt update && \
+          apt install -y make && \ 
+          make install_mkcert && \
+          nimble install -y && \
+          nimble test"
+    - name: Run h2spec
+      run: |
+        docker pull nimlang/nim:${{ matrix.nim }}
+        docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
+        /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
+          apt update && \
+          apt install -y make && \ 
+          make install_mkcert && \
+          nimble install -y && \
+          (nimble serve &) && \
+          sleep 10s && \
+          curl -JLO \"https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz\" && \
+          tar -xvf h2spec_linux_amd64.tar.gz && \
+          chmod +x ./h2spec && \
+          ./h2spec --tls --port 4443 --strict"
     - name: Run h2load
       run: |
         docker pull nimlang/nim:${{ matrix.nim }}
@@ -26,6 +51,6 @@ jobs:
           nimble install -y && \
           (nimble serve2 &) && \
           sleep 10s && \
-          /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\" && \
+          /bin/bash -c \"$\(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh\)\" && \
           brew install nghttp2 && \
           h2load -n100000 -c100 -m10 https://127.0.0.1:4443 | tee /dev/tty | grep \"100000 2xx\""
