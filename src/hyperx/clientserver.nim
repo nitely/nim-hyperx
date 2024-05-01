@@ -285,6 +285,7 @@ proc send*(client: ClientContext, frm: Frame) {.async.} =
   withLock client.sendLock:
     check not client.sock.isClosed, newConnClosedError()
     await client.sock.send(frm.rawBytesPtr, frm.len)
+    doAssert frm.len > 0  # avoid GC before send
 
 proc handshake*(client: ClientContext) {.async.} =
   doAssert client.isConnected
@@ -307,6 +308,7 @@ proc handshake*(client: ClientContext) {.async.} =
   blob.add frmWu.s
   check not client.sock.isClosed, newConnClosedError()
   await client.sock.send(addr blob[0], blob.len)
+  doAssert blob.len > 0  # avoid GC before send
   if client.typ == ctServer:
     blob.setLen preface.len
     check not client.sock.isClosed, newConnClosedError()
