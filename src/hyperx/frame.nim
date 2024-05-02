@@ -162,7 +162,12 @@ func payloadLen*(frm: Frame): FrmPayloadLen {.inline, raises: [].} =
 func typ*(frm: Frame): FrmTyp {.inline, raises: [].} =
   result = frm.s[3].FrmTyp
 
+# XXX mflags
 func flags*(frm: Frame): var FrmFlags {.inline, raises: [].} =
+  result = frm.s[4].FrmFlags
+
+# XXX flags
+func flags2(frm: Frame): FrmFlags {.inline, raises: [].} =
   result = frm.s[4].FrmFlags
 
 func sid*(frm: Frame): FrmSid {.inline, raises: [].} =
@@ -274,7 +279,7 @@ func addSetting*(
   value: uint32
 ) {.inline, raises: [].} =
   doAssert frm.typ == frmtSettings
-  doAssert frmfAck notin frm.flags
+  doAssert frmfAck notin frm.flags2
   let i = frm.len
   frm.grow frmSettingsSize
   frm.setPayloadLen frm.payload.len.FrmPayloadLen

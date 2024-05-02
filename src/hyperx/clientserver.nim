@@ -25,14 +25,8 @@ proc SSL_CTX_set_options*(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: D
 const SSL_OP_NO_RENEGOTIATION* = 1073741824
 const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION* = 65536
 
-# XXX remove
-func toBytes(s: string): seq[byte] {.compileTime.} =
-  result = newSeq[byte]()
-  for c in s:
-    result.add c.byte
-
 const
-  preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".toBytes
+  preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
   statusLineLen* = ":status: xxx\r\n".len
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize* = 4096'u32
@@ -290,36 +284,39 @@ proc send*(client: ClientContext, frm: Frame) {.async.} =
     finally:
       GC_unref frm
 
+func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
+  result = ""
+  var frmStg = newSettingsFrame()
+  if typ == ctClient:
+    frmStg.addSetting frmsEnablePush, stgDisablePush
+  frmStg.addSetting frmsInitialWindowSize, stgMaxWindowSize
+  let frmWu = newWindowUpdateFrame(
+    frmSidMain, (stgMaxWindowSize-stgInitialWindowSize).int
+  )
+  if typ == ctClient:
+    result.add preface
+  result.add frmStg.s
+  result.add frmWu.s
+
+const clientHandshakeBlob = handshakeBlob(ctClient)
+const serverHandshakeBlob = handshakeBlob(ctServer)
+
 proc handshake*(client: ClientContext) {.async.} =
   doAssert client.isConnected
   debugInfo "handshake"
   # we need to do this before sending any other frame
-  # XXX: allow sending some params
   let strm = client.openMainStream()
   doAssert strm.id == frmSidMain.StreamId
-  var frm = newSettingsFrame()
-  if client.typ == ctClient:
-    frm.addSetting frmsEnablePush, stgDisablePush
-  frm.addSetting frmsInitialWindowSize, stgMaxWindowSize
-  let frmWu = newWindowUpdateFrame(
-    frmSidMain, (stgMaxWindowSize-stgInitialWindowSize).int
-  )
-  var blob = newSeqOfCap[byte](preface.len+frm.len+frmWu.len)
-  if client.typ == ctClient:
-    blob.add preface
-  blob.add frm.s
-  blob.add frmWu.s
   check not client.sock.isClosed, newConnClosedError()
-  await client.sock.send(addr blob[0], blob.len)
+  case client.typ
+  of ctClient: await client.sock.send(clientHandshakeBlob)
+  of ctServer: await client.sock.send(serverHandshakeBlob)
   if client.typ == ctServer:
-    blob.setLen preface.len
+    var blob = newString(preface.len)
     check not client.sock.isClosed, newConnClosedError()
     let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
     check blobRln == blob.len, newConnClosedError()
     check blob == preface, newConnError(errProtocolError)
-  else:
-    # avoid blob GC before send completes
-    doAssert blob.len == preface.len+frm.len+frmWu.len
 
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   # we cannot raise stream errors here because of

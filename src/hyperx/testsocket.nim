@@ -73,6 +73,12 @@ proc send*(s: TestSocket, data: pointer, ln: int) {.async.} =
 proc send*(s: TestSocket, data: seq[byte]) {.async.} =
   await s.sentData.put data
 
+proc send*(s: TestSocket, data: string) {.async.} =
+  doAssert data.len > 0
+  var dataCopy = newSeq[byte](data.len)
+  copyMem(addr dataCopy[0], unsafeAddr data[0], data.len)
+  await s.sentData.put dataCopy
+
 proc connect*(s: TestSocket, hostname: string, port: Port) {.async.} =
   doAssert not s.isConnected
   s.isConnected = true
