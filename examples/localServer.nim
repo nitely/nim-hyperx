@@ -79,5 +79,11 @@ when isMainModule:
     echo "Serving forever"
     var server = newServer()
     await server.serve(propagateErr = false)
-  waitFor main()
+  when true:
+    waitFor main()
+  else:  # this is better for profiling/benchmarking but uses 100% CPU
+    var fut = main()
+    while not fut.finished:
+      poll(0)
+    fut.read()
   echo "ok"
