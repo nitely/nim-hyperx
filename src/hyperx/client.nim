@@ -11,6 +11,7 @@ import std/asyncnet
 
 import ./clientserver
 import ./errors
+import ./utils
 
 when defined(hyperxTest):
   import ./testsocket
@@ -29,16 +30,6 @@ export
   HyperxConnError,
   HyperxStrmError,
   HyperxError
-
-func add(s: var seq[byte], ss: string) {.raises: [].} =
-  # XXX x_x
-  for c in ss:
-    s.add c.byte
-
-func add(s: var string, ss: openArray[byte]) {.raises: [].} =
-  # XXX x_x
-  for c in ss:
-    s.add c.char
 
 var sslContext {.threadvar.}: SslContext
 
