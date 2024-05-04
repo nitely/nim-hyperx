@@ -271,7 +271,7 @@ func hpackEncode*(
   except HpackError as err:
     raise newException(HyperxError, err.msg)
 
-proc send*(client: ClientContext, frm: Frame) {.async.} =
+proc send(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
   # this lock exists because of GoAways. We need to send directly
@@ -283,6 +283,15 @@ proc send*(client: ClientContext, frm: Frame) {.async.} =
       await client.sock.send(frm.rawBytesPtr, frm.len)
     finally:
       GC_unref frm
+
+proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
+  ## Call this to send within an except
+  ## block that's already raising another exception
+  debugInfo "frm sent silently"
+  try:
+    await client.send(frm)
+  except HyperxError, SslError:
+    debugInfo getCurrentException().getStackTrace()
 
 func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
   result = ""
@@ -301,7 +310,7 @@ func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
 const clientHandshakeBlob = handshakeBlob(ctClient)
 const serverHandshakeBlob = handshakeBlob(ctServer)
 
-proc handshake*(client: ClientContext) {.async.} =
+proc handshakeNaked(client: ClientContext) {.async.} =
   doAssert client.isConnected
   debugInfo "handshake"
   # we need to do this before sending any other frame
@@ -317,6 +326,17 @@ proc handshake*(client: ClientContext) {.async.} =
     let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
     check blobRln == blob.len, newConnClosedError()
     check blob == preface, newConnError(errProtocolError)
+
+proc handshake(client: ClientContext) {.async.} =
+  try:
+    await client.handshakeNaked()
+  except SslError as err:
+    debugInfo err.getStackTrace()
+    doAssert client.isConnected
+    client.close()
+    # XXX err.msg includes a traceback for SslError but it should not
+    client.error = newHyperxConnectionError(err.msg)
+    raise client.error
 
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
   # we cannot raise stream errors here because of
@@ -400,12 +420,6 @@ proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
       debugInfo strm.error.getStackTrace()
       raise newStrmError(strm.error.code)
     raise err
-  except StrmError:
-    debugInfo getCurrentException().getStackTrace()
-    doAssert false
-  except ConnError:
-    debugInfo getCurrentException().getStackTrace()
-    doAssert false
 
 proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
@@ -510,7 +524,12 @@ proc sendTask*(client: ClientContext) {.async.} =
     if client.isConnected:
       client.error = err
       raise err
-  except OSError as err:  # XXX remove
+  except SslError as err:
+    debugInfo err.getStackTrace()
+    if client.isConnected:
+      client.error = newHyperxConnectionError(err.msg)
+      raise client.error
+  except OsError as err:
     debugInfo err.getStackTrace()
     if client.isConnected:
       client.error = newInternalOsError(err.msg)
@@ -540,7 +559,7 @@ proc recvTask*(client: ClientContext) {.async.} =
       # XXX close all streams
       # XXX close queues
       client.error = err
-      await client.send newGoAwayFrame(
+      await client.sendSilently newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
       )
       #client.close()
@@ -552,6 +571,11 @@ proc recvTask*(client: ClientContext) {.async.} =
     if client.isConnected:
       client.error = err
       raise err
+  except SslError as err:
+    debugInfo err.getStackTrace()
+    if client.isConnected:
+      client.error = newHyperxConnectionError(err.msg)
+      raise client.error
   except OSError as err:
     debugInfo err.getStackTrace()
     if client.isConnected:
@@ -726,7 +750,7 @@ proc recvDispatcher*(client: ClientContext) {.async.} =
   except ConnError as err:
     if client.isConnected:
       client.error = err
-      await client.send newGoAwayFrame(
+      await client.sendSilently newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
       )
     raise err
@@ -765,6 +789,7 @@ template withClient*(client: ClientContext, body: untyped) =
     except QueueClosedError as err:
       doAssert not client.isConnected
       raise err
+    # do not handle any other error here
     finally:
       client.close()
       # XXX do gracefull shutdown with timeout,

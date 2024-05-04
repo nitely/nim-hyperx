@@ -4,7 +4,9 @@ import ./errors
 
 template debugInfo*(s: untyped): untyped =
   when defined(hyperxDebug):
-    debugEcho s
+    # hide "s" expresion side effcets
+    {.cast(noSideEffect).}:
+      debugEcho s
   else:
     discard
 
@@ -15,22 +17,24 @@ template check*(cond, errObj: untyped): untyped =
 
 template raisesAssertion*(exp: untyped): untyped =
   ## Checks the expression passed raises an assertion
-  block:
-    var asserted = false
-    try:
-      exp
-    except AssertionDefect:
-      asserted = true
-    doAssert asserted
+  {.line: instantiationInfo(fullPaths = true).}:
+    block:
+      var asserted = false
+      try:
+        exp
+      except AssertionDefect:
+        asserted = true
+      doAssert asserted
 
 template untrackExceptions*(body: untyped): untyped =
   ## workaround for API errors in Nim's stdlib
-  try:
-    body
-  except Defect as err:
-    raise err  # raise original error
-  except Exception as err:
-    raise newException(Defect, err.msg)
+  {.line: instantiationInfo(fullPaths = true).}:
+    try:
+      body
+    except Defect as err:
+      raise err  # raise original error
+    except Exception as err:
+      raise newException(Defect, err.msg)
 
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
   let L = s.len
