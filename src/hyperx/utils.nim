@@ -2,17 +2,11 @@
 
 import ./errors
 
-template debugInfo*(s: string): untyped =
+template debugInfo*(s: untyped): untyped =
   when defined(hyperxDebug):
     debugEcho s
   else:
     discard
-
-# XXX remove
-template check*(cond: bool): untyped =
-  {.line: instantiationInfo(fullPaths = true).}:
-    if not cond:
-      raise (ref HyperxError)()
 
 template check*(cond, errObj: untyped): untyped =
   {.line: instantiationInfo(fullPaths = true).}:

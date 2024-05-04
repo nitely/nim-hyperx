@@ -21,9 +21,9 @@ import ./utils
 when defined(hyperxTest):
   import ./testsocket
 
-proc SSL_CTX_set_options*(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
-const SSL_OP_NO_RENEGOTIATION* = 1073741824
-const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION* = 65536
+proc SSL_CTX_set_options(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
+const SSL_OP_NO_RENEGOTIATION = 1073741824
+const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
 
 const
   preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
@@ -255,8 +255,8 @@ func hpackDecode(
         # can resize multiple times before a header, but not after
         canResize = false
     doAssert i == L
-  except HpackError as err:
-    debugInfo err.msg
+  except HpackError:
+    debugInfo getCurrentException().msg
     raise newConnError(errCompressionError)
 
 func hpackEncode*(
@@ -400,11 +400,11 @@ proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
       debugInfo strm.error.getStackTrace()
       raise newStrmError(strm.error.code)
     raise err
-  except StrmError as err:
-    debugInfo err.getStackTrace()
+  except StrmError:
+    debugInfo getCurrentException().getStackTrace()
     doAssert false
-  except ConnError as err:
-    debugInfo err.getStackTrace()
+  except ConnError:
+    debugInfo getCurrentException().getStackTrace()
     doAssert false
 
 proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
@@ -420,7 +420,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
     check frm2.sid == frm.sid, newConnError(errProtocolError)
     check frm2.typ == frmtContinuation, newConnError(errProtocolError)
     check frm2.payloadLen <= stgInitialMaxFrameSize, newConnError(errProtocolError)
-    check frm2.payloadLen >= 0
+    check frm2.payloadLen >= 0, newConnError(errProtocolError)
     if frm2.payloadLen == 0:
       continue
     # XXX the spec does not limit total headers size,
@@ -730,8 +730,8 @@ proc recvDispatcher*(client: ClientContext) {.async.} =
         client.maxPeerStrmIdSeen.int, err.code.int
       )
     raise err
-  except StrmError as err:
-    debugInfo err.getStackTrace()
+  except StrmError:
+    debugInfo getCurrentException().getStackTrace()
     doAssert false
   except QueueClosedError:
     doAssert not client.isConnected
@@ -777,8 +777,8 @@ template withClient*(client: ClientContext, body: untyped) =
         try:
           if fut != nil:
             await fut
-        except HyperxError as err:
-          debugInfo err.msg
+        except HyperxError:
+          debugInfo getCurrentException().msg
 
 type
   ClientStreamState* = enum
