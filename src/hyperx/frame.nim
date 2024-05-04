@@ -16,7 +16,7 @@ const
   frmGoAwaySize = 8
 
 type
-  FrmTyp* = distinct uint8
+  FrmTyp* = distinct char
 
 proc `==` *(a, b: FrmTyp): bool {.borrow.}
 
@@ -39,8 +39,8 @@ func isUnknown*(typ: FrmTyp): bool {.inline.} =
   typ.uint8 notin 0x00'u8 .. 0x09'u8
 
 type
-  FrmFlags* = distinct uint8
-  FrmFlag* = distinct uint8
+  FrmFlags* = distinct char
+  FrmFlag* = distinct char
 
 func contains*(flags: FrmFlags, f: FrmFlag): bool {.inline, raises: [].} =
   result = (flags.uint8 and f.uint8) > 0
@@ -56,7 +56,7 @@ const
   frmfPriority* = 0x20'u8.FrmFlag
 
 type
-  FrmErrCode* = distinct uint8
+  FrmErrCode* = distinct char
 
 const
   frmeNoError* = 0x00'u8.FrmErrCode
@@ -75,7 +75,7 @@ const
   frmeHttp11Required* = 0x0d'u8.FrmErrCode
 
 type
-  FrmSetting* = distinct uint8
+  FrmSetting* = distinct char
 
 const
   frmsHeaderTableSize* = 0x01'u8.FrmSetting
@@ -113,13 +113,13 @@ const
 type
   FrmPayloadLen* = uint32  # range[0 .. 24.ones.int]
   Frame* = ref object
-    s*: seq[byte]
+    s*: string
 
 func newFrame*(payloadLen = 0): Frame {.raises: [].} =
-  Frame(s: newSeq[byte](frmHeaderSize+payloadLen))
+  Frame(s: newString(frmHeaderSize+payloadLen))
 
 func newEmptyFrame*(): Frame {.inline, raises: [].} =
-  Frame(s: newSeq[byte]())
+  Frame(s: newString(0))
 
 func copy*(frm: Frame): Frame {.inline, raises: [].} =
   result = newEmptyFrame()
@@ -128,16 +128,16 @@ func copy*(frm: Frame): Frame {.inline, raises: [].} =
 func isEmpty*(frm: Frame): bool =
   frm.s.len == 0
 
-func rawBytesPtr*(frm: Frame): ptr byte =
+func rawBytesPtr*(frm: Frame): ptr char =
   addr frm.s[0]
 
-func rawPayloadBytesPtr*(frm: Frame): ptr byte =
+func rawPayloadBytesPtr*(frm: Frame): ptr char =
   addr frm.s[frmHeaderSize]
 
 func clear*(frm: Frame) {.inline, raises: [].} =
   frm.s.setLen frmHeaderSize
   for i in 0 .. frm.s.len-1:
-    frm.s[i] = 0
+    frm.s[i] = 0.char
 
 func len*(frm: Frame): int {.inline, raises: [].} =
   frm.s.len
@@ -183,24 +183,24 @@ func sid*(frm: Frame): FrmSid {.inline, raises: [].} =
 
 func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline, raises: [].} =
   doAssert n <= 24.ones.uint
-  frm.s[0] = ((n.uint shr 16) and 8.ones).byte
-  frm.s[1] = ((n.uint shr 8) and 8.ones).byte
-  frm.s[2] = (n.uint and 8.ones).byte
+  frm.s[0] = ((n.uint shr 16) and 8.ones).char
+  frm.s[1] = ((n.uint shr 8) and 8.ones).char
+  frm.s[2] = (n.uint and 8.ones).char
 
 func setTyp*(frm: Frame, t: FrmTyp) {.inline, raises: [].} =
-  frm.s[3] = t.uint8
+  frm.s[3] = t.char
 
 func setFlags*(frm: Frame, f: FrmFlags) {.inline, raises: [].} =
-  frm.s[4] = f.uint8
+  frm.s[4] = f.char
 
 func setSid*(frm: Frame, sid: FrmSid) {.inline, raises: [].} =
   ## Set the stream ID
-  frm.s[5] = ((sid.uint shr 24) and 8.ones).byte
-  frm.s[6] = ((sid.uint shr 16) and 8.ones).byte
-  frm.s[7] = ((sid.uint shr 8) and 8.ones).byte
-  frm.s[8] = (sid.uint and 8.ones).byte
+  frm.s[5] = ((sid.uint shr 24) and 8.ones).char
+  frm.s[6] = ((sid.uint shr 16) and 8.ones).char
+  frm.s[7] = ((sid.uint shr 8) and 8.ones).char
+  frm.s[8] = (sid.uint and 8.ones).char
 
-func add*(frm: Frame, payload: openArray[byte]) {.inline, raises: [].} =
+func add*(frm: Frame, payload: openArray[char]) {.inline, raises: [].} =
   frm.s.add payload
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
 
@@ -222,11 +222,11 @@ func isValidSize*(frm: Frame, size: int): bool {.inline, raises: [].} =
   else:
     true
 
-template assignAt(s: var seq[byte], i: int, x: uint32): untyped =
-  s[i+0] = ((x shr 24) and 8.ones).byte
-  s[i+1] = ((x shr 16) and 8.ones).byte
-  s[i+2] = ((x shr 8) and 8.ones).byte
-  s[i+3] = (x and 8.ones).byte
+template assignAt(s: var string, i: int, x: uint32): untyped =
+  s[i+0] = ((x shr 24) and 8.ones).char
+  s[i+1] = ((x shr 16) and 8.ones).char
+  s[i+2] = ((x shr 8) and 8.ones).char
+  s[i+3] = (x and 8.ones).char
 
 func newGoAwayFrame*(
   lastSid, errorCode: int
@@ -265,7 +265,7 @@ func newSettingsFrame*(ack = false): Frame {.inline, raises: [].} =
     result.flags.incl frmfAck
 
 func newPingFrame*(
-  ackPayload: openArray[byte] = []
+  ackPayload: openArray[char] = []
 ): Frame {.inline, raises: [].} =
   doAssert ackPayload.len == 0 or ackPayload.len == frmPingSize
   result = newFrame(frmPingSize)
@@ -287,8 +287,8 @@ func addSetting*(
   let i = frm.len
   frm.s.setLen frm.len+frmSettingsSize
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
-  frm.s[i] = 0.byte
-  frm.s[i+1] = id.byte
+  frm.s[i] = 0.char
+  frm.s[i+1] = id.char
   frm.s.assignAt(i+2, value)
 
 iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline, raises: [].} =
@@ -350,7 +350,7 @@ func windowSizeInc*(frm: Frame): uint {.inline, raises: [].} =
 #func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =
 #  doAssert frm.typ in {frmtData, frmtHeaders, frmtPushPromise}
 
-#func add*(frm: Frame, payload: openArray[byte]) {.inline.} =
+#func add*(frm: Frame, payload: openArray[char]) {.inline.} =
 #  frm.s.add payload
 #  frm.setPayloadLen FrmPayloadLen(frm.rawLen-frmHeaderSize)
 

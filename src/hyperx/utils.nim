@@ -47,6 +47,13 @@ func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
   s.setLen(L+ss.len)
   moveMem(addr s[L], unsafeAddr ss[0], ss.len)
 
+func add*(s: var string, ss: openArray[char]) {.raises: [].} =
+  if ss.len == 0: return
+  let L = s.len
+  s.setLen(L+ss.len)
+  prepareMutation(s)
+  moveMem(addr s[L], unsafeAddr ss[0], ss.len)
+
 func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
   if ss.len == 0: return
   let L = s.len
@@ -66,7 +73,13 @@ func add2*(s: var string, ss: openArray[byte]) {.raises: [].} =
   for i in 0 .. ss.len-1:
     s[L+i] = ss[i].char
 
-func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
+func add2*(s: var string, ss: openArray[char]) {.raises: [].} =
+  let L = s.len
+  s.setLen(L+ss.len)
+  for i in 0 .. ss.len-1:
+    s[L+i] = ss[i].char
+
+func parseBigInt(s: openArray[char]): int64 {.raises: [ValueError].} =
   if s.len == 0:
     raise newException(ValueError, "not a number")
   const validChars = {'0' .. '9'}
@@ -82,7 +95,7 @@ func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
     inc i
 
 # XXX remove once frm is string
-func find(s: openArray[byte], c: byte, i: int): int {.raises: [].} =
+func find(s: openArray[char], c: char, i: int): int {.raises: [].} =
   result = -1
   var i = i
   while i < s.len:
@@ -100,7 +113,7 @@ func `==`(a: openArray[byte], b: string): bool {.inline.} =
     inc i
   return true
 
-func contains(s: openArray[string], item: openArray[byte]): bool =
+func contains(s: openArray[string], item: openArray[char]): bool =
   result = false
   for x in s:
     if item == x:
@@ -110,7 +123,7 @@ func contains(s: openArray[string], item: openArray[byte]): bool =
 #     or back to clientserver, it's not used
 #     anywhere else
 
-iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
+iterator headersIt(s: openArray[char]): (Slice[int], Slice[int]) {.inline.} =
   # this assumes field validity was done
   let L = s.len
   var na = 0
@@ -120,12 +133,12 @@ iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
   while na < L:
     nb = na
     nb += int(s[na].char == ':')  # pseudo-header
-    nb = find(s, ':'.byte, nb)
+    nb = find(s, ':', nb)
     doAssert nb != -1
     assert s[nb].char == ':'
     assert s[nb+1].char == ' '
     va = nb+2  # skip :\s
-    vb = find(s, '\r'.byte, va)
+    vb = find(s, '\r', va)
     doAssert vb != -1
     assert s[vb].char == '\r'
     assert s[vb+1].char == '\n'
@@ -133,7 +146,7 @@ iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
     doAssert vb+2 > na
     na = vb+2  # skip /r/n
 
-func contentLen*(s: openArray[byte]): int {.raises: [ValueError].} =
+func contentLen*(s: openArray[char]): int {.raises: [ValueError].} =
   result = -1
   var val = 0 .. -1
   for (nn, vv) in headersIt(s):
@@ -152,7 +165,7 @@ const connSpecificHeaders = [
   "upgrade"
 ]
 
-func serverHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
+func serverHeadersValidation*(s: openArray[char]) {.raises: [StrmError].} =
   var hasPath = false
   var hasMethod = false
   var hasScheme = false
@@ -183,7 +196,7 @@ func serverHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
   check hasScheme, newStrmError(errProtocolError)
   check hasPath, newStrmError(errProtocolError)
 
-func clientHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
+func clientHeadersValidation*(s: openArray[char]) {.raises: [StrmError].} =
   var regularFieldCount = 0
   for (nn, vv) in headersIt(s):
     if s[nn.a].char != ':':
@@ -197,7 +210,7 @@ func clientHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
       check toOpenArray(s, nn.a, nn.b) == ":status",
         newStrmError(errProtocolError)
 
-func validateTrailers*(s: openArray[byte]) {.raises: [StrmError].} =
+func validateTrailers*(s: openArray[char]) {.raises: [StrmError].} =
   for (nn, _) in headersIt(s):
     check s[nn.a].char != ':', newStrmError(errProtocolError)
 

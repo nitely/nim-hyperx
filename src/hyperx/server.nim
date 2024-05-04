@@ -115,8 +115,8 @@ proc sendHeaders*(
   contentLen = -1
 ) {.async.} =
   template client: untyped = strm.client
-  var headers = new(seq[byte])
-  headers[] = newSeq[byte]()
+  var headers = new(string)
+  headers[] = ""
   client.hpackEncode(headers[], ":status", $status)
   if contentType.len > 0:
     client.hpackEncode(headers[], "content-type", contentType)

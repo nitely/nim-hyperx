@@ -73,8 +73,8 @@ proc sendHeaders*(
   contentLen = 0
 ) {.async.} =
   template client: untyped = strm.client
-  var headers = new(seq[byte])
-  headers[] = newSeq[byte]()
+  var headers = new(string)
+  headers[] = ""
   client.hpackEncode(headers[], ":method", $httpMethod)
   client.hpackEncode(headers[], ":scheme", "https")
   client.hpackEncode(headers[], ":path", path)

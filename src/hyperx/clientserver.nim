@@ -163,7 +163,7 @@ func validateHeader(
 func hpackDecode(
   client: ClientContext,
   ss: var string,
-  payload: openArray[byte]
+  payload: openArray[char]
 ) {.raises: [ConnError].} =
   var dhSize = -1
   var nn = 0 .. -1
@@ -194,7 +194,7 @@ func hpackDecode(
 
 func hpackEncode*(
   client: ClientContext,
-  payload: var seq[byte],  # XXX var string
+  payload: var string,  # XXX var string
   name, value: openArray[char]
 ) {.raises: [HyperxError].} =
   ## headers must be added synchronously, no await in between,
@@ -278,7 +278,8 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
     client.headersEnc.clearLastResize()
     payload.add frm.payload
     frm.shrink frm.payload.len
-    frm.add payload
+    frm.s.add payload
+    frm.setPayloadLen frm.payload.len.FrmPayloadLen
   if frm.sid != frmSidMain and
       frm.sid.StreamId in client.streams:
     # XXX pass stream to write as param
@@ -750,7 +751,7 @@ proc close*(strm: ClientStream) =
 func recvEnded*(strm: ClientStream): bool =
   strm.state == csStateRecvEnded
 
-func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].} =
+func validateHeaders(s: openArray[char], typ: ClientTyp) {.raises: [StrmError].} =
   case typ
   of ctServer: serverHeadersValidation(s)
   of ctClient: clientHeadersValidation(s)
@@ -770,7 +771,7 @@ proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
       break
     check frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
     #check frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
-    if frm.payload[9] == '1'.byte:
+    if frm.payload[9] == '1':
       check frmfEndStream notin frm.flags, newStrmError(errProtocolError)
     else:
       break
@@ -838,7 +839,7 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
 
 proc sendHeadersNaked(
   strm: ClientStream,
-  headers: ref seq[byte],  # XXX ref string
+  headers: ref string,  # XXX ref string
   finish: bool
 ) {.async.} =
   ## Headers must be HPACK encoded
@@ -860,7 +861,7 @@ proc sendHeadersNaked(
 
 proc sendHeaders*(
   strm: ClientStream,
-  headers: ref seq[byte],  # XXX ref string
+  headers: ref string,  # XXX ref string
   finish: bool
 ) {.async.} =
   try:
