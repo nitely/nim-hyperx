@@ -2,7 +2,7 @@
 
 import ./errors
 
-template debugInfo*(s: string): untyped =
+template debugInfo*(s: untyped): untyped =
   when defined(hyperxDebug):
     debugEcho s
   else:

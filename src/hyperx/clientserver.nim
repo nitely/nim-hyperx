@@ -348,7 +348,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
   var frm2 = newFrame()
   while frmfEndHeaders notin frm2.flags:
     check not client.sock.isClosed, newConnClosedError()
-    let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm2.len)
+    let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frmHeaderSize)
     check headerRln == frmHeaderSize, newConnClosedError()
     debugInfo $frm2
     check frm2.sid == frm.sid, newConnError(errProtocolError)
@@ -378,7 +378,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   ##
   ## Unused flags MUST be ignored on receipt
   check not client.sock.isClosed, newConnClosedError()
-  let headerRln = await client.sock.recvInto(frm.rawBytesPtr, frm.len)
+  let headerRln = await client.sock.recvInto(frm.rawBytesPtr, frmHeaderSize)
   check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
@@ -405,14 +405,17 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   check payloadLen >= paddingLen, newConnError(errProtocolError)
   payloadLen -= paddingLen
   check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
+  if payloadLen == 0:
+    frm.s.setLen frmHeaderSize.int
   if payloadLen > 0:
-    frm.grow payloadLen
+    frm.s.setLen frmHeaderSize+payloadLen
     check not client.sock.isClosed, newConnClosedError()
     let payloadRln = await client.sock.recvInto(
       frm.rawPayloadBytesPtr, payloadLen
     )
     check payloadRln == payloadLen, newConnClosedError()
     debugInfo frm.debugPayload
+  # XXX fix
   if paddingLen > 0:
     let oldFrmLen = frm.len
     frm.grow paddingLen
@@ -462,9 +465,11 @@ proc recvTaskNaked(client: ClientContext) {.async.} =
   ## Meant to be asyncCheck'ed
   doAssert client.isConnected
   #var frm = newFrame()
+  const maxPayloadSize = stgInitialMaxFrameSize.int
   while client.isConnected:
     #frm.s.setLen frmHeaderSize
-    var frm = newFrame()
+    var frm = newFrameUninit(maxPayloadSize)
+    #var frm = newFrame()
     await client.read frm
     await client.recvMsgs.put frm
     #await client.recvMsgs.put frm.copy()

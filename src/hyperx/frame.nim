@@ -118,6 +118,9 @@ type
 func newFrame*(payloadLen = 0): Frame {.raises: [].} =
   Frame(s: newString(frmHeaderSize+payloadLen))
 
+func newFrameUninit*(payloadLen = 0): Frame {.raises: [].} =
+  Frame(s: newStringUninit(frmHeaderSize+payloadLen))
+
 func newEmptyFrame*(): Frame {.inline, raises: [].} =
   Frame(s: newString(0))
 
