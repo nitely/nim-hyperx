@@ -118,8 +118,12 @@ type
 func newFrame*(payloadLen = 0): Frame {.raises: [].} =
   Frame(s: newSeq[byte](frmHeaderSize+payloadLen))
 
-func newEmptyFrame*(): Frame {.raises: [].} =
+func newEmptyFrame*(): Frame {.inline, raises: [].} =
   Frame(s: newSeq[byte]())
+
+func copy*(frm: Frame): Frame {.inline, raises: [].} =
+  result = newEmptyFrame()
+  result.s = frm.s
 
 func isEmpty*(frm: Frame): bool =
   frm.s.len == 0
@@ -281,7 +285,7 @@ func addSetting*(
   doAssert frm.typ == frmtSettings
   doAssert frmfAck notin frm.flags2
   let i = frm.len
-  frm.grow frmSettingsSize
+  frm.s.setLen frm.len+frmSettingsSize
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
   frm.s[i] = 0.byte
   frm.s[i+1] = id.byte

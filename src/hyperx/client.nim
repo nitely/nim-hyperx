@@ -31,23 +31,10 @@ export
   HyperxStrmError,
   HyperxError
 
-var sslContext {.threadvar.}: SslContext
-
-proc destroySslContext() {.noconv.} =
-  sslContext.destroyContext()
-
-proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
-  if not sslContext.isNil:
-    return sslContext
-  sslContext = defaultSslContext(ctClient)
-  addExitProc(destroySslContext)
-  return sslContext
-
 when not defined(hyperxTest):
   proc newMySocket(): MyAsyncSocket {.raises: [InternalOsError].} =
     try:
       result = newAsyncSocket()
-      wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
       raise newInternalOsError(err.msg)
 

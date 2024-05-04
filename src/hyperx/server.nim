@@ -33,20 +33,6 @@ export
   HyperxStrmError,
   HyperxError
 
-var sslContext {.threadvar.}: SslContext
-
-proc destroySslContext() {.noconv.} =
-  sslContext.destroyContext()
-
-proc defaultSslContext(
-  certFile, keyFile: string
-): SslContext {.raises: [InternalSslError].} =
-  if not sslContext.isNil:
-    return sslContext
-  sslContext = defaultSslContext(ctServer, certFile, keyFile)
-  addExitProc(destroySslContext)
-  return sslContext
-
 when not defined(hyperxTest):
   proc newMySocket(
     certFile = "",
@@ -54,7 +40,6 @@ when not defined(hyperxTest):
   ): MyAsyncSocket {.raises: [InternalOsError].} =
     try:
       result = newAsyncSocket()
-      wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
       raise newInternalOsError(err.msg)
 
@@ -100,11 +85,6 @@ proc listen(server: ServerContext) =
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
   # note OptNoDelay is inherited from server.sock
   let sock = await server.sock.accept()
-  when not defined(hyperxTest):
-    doAssert not sslContext.isNil
-  wrapConnectedSocket(
-    sslContext, sock, handshakeAsServer, server.hostname
-  )
   result = newClient(ctServer, sock, server.hostname)
 
 template withServer*(server: ServerContext, body: untyped): untyped =
