@@ -514,7 +514,7 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
     let frm = await client.sendMsgs.pop()
     await client.send(frm)
 
-proc sendTask*(client: ClientContext) {.async.} =
+proc sendTask(client: ClientContext) {.async.} =
   try:
     await client.sendTaskNaked()
   except QueueClosedError:
@@ -547,7 +547,7 @@ proc recvTaskNaked(client: ClientContext) {.async.} =
     await client.read frm
     await client.recvMsgs.put frm
 
-proc recvTask*(client: ClientContext) {.async.} =
+proc recvTask(client: ClientContext) {.async.} =
   try:
     await client.recvTaskNaked()
   except ConnError as err:
@@ -734,7 +734,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     except QueueClosedError:
       debugInfo "stream is closed " & $frm.sid.int
 
-proc recvDispatcher*(client: ClientContext) {.async.} =
+proc recvDispatcher(client: ClientContext) {.async.} =
   # XXX always store error for all errors
   #     everywhere where queues are closed
   try:
