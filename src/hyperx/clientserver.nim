@@ -64,7 +64,7 @@ proc defaultSslContext*(
   clientTyp: ClientTyp,
   certFile = "",
   keyFile = ""
-): SslContext {.raises: [InternalSslError].} =
+): SslContext {.raises: [HyperxConnError].} =
   # protSSLv23 will disable all protocols
   # lower than the min protocol defined
   # in openssl.config, usually +TLSv1.2
@@ -76,7 +76,7 @@ proc defaultSslContext*(
       keyFile = keyFile
     )
   except CatchableError as err:
-    raise newException(InternalSslError, err.msg)
+    raise newHyperxConnError(err.msg)
   except Defect as err:
     raise err
   except Exception as err:
@@ -159,14 +159,14 @@ proc newClient*(
     window: 0
   )
 
-proc close*(client: ClientContext) {.raises: [InternalOsError].} =
+proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
   if not client.isConnected:
     return
   client.isConnected = false
   try:
     client.sock.close()
   except CatchableError as err:
-    raise newInternalOsError(err.msg)
+    raise newHyperxConnError(err.msg)
   except Defect as err:
     raise err  # raise original error
   except Exception as err:
@@ -335,7 +335,7 @@ proc handshake(client: ClientContext) {.async.} =
     doAssert client.isConnected
     client.close()
     # XXX err.msg includes a traceback for SslError but it should not
-    client.error = newHyperxConnectionError(err.msg)
+    client.error = newHyperxConnError(err.msg)
     raise client.error
 
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
@@ -415,7 +415,7 @@ proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
     if client.error != nil:
       # xxx change to connError
       debugInfo client.error.getStackTrace()
-      raise newHyperxConnectionError(client.error.msg)
+      raise newHyperxConnError(client.error.msg)
     if strm.error != nil:
       debugInfo strm.error.getStackTrace()
       raise newStrmError(strm.error.code)
@@ -524,15 +524,11 @@ proc sendTask*(client: ClientContext) {.async.} =
     if client.isConnected:
       client.error = err
       raise err
-  except SslError as err:
+  except SslError, OsError:
+    let err = getCurrentException()
     debugInfo err.getStackTrace()
     if client.isConnected:
-      client.error = newHyperxConnectionError(err.msg)
-      raise client.error
-  except OsError as err:
-    debugInfo err.getStackTrace()
-    if client.isConnected:
-      client.error = newInternalOsError(err.msg)
+      client.error = newHyperxConnError(err.msg)
       raise client.error
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -571,15 +567,11 @@ proc recvTask*(client: ClientContext) {.async.} =
     if client.isConnected:
       client.error = err
       raise err
-  except SslError as err:
+  except SslError, OSError:
+    let err = getCurrentException()
     debugInfo err.getStackTrace()
     if client.isConnected:
-      client.error = newHyperxConnectionError(err.msg)
-      raise client.error
-  except OSError as err:
-    debugInfo err.getStackTrace()
-    if client.isConnected:
-      client.error = newInternalOsError(err.msg)
+      client.error = newHyperxConnError(err.msg)
       raise client.error
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -958,7 +950,7 @@ proc sendHeaders*(
     if strm.client.error != nil:
       # xxx change to connError
       debugInfo strm.client.error.getStackTrace()
-      raise newHyperxConnectionError(strm.client.error.msg)
+      raise newHyperxConnError(strm.client.error.msg)
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
       raise newStrmError(strm.stream.error.code)
@@ -1009,7 +1001,7 @@ proc sendBody*(
     if strm.client.error != nil:
       # xxx change to connError
       debugInfo strm.client.error.getStackTrace()
-      raise newHyperxConnectionError(strm.client.error.msg)
+      raise newHyperxConnError(strm.client.error.msg)
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
       raise newStrmError(strm.stream.error.code)

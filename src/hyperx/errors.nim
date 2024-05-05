@@ -37,33 +37,26 @@ func `$`(errCode: ErrorCode): string {.raises: [].} =
   of errHttp11Required: "HTTP_1_1_REQUIRED"
   else: "UNKNOWN ERROR CODE"
 
-# XXX prefix Hyperx
 type
   HyperxError* = object of CatchableError
-  HyperxConnectionError* = object of HyperxError
-  ConnectionClosedError* = object of HyperxConnectionError
-  InternalOsError* = object of HyperxConnectionError
-  InternalSslError* = object of InternalOsError
-  ConnError* = object of HyperxConnectionError
+  HyperxConnError* = object of HyperxError
+  HyperxStrmError* = object of HyperxError
+  ConnClosedError* = object of HyperxConnError
+  ConnError* = object of HyperxConnError
     code*: ErrorCode
-  StrmError* = object of HyperxError
+  StrmError* = object of HyperxStrmError
     code*: ErrorCode
-  HyperxConnError* = HyperxConnectionError
-  HyperxStrmError* = StrmError
   QueueError* = object of HyperxError
   QueueClosedError* = object of QueueError
+
+func newHyperxConnError*(msg: string): ref HyperxConnError {.raises: [].} =
+  result = (ref HyperxConnError)(msg: msg)
+
+func newConnClosedError*(): ref ConnClosedError {.raises: [].} =
+  result = (ref ConnClosedError)(msg: "Connection Closed")
 
 func newConnError*(errCode: ErrorCode): ref ConnError {.raises: [].} =
   result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
 
-func newConnClosedError*(): ref ConnectionClosedError {.raises: [].} =
-  result = (ref ConnectionClosedError)(msg: "Connection Closed")
-
 func newStrmError*(errCode: ErrorCode): ref StrmError {.raises: [].} =
   result = (ref StrmError)(code: errCode, msg: "Stream Error: " & $errCode)
-
-func newInternalOsError*(msg: string): ref InternalOsError {.raises: [].} =
-  result = (ref InternalOsError)(msg: msg)
-
-func newHyperxConnectionError*(msg: string): ref HyperxConnectionError {.raises: [].} =
-  result = (ref HyperxConnectionError)(msg: msg)

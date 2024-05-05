@@ -36,7 +36,7 @@ var sslContext {.threadvar.}: SslContext
 proc destroySslContext() {.noconv.} =
   sslContext.destroyContext()
 
-proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
+proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
   if not sslContext.isNil:
     return sslContext
   sslContext = defaultSslContext(ctClient)
@@ -44,17 +44,17 @@ proc defaultSslContext(): SslContext {.raises: [InternalSslError].} =
   return sslContext
 
 when not defined(hyperxTest):
-  proc newMySocket(): MyAsyncSocket {.raises: [InternalOsError].} =
+  proc newMySocket(): MyAsyncSocket {.raises: [HyperxConnError].} =
     try:
       result = newAsyncSocket()
       wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
-      raise newInternalOsError(err.msg)
+      raise newHyperxConnError(err.msg)
 
 proc newClient*(
   hostname: string,
   port = Port 443
-): ClientContext {.raises: [InternalOsError].} =
+): ClientContext {.raises: [HyperxConnError].} =
   newClient(ctClient, newMySocket(), hostname, port)
 
 type

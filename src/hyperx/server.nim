@@ -40,7 +40,7 @@ proc destroySslContext() {.noconv.} =
 
 proc defaultSslContext(
   certFile, keyFile: string
-): SslContext {.raises: [InternalSslError].} =
+): SslContext {.raises: [HyperxConnError].} =
   if not sslContext.isNil:
     return sslContext
   sslContext = defaultSslContext(ctServer, certFile, keyFile)
@@ -51,12 +51,12 @@ when not defined(hyperxTest):
   proc newMySocket(
     certFile = "",
     keyFile = ""
-  ): MyAsyncSocket {.raises: [InternalOsError].} =
+  ): MyAsyncSocket {.raises: [HyperxConnError].} =
     try:
       result = newAsyncSocket()
       wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
-      raise newInternalOsError(err.msg)
+      raise newHyperxConnError(err.msg)
 
 type
   ServerContext* = ref object
@@ -125,7 +125,7 @@ proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
     if client.error != nil:
       # https://github.com/nim-lang/Nim/issues/15182
       debugInfo client.error.getStackTrace()
-      raise newHyperxConnectionError(client.error.msg)
+      raise newHyperxConnError(client.error.msg)
     raise err
 
 proc sendHeaders*(

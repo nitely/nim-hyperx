@@ -149,7 +149,7 @@ testAsync "response with bad header compression":
         tc.client.get("/") and
         tc.replyBadHeaders()
       )
-    except HyperxConnectionError as err:
+    except HyperxConnError as err:
       errorMsg = err.msg
   doAssert "COMPRESSION_ERROR" in errorMsg
 
@@ -201,7 +201,7 @@ testAsync "response with bad prio length":
         tc.client.get("/") and
         tc.replyPrio()
       )
-    except HyperxConnectionError as err:
+    except HyperxConnError as err:
       errorMsg = err.msg
   doAssert "PROTOCOL_ERROR" in errorMsg
 
@@ -253,7 +253,7 @@ testAsync "response with bad over padding length":
         tc.client.get("/") and
         tc.replyPadding()
       )
-    except HyperxConnectionError as err:
+    except HyperxConnError as err:
       errorMsg = err.msg
   doAssert "PROTOCOL_ERROR" in errorMsg
 
@@ -272,7 +272,7 @@ testAsync "response with bad missing padding length":
         tc.client.get("/") and
         tc.replyPadding()
       )
-    except HyperxConnectionError as err:
+    except HyperxConnError as err:
       errorMsg = err.msg
   doAssert "PROTOCOL_ERROR" in errorMsg
 
