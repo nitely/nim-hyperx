@@ -1,4 +1,5 @@
 import yasync
+from std/asyncdispatch import callSoon
 import std/deques
 
 import ./utils
@@ -43,8 +44,7 @@ proc wakeupLastWaiter(lck: LockAsync) =
         fut.complete()
   untrackExceptions:
     lck.wakingUp = true
-    #callSoon weakup
-    weakup()
+    callSoon weakup
 
 proc acquire(lck: LockAsync) {.async.} =
   if lck.isClosed:
@@ -87,8 +87,7 @@ proc close*(lck: LockAsync) {.raises: [].}  =
       if not fut.finished:
         fut.fail newLockClosedError()
   untrackExceptions:
-    #callSoon failWaiters
-    failWaiters()
+    callSoon failWaiters
 
 when isMainModule:
   block:

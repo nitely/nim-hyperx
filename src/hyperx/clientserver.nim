@@ -591,7 +591,7 @@ const connFrmAllowed = {
   frmtWindowUpdate
 }
 
-proc consumeMainStream(client: ClientContext, frm: Frame) =
+proc consumeMainStream(client: ClientContext, frm: Frame) {.asyncClosureExperimental.} =
   case frm.typ
   of frmtWindowUpdate:
     check frm.windowSizeInc > 0, newConnError(errProtocolError)
@@ -641,11 +641,11 @@ proc consumeMainStream(client: ClientContext, frm: Frame) =
       else:
         # ignore unknown setting
         debugInfo "unknown setting received"
-    #if frmfAck notin frm.flags:
-    #  await client.write newSettingsFrame(ack = true)
+    if frmfAck notin frm.flags:
+      await client.write newSettingsFrame(ack = true)
   of frmtPing:
-    #if frmfAck notin frm.flags:
-    #  await client.write newPingFrame(ackPayload = frm.payload)
+    if frmfAck notin frm.flags:
+      await client.write newPingFrame(ackPayload = frm.payload)
     discard
   of frmtGoAway:
     # XXX close streams lower than Last-Stream-ID
@@ -674,7 +674,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     if frm.sid == frmSidMain:
       # Settings need to be applied before consuming following messages
       #await consumeMainStream(client, frm)
-      consumeMainStream(client, frm)
+      await consumeMainStream(client, frm)
       continue
     if client.typ == ctServer and
         frm.sid.StreamId > client.maxPeerStrmIdSeen and
