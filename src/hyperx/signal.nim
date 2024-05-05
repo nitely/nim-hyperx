@@ -15,24 +15,30 @@ type
     ## Wait for a signal. When triggers wakes everyone up
     # XXX use/reuse FutureVars
     waiters: Deque[Future[void]]
+    wakingUp: bool
     isClosed: bool
 
 proc newSignal*(): SignalAsync {.raises: [].} =
   new result
   result = SignalAsync(
     waiters: initDeque[Future[void]](0),
+    wakingUp: false,
     isClosed: false
   )
 
 proc wakeupLastWaiter(sig: SignalAsync) {.raises: [].} =
   if sig.waiters.len == 0:
     return
+  if sig.wakingUp:
+    return
   proc wakeup =
+    sig.wakingUp = false
     if sig.waiters.len > 0:
       let fut = sig.waiters.peekLast()
       if not fut.finished:
         fut.complete()
   untrackExceptions:
+    sig.wakingUp = true
     callSoon wakeup
 
 proc waitFor*(sig: SignalAsync): Future[void] {.async.} =

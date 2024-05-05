@@ -16,20 +16,25 @@ type
     used: bool
     # XXX use/reuse FutureVars
     waiters: Deque[Future[void]]
+    wakingUp:bool
     isClosed: bool
 
 proc newLock*(): LockAsync {.raises: [].} =
   new result
   result = LockAsync(
     used: false,
-    waiters: initDeque[Future[void]](2),
+    waiters: initDeque[Future[void]](0),
+    wakingUp: false,
     isClosed: false
   )
 
 proc wakeupLastWaiter(lck: LockAsync) =
   if lck.waiters.len == 0:
     return
+  if lck.wakingUp:
+    return
   proc weakup =
+    lck.wakingUp = false
     if lck.used:
       return
     if lck.waiters.len > 0:
@@ -37,6 +42,7 @@ proc wakeupLastWaiter(lck: LockAsync) =
       if not fut.finished:
         fut.complete()
   untrackExceptions:
+    lck.wakingUp = true
     callSoon weakup
 
 proc acquire(lck: LockAsync) {.async.} =
