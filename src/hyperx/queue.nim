@@ -3,9 +3,6 @@ import std/deques
 import ./utils
 import ./errors
 
-template tof(fut: untyped): untyped =
-  Future[void](fut)
-
 func newQueueClosedError(): ref QueueClosedError {.raises: [].} =
   result = (ref QueueClosedError)(msg: "Queue is closed")
 
@@ -13,8 +10,8 @@ type
   QueueAsync*[T] = ref object
     s: Deque[T]
     size: int
-    putWaiters, popWaiters: Deque[FutureVar[void]]
-    futs: seq[FutureVar[void]]
+    # XXX use/reuse FutureVars
+    putWaiters, popWaiters: Deque[Future[void]]
     wakingPut, wakingPop: bool
     isClosed: bool
 
@@ -24,9 +21,8 @@ proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
   result = QueueAsync[T](
     s: initDeque[T](size),
     size: size,
-    putWaiters: initDeque[FutureVar[void]](2),
-    popWaiters: initDeque[FutureVar[void]](2),
-    futs: newSeq[FutureVar[void]](),
+    putWaiters: initDeque[Future[void]](2),
+    popWaiters: initDeque[Future[void]](2),
     wakingPut: false,
     wakingPop: false,
     isClosed: false
@@ -34,18 +30,6 @@ proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
 
 func used[T](q: QueueAsync[T]): int {.raises: [].} =
   q.s.len
-
-proc newFut[T](q: QueueAsync[T]): FutureVar[void] =
-  if q.futs.len > 0:
-    return q.futs.pop()
-  return newFutureVar[void]()
-
-proc reuse[T](q: QueueAsync[T], fut: FutureVar[void]) =
-  doAssert fut.finished
-  #if q.futs.len > 1_000:
-  #  return
-  fut.clean()
-  q.futs.add fut
 
 proc wakeupLastPut[T](q: QueueAsync[T]) {.raises: [].} =
   if q.used == q.size:
@@ -90,14 +74,13 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   if q.isClosed:
     raise newQueueClosedError()
   if q.used == q.size or q.putWaiters.len > 0:
-    let fut = q.newFut()
+    let fut = newFuture[void]()
     q.putWaiters.addFirst fut
-    await fut.tof
+    await fut
     if q.isClosed:
       raise newQueueClosedError()
     let fut2 = q.putWaiters.popLast()
-    doAssert fut.tof == fut2.tof
-    q.reuse fut
+    doAssert fut == fut2
   doAssert q.used < q.size
   q.s.addFirst v
   q.wakeupLastPut()
@@ -108,14 +91,13 @@ proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   if q.isClosed:
     raise newQueueClosedError()
   if q.used == 0 or q.popWaiters.len > 0:
-    let fut = q.newFut()
+    let fut = newFuture[void]()
     q.popWaiters.addFirst fut
-    await fut.tof
+    await fut
     if q.isClosed:
       raise newQueueClosedError()
     let fut2 = q.popWaiters.popLast()
-    doAssert fut.tof == fut2.tof
-    q.reuse fut
+    doAssert fut == fut2
   doAssert q.used > 0
   result = q.s.popLast()
   q.wakeupLastPop()
@@ -132,11 +114,11 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
     while q.putWaiters.len > 0:
       let fut = q.putWaiters.popLast()
       if not fut.finished:
-        fut.tof.fail newQueueClosedError()
+        fut.fail newQueueClosedError()
     while q.popWaiters.len > 0:
       let fut = q.popWaiters.popLast()
       if not fut.finished:
-        fut.tof.fail newQueueClosedError()
+        fut.fail newQueueClosedError()
   untrackExceptions:
     callSoon failWaiters
 
