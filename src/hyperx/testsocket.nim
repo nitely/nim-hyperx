@@ -2,7 +2,7 @@
 when not defined(ssl):
   {.error: "this lib needs -d:ssl".}
 
-import std/asyncdispatch
+import yasync
 import std/asyncnet
 import std/net
 

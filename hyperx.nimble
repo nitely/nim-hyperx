@@ -9,6 +9,7 @@ skipDirs = @["tests", "examples"]
 
 requires "nim >= 2.0.0"
 requires "hpack >= 0.4.0"
+requires "yasync"
 
 task test, "Test":
   exec "nim c -r src/hyperx/utils.nim"

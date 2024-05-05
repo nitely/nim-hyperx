@@ -6,7 +6,7 @@ when not defined(ssl):
 
 import std/exitprocs
 import std/net
-import std/asyncdispatch
+import yasync
 import std/asyncnet
 
 import ./clientserver

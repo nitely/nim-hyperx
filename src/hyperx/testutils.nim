@@ -5,7 +5,7 @@ when not defined(ssl):
   {.error: "this lib needs -d:ssl".}
 
 import std/strutils
-import std/asyncdispatch
+import yasync
 import pkg/hpack
 import ./frame
 import ./clientserver

@@ -1,4 +1,4 @@
-import std/asyncdispatch
+import yasync
 import std/deques
 
 import ./utils
@@ -39,12 +39,13 @@ proc wakeupLastWaiter(sig: SignalAsync) {.raises: [].} =
         fut.complete()
   untrackExceptions:
     sig.wakingUp = true
-    callSoon wakeup
+    #callSoon wakeup
+    wakeup()
 
-proc waitFor*(sig: SignalAsync): Future[void] {.async.} =
+proc waitFor*(sig: SignalAsync) {.async.} =
   if sig.isClosed:
     raise newSignalClosedError()
-  let fut = newFuture[void]()
+  let fut = newFuture(void)
   sig.waiters.addFirst fut
   await fut
   if sig.isClosed:
@@ -71,7 +72,8 @@ proc close*(sig: SignalAsync) {.raises: [].}  =
       if not fut.finished:
         fut.fail newSignalClosedError()
   untrackExceptions:
-    callSoon failWaiters
+    #callSoon failWaiters
+    failWaiters()
 
 when isMainModule:
   block:
