@@ -1,4 +1,6 @@
-import std/asyncdispatch
+import yasync
+import yasync/compat
+from std/asyncdispatch import callSoon
 import std/deques
 import ./utils
 import ./errors
@@ -74,7 +76,7 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   if q.isClosed:
     raise newQueueClosedError()
   if q.used == q.size or q.putWaiters.len > 0:
-    let fut = newFuture[void]()
+    let fut = newFuture(void)
     q.putWaiters.addFirst fut
     await fut
     if q.isClosed:
@@ -86,12 +88,12 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   q.wakeupLastPut()
   q.wakeupLastPop()
 
-proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
+proc pop*[T](q: QueueAsync[T]): T {.async.} =
   doAssert q.used >= 0
   if q.isClosed:
     raise newQueueClosedError()
   if q.used == 0 or q.popWaiters.len > 0:
-    let fut = newFuture[void]()
+    let fut = newFuture(void)
     q.popWaiters.addFirst fut
     await fut
     if q.isClosed:

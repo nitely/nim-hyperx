@@ -5,7 +5,9 @@
 {.define: ssl.}
 
 import std/strutils
-import std/asyncdispatch
+#import std/asyncdispatch
+import yasync
+import yasync/compat
 import ../src/hyperx/client
 import ./localServer
 

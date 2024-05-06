@@ -6,7 +6,7 @@ when not defined(ssl):
 
 import std/exitprocs
 import std/net
-import std/asyncdispatch
+import yasync
 import std/asyncnet
 
 import ./clientserver
@@ -131,7 +131,7 @@ proc request(
   userAgent = defaultUserAgent,
   accept = defaultAccept,
   contentType = defaultContentType
-): Future[Response] {.async.} =
+): Response {.async.} =
   result = newResponse()
   let strm = client.newClientStream()
   withStream strm:
@@ -159,14 +159,14 @@ proc get*(
   client: ClientContext,
   path: string,
   accept = defaultAccept
-): Future[Response] {.async.} =
+): Response {.async.} =
   result = await request(client, hmGet, path, accept = accept)
 
 proc head*(
   client: ClientContext,
   path: string,
   accept = defaultAccept
-): Future[Response] {.async.} =
+): Response {.async.} =
   result = await request(client, hmHead, path, accept = accept)
 
 proc post*(
@@ -174,7 +174,7 @@ proc post*(
   path: string,
   data: seq[byte],
   contentType = defaultContentType
-): Future[Response] {.async.} =
+): Response {.async.} =
   # https://httpwg.org/specs/rfc9113.html#n-complex-request
   result = await request(
     client, hmPost, path, data = data, contentType = contentType
@@ -185,7 +185,7 @@ proc put*(
   path: string,
   data: seq[byte],
   contentType = defaultContentType
-): Future[Response] {.async.} =
+): Response {.async.} =
   result = await request(
     client, hmPut, path, data = data, contentType = contentType
   )
@@ -193,7 +193,7 @@ proc put*(
 proc delete*(
   client: ClientContext,
   path: string
-): Future[Response] {.async.} =
+): Response {.async.} =
   result = await request(client, hmDelete, path)
 
 when isMainModule:

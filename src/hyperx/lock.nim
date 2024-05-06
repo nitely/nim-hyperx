@@ -1,4 +1,5 @@
-import std/asyncdispatch
+import yasync
+from std/asyncdispatch import callSoon
 import std/deques
 
 import ./utils
@@ -49,7 +50,7 @@ proc acquire(lck: LockAsync) {.async.} =
   if lck.isClosed:
     raise newLockClosedError()
   if lck.used or lck.waiters.len > 0:
-    let fut = newFuture[void]()
+    let fut = newFuture(void)
     lck.waiters.addFirst fut
     await fut
     if lck.isClosed:

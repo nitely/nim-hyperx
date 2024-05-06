@@ -4,7 +4,8 @@
 when not defined(ssl):
   {.error: "this lib needs -d:ssl".}
 
-import std/asyncdispatch
+import yasync
+import yasync/compat
 import std/asyncnet
 import std/exitprocs
 import std/net
@@ -98,9 +99,9 @@ proc listen(server: ServerContext) =
 # XXX dont allow receive push promise
 
 # XXX limit number of active clients
-proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
+proc recvClient*(server: ServerContext): ClientContext {.async.} =
   # note OptNoDelay is inherited from server.sock
-  let sock = await server.sock.accept()
+  let sock = awaitc server.sock.accept()
   when not defined(hyperxTest):
     doAssert not sslContext.isNil
   wrapConnectedSocket(
@@ -117,7 +118,7 @@ template withServer*(server: ServerContext, body: untyped): untyped =
   finally:
     server.close()
 
-proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
+proc recvStream*(client: ClientContext): ClientStream {.async.} =
   try:
     let strm = await client.streamOpenedMsgs.pop()
     result = newClientStream(client, strm)

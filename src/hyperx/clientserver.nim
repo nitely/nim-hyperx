@@ -3,7 +3,8 @@
 when not defined(ssl):
   {.error: "this lib needs -d:ssl".}
 
-import std/asyncdispatch
+import yasync
+import yasync/compat
 import std/asyncnet
 import std/openssl
 import std/net
@@ -281,7 +282,7 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
     check not client.sock.isClosed, newConnClosedError()
     GC_ref frm
     try:
-      await client.sock.send(frm.rawBytesPtr, frm.len)
+      awaitc client.sock.send(frm.rawBytesPtr, frm.len)
     finally:
       GC_unref frm
 
@@ -319,12 +320,12 @@ proc handshakeNaked(client: ClientContext) {.async.} =
   doAssert strm.id == frmSidMain.StreamId
   check not client.sock.isClosed, newConnClosedError()
   case client.typ
-  of ctClient: await client.sock.send(clientHandshakeBlob)
-  of ctServer: await client.sock.send(serverHandshakeBlob)
+  of ctClient: awaitc client.sock.send(clientHandshakeBlob)
+  of ctServer: awaitc client.sock.send(serverHandshakeBlob)
   if client.typ == ctServer:
     var blob = newString(preface.len)
     check not client.sock.isClosed, newConnClosedError()
-    let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
+    let blobRln = awaitc client.sock.recvInto(addr blob[0], blob.len)
     check blobRln == blob.len, newConnClosedError()
     check blob == preface, newConnError(errProtocolError)
 
@@ -396,7 +397,7 @@ func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError
   #  # XXX close streams < s.id in idle state
   #  discard
 
-proc readNaked(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
+proc readNaked(client: ClientContext, strm: Stream): Frame {.async.} =
   let frm = await strm.msgs.pop()
   doAssert strm.id == frm.sid.StreamId
   if frm.typ == frmtData and
@@ -408,7 +409,7 @@ proc readNaked(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
       strm.window = 0
   return frm
 
-proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
+proc read*(client: ClientContext, strm: Stream): Frame {.async.} =
   try:
     result = await client.readNaked(strm)
   except QueueClosedError as err:
@@ -429,7 +430,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
   var frm2 = newFrame()
   while frmfEndHeaders notin frm2.flags:
     check not client.sock.isClosed, newConnClosedError()
-    let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm2.len)
+    let headerRln = awaitc client.sock.recvInto(frm2.rawBytesPtr, frm2.len)
     check headerRln == frmHeaderSize, newConnClosedError()
     debugInfo $frm2
     check frm2.sid == frm.sid, newConnError(errProtocolError)
@@ -445,7 +446,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
     let oldFrmLen = frm.len
     frm.grow frm2.payloadLen.int
     check not client.sock.isClosed, newConnClosedError()
-    let payloadRln = await client.sock.recvInto(
+    let payloadRln = awaitc client.sock.recvInto(
       addr frm.s[oldFrmLen], frm2.payloadLen.int
     )
     check payloadRln == frm2.payloadLen.int, newConnClosedError()
@@ -459,7 +460,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   ##
   ## Unused flags MUST be ignored on receipt
   check not client.sock.isClosed, newConnClosedError()
-  let headerRln = await client.sock.recvInto(frm.rawBytesPtr, frm.len)
+  let headerRln = awaitc client.sock.recvInto(frm.rawBytesPtr, frm.len)
   check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
@@ -469,7 +470,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     debugInfo "Padding"
     check payloadLen >= frmPaddingSize, newConnError(errProtocolError)
     check not client.sock.isClosed, newConnClosedError()
-    let paddingRln = await client.sock.recvInto(addr paddingLen, frmPaddingSize)
+    let paddingRln = awaitc client.sock.recvInto(addr paddingLen, frmPaddingSize)
     check paddingRln == frmPaddingSize, newConnClosedError()
     payloadLen -= frmPaddingSize
   # prio is deprecated so do nothing with it
@@ -478,7 +479,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
     var prio = [byte 0, 0, 0, 0, 0]
     check not client.sock.isClosed, newConnClosedError()
-    let prioRln = await client.sock.recvInto(addr prio, frmPrioritySize)
+    let prioRln = awaitc client.sock.recvInto(addr prio, frmPrioritySize)
     check prioRln == frmPrioritySize, newConnClosedError()
     check prioDependency(prio) != frm.sid, newConnError(errProtocolError)
     payloadLen -= frmPrioritySize
@@ -489,7 +490,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   if payloadLen > 0:
     frm.grow payloadLen
     check not client.sock.isClosed, newConnClosedError()
-    let payloadRln = await client.sock.recvInto(
+    let payloadRln = awaitc client.sock.recvInto(
       frm.rawPayloadBytesPtr, payloadLen
     )
     check payloadRln == payloadLen, newConnClosedError()
@@ -498,7 +499,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     let oldFrmLen = frm.len
     frm.grow paddingLen
     check not client.sock.isClosed, newConnClosedError()
-    let paddingRln = await client.sock.recvInto(
+    let paddingRln = awaitc client.sock.recvInto(
       addr frm.s[oldFrmLen], paddingLen
     )
     check paddingRln == paddingLen, newConnClosedError()
@@ -591,7 +592,7 @@ const connFrmAllowed = {
   frmtWindowUpdate
 }
 
-proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
+proc consumeMainStream(client: ClientContext, frm: Frame) {.asyncClosureExperimental.} =
   case frm.typ
   of frmtWindowUpdate:
     check frm.windowSizeInc > 0, newConnError(errProtocolError)
@@ -772,7 +773,7 @@ template withClient*(client: ClientContext, body: untyped) =
     try:
       client.isConnected = true
       if client.typ == ctClient:
-        await client.sock.connect(client.hostname, client.port)
+        awaitc client.sock.connect(client.hostname, client.port)
       await client.handshake()
       sendFut = client.sendTask()
       recvFut = client.recvTask()

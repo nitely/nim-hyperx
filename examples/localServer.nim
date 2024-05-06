@@ -2,7 +2,9 @@
 
 from std/os import getEnv
 import std/strutils
-import std/asyncdispatch
+import yasync
+import yasync/compat
+from std/asyncdispatch import Port, waitFor
 import ../src/hyperx/server
 
 const localHost* = "127.0.0.1"
@@ -52,7 +54,7 @@ proc processClient(client: ClientContext, propagateErr: bool) {.async.} =
   withClient client:
     while client.isConnected:
       let strm = await client.recvStream()
-      asyncCheck processStreamHandler(strm, propagateErr)
+      discard processStreamHandler(strm, propagateErr)
 
 proc processClientHandler(client: ClientContext, propagateErr: bool) {.async.} =
   try:
@@ -67,7 +69,7 @@ proc serve*(server: ServerContext, propagateErr = true) {.async.} =
   withServer server:
     while server.isConnected:
       let client = await server.recvClient()
-      asyncCheck processClientHandler(client, propagateErr)
+      discard processClientHandler(client, propagateErr)
 
 proc newServer*(): ServerContext =
   newServer(
