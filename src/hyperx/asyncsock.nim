@@ -36,7 +36,8 @@ type
     fd: SocketHandle
     closed: bool
     isBuffered: bool
-    buffer, bufferAuxRecv, bufferAuxSend: array[BufferSize, char]
+    buffer: array[BufferSize, char]
+    bufferAuxRecv, bufferAuxSend: string
     currPos: int
     bufLen: int
     isSsl: bool
@@ -171,35 +172,29 @@ proc sendPendingSslData2(
   socket: AsyncSock,
   flags: set[SocketFlag]
 ) {.async.} =
-  var pendingL = bioCtrlPending(socket.bioOut)
-  while pendingL > 0:
-    let chunkL = min(BufferSize, pendingL)
-    let read = bioRead(socket.bioOut, cast[cstring](addr socket.bufferAuxRecv[0]), chunkL.cint)
+  var len = bioCtrlPending(socket.bioOut)
+  if len > 0:
+    if len > socket.bufferAuxRecv.len:
+      socket.bufferAuxRecv.setLen len
+    let read = bioRead(socket.bioOut, cast[cstring](addr socket.bufferAuxRecv[0]), len.cint)
     assert read != 0
     if read < 0:
       raiseSSLError()
-    assert read <= BufferSize
     await send(socket.fd.AsyncFD, addr socket.bufferAuxRecv[0], read, flags)
-    pendingL -= read
-    if read < chunkL:
-      break
 
 proc sendPendingSslData22(
   socket: AsyncSock,
   flags: set[SocketFlag]
 ) {.async.} =
-  var pendingL = bioCtrlPending(socket.bioOut)
-  while pendingL > 0:
-    let chunkL = min(BufferSize, pendingL)
-    let read = bioRead(socket.bioOut, cast[cstring](addr socket.bufferAuxSend[0]), chunkL.cint)
+  var len = bioCtrlPending(socket.bioOut)
+  if len > 0:
+    if len > socket.bufferAuxSend.len:
+      socket.bufferAuxSend.setLen len
+    let read = bioRead(socket.bioOut, cast[cstring](addr socket.bufferAuxSend[0]), len.cint)
     assert read != 0
     if read < 0:
       raiseSSLError()
-    assert read <= BufferSize
     await send(socket.fd.AsyncFD, addr socket.bufferAuxSend[0], read, flags)
-    pendingL -= read
-    if read < chunkL:
-      break
 
 proc getSslError(socket: AsyncSock, err: cint): cint =
   assert socket.isSsl
@@ -230,11 +225,12 @@ proc appeaseSsl2(
   of SSL_ERROR_WANT_WRITE:
     await sendPendingSslData2(socket, flags)
   of SSL_ERROR_WANT_READ:
+    if BufferSize > socket.bufferAuxRecv.len:
+      socket.bufferAuxRecv.setLen BufferSize
     let length = await recvInto(
       socket.fd.AsyncFD, addr socket.bufferAuxRecv[0], BufferSize, flags
     )
     if length > 0:
-      assert length <= BufferSize
       let ret = bioWrite(socket.bioIn, cast[cstring](addr socket.bufferAuxRecv[0]), length.cint)
       if ret < 0:
         raiseSSLError()
@@ -256,11 +252,12 @@ proc appeaseSsl22(
   of SSL_ERROR_WANT_WRITE:
     await sendPendingSslData2(socket, flags)
   of SSL_ERROR_WANT_READ:
+    if BufferSize > socket.bufferAuxSend.len:
+      socket.bufferAuxSend.setLen BufferSize
     let length = await recvInto(
       socket.fd.AsyncFD, addr socket.bufferAuxSend[0], BufferSize, flags
     )
     if length > 0:
-      assert length <= BufferSize
       let ret = bioWrite(socket.bioIn, cast[cstring](addr socket.bufferAuxSend[0]), length.cint)
       if ret < 0:
         raiseSSLError()
