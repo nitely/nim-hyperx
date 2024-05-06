@@ -31,12 +31,14 @@ THE SOFTWARE.
 
 include std/asyncnet
 
+const BufferSize2 = 128*1024
+
 type
   AsyncSock* = ref object
     fd: SocketHandle
     closed: bool
     isBuffered: bool
-    buffer: array[BufferSize, char]
+    buffer: array[BufferSize2, char]
     bufferAuxRecv, bufferAuxSend: string
     currPos: int
     bufLen: int
@@ -70,6 +72,8 @@ proc newAsyncSock(
   result.protocol = protocol
   if buffered:
     result.currPos = 0
+  result.bufferAuxRecv = newString(BufferSize2)
+  result.bufferAuxSend = newString(BufferSize2)
 
 proc newAsyncSock*(
   domain: Domain = AF_INET,
@@ -225,10 +229,8 @@ proc appeaseSsl2(
   of SSL_ERROR_WANT_WRITE:
     await sendPendingSslData2(socket, flags)
   of SSL_ERROR_WANT_READ:
-    if BufferSize > socket.bufferAuxRecv.len:
-      socket.bufferAuxRecv.setLen BufferSize
     let length = await recvInto(
-      socket.fd.AsyncFD, addr socket.bufferAuxRecv[0], BufferSize, flags
+      socket.fd.AsyncFD, addr socket.bufferAuxRecv[0], BufferSize2, flags
     )
     if length > 0:
       let ret = bioWrite(socket.bioIn, cast[cstring](addr socket.bufferAuxRecv[0]), length.cint)
@@ -252,10 +254,8 @@ proc appeaseSsl22(
   of SSL_ERROR_WANT_WRITE:
     await sendPendingSslData2(socket, flags)
   of SSL_ERROR_WANT_READ:
-    if BufferSize > socket.bufferAuxSend.len:
-      socket.bufferAuxSend.setLen BufferSize
     let length = await recvInto(
-      socket.fd.AsyncFD, addr socket.bufferAuxSend[0], BufferSize, flags
+      socket.fd.AsyncFD, addr socket.bufferAuxSend[0], BufferSize2, flags
     )
     if length > 0:
       let ret = bioWrite(socket.bioIn, cast[cstring](addr socket.bufferAuxSend[0]), length.cint)
@@ -337,7 +337,7 @@ template readIntoBuf2(
   socket: AsyncSock,
   flags: set[SocketFlag]
 ): int =
-  var size = readInto2(addr socket.buffer[0], BufferSize, socket, flags)
+  var size = readInto2(addr socket.buffer[0], BufferSize2, socket, flags)
   socket.currPos = 0
   socket.bufLen = size
   size
