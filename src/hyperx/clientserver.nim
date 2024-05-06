@@ -17,6 +17,7 @@ import ./lock
 import ./signal
 import ./errors
 import ./utils
+import ./asyncsock
 
 when defined(hyperxTest):
   import ./testsocket
@@ -107,7 +108,7 @@ proc defaultSslContext*(
 when defined(hyperxTest):
   type MyAsyncSocket* = TestSocket
 else:
-  type MyAsyncSocket* = AsyncSocket
+  type MyAsyncSocket* = AsyncSock
 
 type
   ClientContext* = ref object
@@ -304,8 +305,8 @@ func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
   )
   if typ == ctClient:
     result.add preface
-  result.add frmStg.s
-  result.add frmWu.s
+  result.add2 frmStg.s
+  result.add2 frmWu.s
 
 const clientHandshakeBlob = handshakeBlob(ctClient)
 const serverHandshakeBlob = handshakeBlob(ctServer)

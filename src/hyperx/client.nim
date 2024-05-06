@@ -12,6 +12,7 @@ import std/asyncnet
 import ./clientserver
 import ./errors
 import ./utils
+import ./asyncsock
 
 when defined(hyperxTest):
   import ./testsocket
@@ -46,7 +47,7 @@ proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
 when not defined(hyperxTest):
   proc newMySocket(): MyAsyncSocket {.raises: [HyperxConnError].} =
     try:
-      result = newAsyncSocket()
+      result = newAsyncSock()
       wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
       raise newHyperxConnError(err.msg)

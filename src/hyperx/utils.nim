@@ -37,12 +37,28 @@ template untrackExceptions*(body: untyped): untyped =
       raise newException(Defect, err.msg)
 
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
+  if ss.len == 0: return
+  let L = s.len
+  #when defined(orc):
+  #  s.setLenUninit(L+ss.len)
+  #else:
+  s.setLen(L+ss.len)
+  moveMem(addr s[L], unsafeAddr ss[0], ss.len)
+
+func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
+  if ss.len == 0: return
+  let L = s.len
+  s.setLen(L+ss.len)
+  prepareMutation(s)
+  moveMem(addr s[L], unsafeAddr ss[0], ss.len)
+
+func add2*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
   let L = s.len
   s.setLen(L+ss.len)
   for i in 0 .. ss.len-1:
     s[L+i] = ss[i].byte
 
-func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
+func add2*(s: var string, ss: openArray[byte]) {.raises: [].} =
   let L = s.len
   s.setLen(L+ss.len)
   for i in 0 .. ss.len-1:

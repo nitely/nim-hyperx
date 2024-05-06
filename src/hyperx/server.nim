@@ -14,6 +14,7 @@ import ./stream
 import ./queue
 import ./errors
 import ./utils
+import ./asyncsock
 
 when defined(hyperxTest):
   import ./testsocket
@@ -53,7 +54,7 @@ when not defined(hyperxTest):
     keyFile = ""
   ): MyAsyncSocket {.raises: [HyperxConnError].} =
     try:
-      result = newAsyncSocket()
+      result = newAsyncSock()
       wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
       raise newHyperxConnError(err.msg)
