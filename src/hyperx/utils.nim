@@ -39,10 +39,7 @@ template untrackExceptions*(body: untyped): untyped =
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
   if ss.len == 0: return
   let L = s.len
-  #when defined(orc):
-  #  s.setLenUninit(L+ss.len)
-  #else:
-  s.setLen(L+ss.len)
+  s.setLenUninit(L+ss.len)
   moveMem(addr s[L], unsafeAddr ss[0], ss.len)
 
 func add*(s: var string, ss: openArray[byte]) {.raises: [].} =

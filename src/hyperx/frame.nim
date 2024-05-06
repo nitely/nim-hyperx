@@ -131,7 +131,7 @@ func rawPayloadBytesPtr*(frm: Frame): ptr byte =
   addr frm.s[frmHeaderSize]
 
 func clear*(frm: Frame) {.inline, raises: [].} =
-  frm.s.setLen frmHeaderSize
+  frm.s.setLenUninit frmHeaderSize
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0
 
@@ -145,12 +145,12 @@ func payloadSize*(frm: Frame): int {.raises: [].} =
   frm.len-frmHeaderSize
 
 func grow*(frm: Frame, size: int) {.inline, raises: [].} =
-  frm.s.setLen frm.s.len+size
+  frm.s.setLenUninit frm.s.len+size
 
 func shrink*(frm: Frame, size: int) {.inline, raises: [].} =
   doAssert frm.s.len >= size
   doAssert frm.s.len-size >= frmHeaderSize
-  frm.s.setLen frm.s.len-size
+  frm.s.setLenUninit frm.s.len-size
 
 func payloadLen*(frm: Frame): FrmPayloadLen {.inline, raises: [].} =
   # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
@@ -281,7 +281,8 @@ func addSetting*(
   doAssert frm.typ == frmtSettings
   doAssert frmfAck notin frm.flags2
   let i = frm.len
-  frm.grow frmSettingsSize
+  frm.s.setLen frm.s.len+frmSettingsSize
+  #frm.grow frmSettingsSize
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
   frm.s[i] = 0.byte
   frm.s[i+1] = id.byte
