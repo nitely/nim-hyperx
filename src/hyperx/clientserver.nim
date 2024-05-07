@@ -274,8 +274,6 @@ func hpackEncode*(
 proc send(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
-  # this lock exists because of GoAways. We need to send directly
-  # if we close the conn right after
   withLock client.sendLock:
     check not client.sock.isClosed, newConnClosedError()
     GC_ref frm
@@ -371,6 +369,7 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
     # XXX pass stream to write as param
     client.stream(frm.sid).doTransitionSend frm
   await client.sendMsgs.put frm
+  #await client.send(frm)
 
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
@@ -712,6 +711,11 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       client.close(stream.id)
       # xxx this is too easy to get wrong, try raise conn error instead
       await client.send newRstStreamFrame(frm.sid, err.code.int)
+    if frm.typ == frmtRstStream:
+      # need to close in case the stream is waiting
+      stream.error = newStrmError(errStreamClosed)
+      client.close(stream.id)
+      continue
     if frm.typ == frmtWindowUpdate:
       try:
         check frm.windowSizeInc > 0, newConnError(errProtocolError)
@@ -984,6 +988,7 @@ proc sendBodyNaked(
     frm.s.add toOpenArray(data[], dataIdxA, dataIdxB-1)
     strm.stream.peerWindow -= frm.payloadLen.int32
     strm.client.peerWindow -= frm.payloadLen.int32
+    check strm.stream.state != strmClosed, newStrmError(errStreamClosed)
     await strm.client.write frm
     dataIdxA = dataIdxB
     # allow sending empty payload
