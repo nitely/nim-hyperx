@@ -49,6 +49,7 @@ when not defined(hyperxTest):
       result = newAsyncSocket()
       wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
+      debugInfo err.getStackTrace()
       raise newHyperxConnError(err.msg)
 
 proc newClient*(

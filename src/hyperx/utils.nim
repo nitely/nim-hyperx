@@ -34,6 +34,7 @@ template untrackExceptions*(body: untyped): untyped =
     except Defect as err:
       raise err  # raise original error
     except Exception as err:
+      debugInfo err.getStackTrace()
       raise newException(Defect, err.msg)
 
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =

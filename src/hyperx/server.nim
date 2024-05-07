@@ -56,6 +56,7 @@ when not defined(hyperxTest):
       result = newAsyncSocket()
       wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
+      debugInfo err.getStackTrace()
       raise newHyperxConnError(err.msg)
 
 type

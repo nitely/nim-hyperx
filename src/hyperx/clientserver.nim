@@ -13,7 +13,6 @@ import pkg/hpack
 import ./frame
 import ./stream
 import ./queue
-import ./lock
 import ./signal
 import ./errors
 import ./utils
@@ -76,10 +75,12 @@ proc defaultSslContext*(
       keyFile = keyFile
     )
   except CatchableError as err:
+    debugInfo err.getStackTrace()
     raise newHyperxConnError(err.msg)
   except Defect as err:
     raise err
   except Exception as err:
+    debugInfo err.getStackTrace()
     # workaround for newContext raising Exception
     raise newException(Defect, err.msg)
   doAssert result != nil, "failure to initialize the SSL context"
@@ -118,14 +119,13 @@ type
     isConnected*: bool
     headersEnc, headersDec: DynHeaders
     streams: Streams
-    sendMsgs, recvMsgs: QueueAsync[Frame]
+    recvMsgs: QueueAsync[Frame]
     streamOpenedMsgs*: QueueAsync[Stream]
     currStreamId, maxPeerStrmIdSeen: StreamId
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
     peerWindow: int32  # can be negative
     peerMaxFrameSize: uint32
-    sendLock: LockAsync
     peerWindowUpdateSig: SignalAsync
     window: int
     error*: ref HyperxError
@@ -147,14 +147,12 @@ proc newClient*(
     streams: initStreams(),
     currStreamId: 1.StreamId,
     recvMsgs: newQueue[Frame](10),
-    sendMsgs: newQueue[Frame](10),
     streamOpenedMsgs: newQueue[Stream](10),
     maxPeerStrmIdSeen: 0.StreamId,
     peerMaxConcurrentStreams: stgMaxConcurrentStreams,
     peerWindow: stgInitialWindowSize.int32,
     peerWindowSize: stgInitialWindowSize,
     peerMaxFrameSize: stgInitialMaxFrameSize,
-    sendLock: newLock(),
     peerWindowUpdateSig: newSignal(),
     window: 0
   )
@@ -166,17 +164,17 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
   try:
     client.sock.close()
   except CatchableError as err:
+    debugInfo err.getStackTrace()
     raise newHyperxConnError(err.msg)
   except Defect as err:
     raise err  # raise original error
   except Exception as err:
+    debugInfo err.getStackTrace()
     raise newException(Defect, err.msg)
   finally:
-    client.sendMsgs.close()
     client.recvMsgs.close()
     client.streamOpenedMsgs.close()
     client.streams.close()
-    client.sendLock.close()
     client.peerWindowUpdateSig.close()
 
 func stream*(client: ClientContext, sid: StreamId): var Stream {.raises: [].} =
@@ -269,12 +267,12 @@ func hpackEncode*(
   try:
     discard hencode(name, value, client.headersEnc, payload, huffman = false)
   except HpackError as err:
+    debugInfo err.getStackTrace()
     raise newException(HyperxError, err.msg)
 
 proc send(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
-  #withLock client.sendLock:
   check not client.sock.isClosed, newConnClosedError()
   GC_ref frm
   try:
@@ -284,8 +282,11 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
-  ## block that's already raising another exception
+  ## block that's already raising another exception.
+  ## The stream/client should be closed before/after,
+  ## no stream transition is made
   debugInfo "frm sent silently"
+  doAssert frm.typ in {frmtGoAway, frmtRstStream}
   try:
     await client.send(frm)
   except HyperxError, OsError, SslError:
@@ -354,9 +355,6 @@ func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
 #     similar to a stream i.e: if frm without end is
 #     found consume from streamContinuations
 proc writeNaked(client: ClientContext, frm: Frame) {.async.} =
-#proc write*(client: ClientContext, frm: Frame) {.async.} =
-  ## Frames passed cannot be reused because they are references
-  ## added to a queue, and may not have been consumed yet
   # This is done in the next headers after settings ACK put
   if frm.typ == frmtHeaders and client.headersEnc.hasResized():
     # XXX avoid copy?
@@ -370,7 +368,6 @@ proc writeNaked(client: ClientContext, frm: Frame) {.async.} =
       frm.sid.StreamId in client.streams:
     # XXX pass stream to write as param
     client.stream(frm.sid).doTransitionSend frm
-  #await client.sendMsgs.put frm
   await client.send(frm)
 
 proc write(client: ClientContext, frm: Frame) {.async.} =
@@ -516,34 +513,6 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   if frmfEndHeaders notin frm.flags and frm.typ in {frmtHeaders, frmtPushPromise}:
     debugInfo "Continuation"
     await client.readUntilEnd(frm)
-
-proc sendTaskNaked(client: ClientContext) {.async.} =
-  ## Send frames
-  ## Meant to be asyncCheck'ed
-  doAssert client.isConnected
-  while client.isConnected:
-    let frm = await client.sendMsgs.pop()
-    await client.send(frm)
-
-proc sendTask(client: ClientContext) {.async.} =
-  try:
-    await client.sendTaskNaked()
-  except QueueClosedError:
-    doAssert not client.isConnected
-  except HyperxConnError, OsError, SslError:
-    let err = getCurrentException()
-    if client.isConnected:
-      debugInfo err.getStackTrace()
-      client.error = newHyperxConnError(err.msg)
-      raise client.error
-    raise newHyperxConnError(err.msg)
-  except CatchableError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise err
-  finally:
-    debugInfo "sendTask exited"
-    client.close()
 
 proc recvTaskNaked(client: ClientContext) {.async.} =
   ## Receive frames and dispatch to opened streams
@@ -774,16 +743,22 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     debugInfo "responseDispatcher exited"
     client.close()
 
+proc connect(client: ClientContext) {.async.} =
+  try:
+    await client.sock.connect(client.hostname, client.port)
+  except OsError as err:
+    debugInfo err.getStackTrace()
+    raise newHyperxConnError(err.msg)
+
 template withClient*(client: ClientContext, body: untyped) =
   {.line: instantiationInfo(fullPaths = true).}:
     doAssert not client.isConnected
-    var sendFut, recvFut, dispFut: Future[void]
+    var recvFut, dispFut: Future[void]
     try:
       client.isConnected = true
       if client.typ == ctClient:
-        await client.sock.connect(client.hostname, client.port)
+        await client.connect()
       await client.handshake()
-      sendFut = client.sendTask()
       recvFut = client.recvTask()
       dispFut = client.recvDispatcher()
       block:
@@ -800,7 +775,7 @@ template withClient*(client: ClientContext, body: untyped) =
       
       # do not bother the user with hyperx errors
       # at this point body completed or errored out
-      for fut in [sendFut, recvFut, dispFut]:
+      for fut in [recvFut, dispFut]:
         try:
           if fut != nil:
             await fut
@@ -869,6 +844,7 @@ proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
   try:
     strm.contentLen = contentLen(frm.payload)
   except ValueError:
+    debugInfo getCurrentException().getStackTrace()
     raise newStrmError(errProtocolError)
   if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
@@ -882,7 +858,7 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   except StrmError as err:
     strm.stream.error = err
     strm.close()
-    await strm.client.write newRstStreamFrame(
+    await strm.client.sendSilently newRstStreamFrame(
       strm.stream.id.FrmSid, err.code.int
     )
     raise err
@@ -922,7 +898,7 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   except StrmError as err:
     strm.stream.error = err
     strm.close()
-    await strm.client.write newRstStreamFrame(
+    await strm.client.sendSilently newRstStreamFrame(
       strm.stream.id.FrmSid, err.code.int
     )
     raise err
