@@ -275,13 +275,12 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
   #withLock client.sendLock:
-  when true:
-    check not client.sock.isClosed, newConnClosedError()
-    GC_ref frm
-    try:
-      await client.sock.send(frm.rawBytesPtr, frm.len)
-    finally:
-      GC_unref frm
+  check not client.sock.isClosed, newConnClosedError()
+  GC_ref frm
+  try:
+    await client.sock.send(frm.rawBytesPtr, frm.len)
+  finally:
+    GC_unref frm
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
@@ -289,7 +288,7 @@ proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   debugInfo "frm sent silently"
   try:
     await client.send(frm)
-  except HyperxError, SslError:
+  except HyperxError, OsError, SslError:
     debugInfo getCurrentException().getStackTrace()
 
 func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
@@ -353,7 +352,8 @@ func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
 # XXX continuations need a mechanism
 #     similar to a stream i.e: if frm without end is
 #     found consume from streamContinuations
-proc write*(client: ClientContext, frm: Frame) {.async.} =
+proc writeNaked(client: ClientContext, frm: Frame) {.async.} =
+#proc write*(client: ClientContext, frm: Frame) {.async.} =
   ## Frames passed cannot be reused because they are references
   ## added to a queue, and may not have been consumed yet
   # This is done in the next headers after settings ACK put
@@ -371,6 +371,16 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
     client.stream(frm.sid).doTransitionSend frm
   #await client.sendMsgs.put frm
   await client.send(frm)
+
+proc write(client: ClientContext, frm: Frame) {.async.} =
+  try:
+    await client.writeNaked(frm)
+  except HyperxConnError, OsError, SslError:
+    let err = getCurrentException()
+    if client.isConnected:
+      client.error = newHyperxConnError(err.msg)
+      client.close()
+    raise newHyperxConnError(err.msg)
 
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
@@ -413,7 +423,6 @@ proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
   except QueueClosedError as err:
     #doAssert not client.isConnected
     if client.error != nil:
-      # xxx change to connError
       debugInfo client.error.getStackTrace()
       raise newHyperxConnError(client.error.msg)
     if strm.error != nil:
@@ -551,6 +560,7 @@ proc recvTask(client: ClientContext) {.async.} =
   try:
     await client.recvTaskNaked()
   except ConnError as err:
+    debugInfo err.getStackTrace()
     if client.isConnected:
       # XXX close all streams
       # XXX close queues
@@ -745,6 +755,7 @@ proc recvDispatcher(client: ClientContext) {.async.} =
   try:
     await client.recvDispatcherNaked()
   except ConnError as err:
+    debugInfo err.getStackTrace()
     if client.isConnected:
       client.error = err
       await client.sendSilently newGoAwayFrame(
@@ -953,7 +964,6 @@ proc sendHeaders*(
     await sendHeadersNaked(strm, headers, finish)
   except QueueClosedError as err:
     if strm.client.error != nil:
-      # xxx change to connError
       debugInfo strm.client.error.getStackTrace()
       raise newHyperxConnError(strm.client.error.msg)
     if strm.stream.error != nil:
@@ -1005,7 +1015,6 @@ proc sendBody*(
     await sendBodyNaked(strm, data, finish)
   except QueueClosedError as err:
     if strm.client.error != nil:
-      # xxx change to connError
       debugInfo strm.client.error.getStackTrace()
       raise newHyperxConnError(strm.client.error.msg)
     if strm.stream.error != nil:
