@@ -328,12 +328,13 @@ proc handshakeNaked(client: ClientContext) {.async.} =
 proc handshake(client: ClientContext) {.async.} =
   try:
     await client.handshakeNaked()
-  except SslError as err:
+  except OsError, SslError:
+    let err = getCurrentException()
     debugInfo err.getStackTrace()
     doAssert client.isConnected
-    client.close()
     # XXX err.msg includes a traceback for SslError but it should not
     client.error = newHyperxConnError(err.msg)
+    client.close()
     raise client.error
 
 func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
@@ -378,6 +379,7 @@ proc write(client: ClientContext, frm: Frame) {.async.} =
   except HyperxConnError, OsError, SslError:
     let err = getCurrentException()
     if client.isConnected:
+      debugInfo err.getStackTrace()
       client.error = newHyperxConnError(err.msg)
       client.close()
     raise newHyperxConnError(err.msg)
@@ -528,17 +530,13 @@ proc sendTask(client: ClientContext) {.async.} =
     await client.sendTaskNaked()
   except QueueClosedError:
     doAssert not client.isConnected
-  except HyperxError as err:
-    debugInfo err.getStackTrace()
-    if client.isConnected:
-      client.error = err
-      raise err
-  except SslError, OsError:
+  except HyperxConnError, OsError, SslError:
     let err = getCurrentException()
-    debugInfo err.getStackTrace()
     if client.isConnected:
+      debugInfo err.getStackTrace()
       client.error = newHyperxConnError(err.msg)
       raise client.error
+    raise newHyperxConnError(err.msg)
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
@@ -559,6 +557,8 @@ proc recvTaskNaked(client: ClientContext) {.async.} =
 proc recvTask(client: ClientContext) {.async.} =
   try:
     await client.recvTaskNaked()
+  except QueueClosedError:
+    doAssert not client.isConnected
   except ConnError as err:
     debugInfo err.getStackTrace()
     if client.isConnected:
@@ -570,19 +570,13 @@ proc recvTask(client: ClientContext) {.async.} =
       )
       #client.close()
     raise err
-  except QueueClosedError:
-    doAssert not client.isConnected
-  except HyperxError as err:
-    debugInfo err.getStackTrace()
-    if client.isConnected:
-      client.error = err
-      raise err
-  except SslError, OSError:
+  except HyperxConnError, OsError, SslError:
     let err = getCurrentException()
     debugInfo err.getStackTrace()
     if client.isConnected:
       client.error = newHyperxConnError(err.msg)
       raise client.error
+    raise newHyperxConnError(err.msg)
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
@@ -754,6 +748,8 @@ proc recvDispatcher(client: ClientContext) {.async.} =
   #     everywhere where queues are closed
   try:
     await client.recvDispatcherNaked()
+  except QueueClosedError:
+    doAssert not client.isConnected
   except ConnError as err:
     debugInfo err.getStackTrace()
     if client.isConnected:
@@ -765,13 +761,11 @@ proc recvDispatcher(client: ClientContext) {.async.} =
   except StrmError:
     debugInfo getCurrentException().getStackTrace()
     doAssert false
-  except QueueClosedError:
-    doAssert not client.isConnected
   except HyperxError as err:
-    debugInfo err.getStackTrace()
     if client.isConnected:
+      debugInfo err.getStackTrace()
       client.error = err
-      raise err
+    raise err
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
