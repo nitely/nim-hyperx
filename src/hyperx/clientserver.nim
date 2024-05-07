@@ -274,7 +274,8 @@ func hpackEncode*(
 proc send(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
-  withLock client.sendLock:
+  #withLock client.sendLock:
+  when true:
     check not client.sock.isClosed, newConnClosedError()
     GC_ref frm
     try:
@@ -368,8 +369,8 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
       frm.sid.StreamId in client.streams:
     # XXX pass stream to write as param
     client.stream(frm.sid).doTransitionSend frm
-  await client.sendMsgs.put frm
-  #await client.send(frm)
+  #await client.sendMsgs.put frm
+  await client.send(frm)
 
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
