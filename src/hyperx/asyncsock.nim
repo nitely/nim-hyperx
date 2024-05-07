@@ -29,9 +29,13 @@ THE SOFTWARE.
 
 # Some of this is from Nim's std lib
 
-include std/asyncnet
+import std/os
+import std/net
+import std/nativesockets
+import std/openssl
+import std/asyncdispatch
 
-const BufferSize2 = 128*1024
+const BufferSize2 = 16*1024
 
 type
   AsyncSock* = ref object
