@@ -46,7 +46,7 @@ proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
 when not defined(hyperxTest):
   proc newMySocket(): MyAsyncSocket {.raises: [HyperxConnError].} =
     try:
-      result = newAsyncSocket()
+      result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
       wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
       debugInfo err.getStackTrace()

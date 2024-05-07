@@ -53,7 +53,7 @@ when not defined(hyperxTest):
     keyFile = ""
   ): MyAsyncSocket {.raises: [HyperxConnError].} =
     try:
-      result = newAsyncSocket()
+      result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
       wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
       debugInfo err.getStackTrace()
