@@ -35,7 +35,7 @@ import std/nativesockets
 import std/openssl
 import std/asyncdispatch
 
-const BufferSize2 = 16*1024
+const BufferSize2 = 32*1024
 
 type
   AsyncSock* = ref object
@@ -43,7 +43,6 @@ type
     closed: bool
     isBuffered: bool
     buffer: array[BufferSize2, char]
-    bufferAuxRecv, bufferAuxSend: string
     currPos: int
     bufLen: int
     isSsl: bool
@@ -76,8 +75,6 @@ proc newAsyncSock(
   result.protocol = protocol
   if buffered:
     result.currPos = 0
-  result.bufferAuxRecv = newString(BufferSize2)
-  result.bufferAuxSend = newString(BufferSize2)
 
 proc newAsyncSock*(
   domain: Domain = AF_INET,
@@ -182,27 +179,12 @@ proc sendPendingSslData2(
 ) {.async.} =
   var len = bioCtrlPending(socket.bioOut)
   if len > 0:
-    if len > socket.bufferAuxRecv.len:
-      socket.bufferAuxRecv.setLen len
-    let read = bioRead(socket.bioOut, cast[cstring](addr socket.bufferAuxRecv[0]), len.cint)
+    var data = newSeqUninit[byte](len)
+    let read = bioRead(socket.bioOut, cast[cstring](addr data[0]), len.cint)
     assert read != 0
     if read < 0:
       raiseSSLError()
-    await send(socket.fd.AsyncFD, addr socket.bufferAuxRecv[0], read, flags)
-
-proc sendPendingSslData22(
-  socket: AsyncSock,
-  flags: set[SocketFlag]
-) {.async.} =
-  var len = bioCtrlPending(socket.bioOut)
-  if len > 0:
-    if len > socket.bufferAuxSend.len:
-      socket.bufferAuxSend.setLen len
-    let read = bioRead(socket.bioOut, cast[cstring](addr socket.bufferAuxSend[0]), len.cint)
-    assert read != 0
-    if read < 0:
-      raiseSSLError()
-    await send(socket.fd.AsyncFD, addr socket.bufferAuxSend[0], read, flags)
+    await send(socket.fd.AsyncFD, addr data[0], read, flags)
 
 proc getSslError(socket: AsyncSock, err: cint): cint =
   assert socket.isSsl
@@ -233,36 +215,12 @@ proc appeaseSsl2(
   of SSL_ERROR_WANT_WRITE:
     await sendPendingSslData2(socket, flags)
   of SSL_ERROR_WANT_READ:
+    var data = newSeqUninit[byte](BufferSize2)
     let length = await recvInto(
-      socket.fd.AsyncFD, addr socket.bufferAuxRecv[0], BufferSize2, flags
+      socket.fd.AsyncFD, addr data[0], BufferSize2, flags
     )
     if length > 0:
-      let ret = bioWrite(socket.bioIn, cast[cstring](addr socket.bufferAuxRecv[0]), length.cint)
-      if ret < 0:
-        raiseSSLError()
-    elif length == 0:
-      # connection not properly closed by remote side or connection dropped
-      SSL_set_shutdown(socket.sslHandle, SSL_RECEIVED_SHUTDOWN)
-      result = false
-  else:
-    raiseSSLError("Cannot appease SSL.")
-
-proc appeaseSsl22(
-  socket: AsyncSock,
-  flags: set[SocketFlag],
-  sslError: cint
-): Future[bool] {.async.} =
-  ## Returns `true` if `socket` is still connected, otherwise `false`.
-  result = true
-  case sslError
-  of SSL_ERROR_WANT_WRITE:
-    await sendPendingSslData2(socket, flags)
-  of SSL_ERROR_WANT_READ:
-    let length = await recvInto(
-      socket.fd.AsyncFD, addr socket.bufferAuxSend[0], BufferSize2, flags
-    )
-    if length > 0:
-      let ret = bioWrite(socket.bioIn, cast[cstring](addr socket.bufferAuxSend[0]), length.cint)
+      let ret = bioWrite(socket.bioIn, cast[cstring](addr data[0]), length.cint)
       if ret < 0:
         raiseSSLError()
     elif length == 0:
@@ -289,31 +247,6 @@ template sslLoop2(
     await sendPendingSslData2(socket, flags)
     if opResult < 0:
       let fut = appeaseSsl2(socket, flags, err.cint)
-      yield fut
-      if not fut.read():
-        if SocketFlag.SafeDisconn in flags:
-          opResult = 0.cint
-          break
-        else:
-          raiseSSLError("Socket has been disconnected")
-
-template sslLoop22(
-  socket: AsyncSock,
-  flags: set[SocketFlag],
-  op: untyped
-) =
-  var opResult {.inject.} = -1.cint
-  while opResult < 0:
-    ErrClearError()
-    opResult = op
-    let err =
-      if opResult < 0:
-        getSslError(socket, opResult.cint)
-      else:
-        SSL_ERROR_NONE
-    await sendPendingSslData22(socket, flags)
-    if opResult < 0:
-      let fut = appeaseSsl22(socket, flags, err.cint)
       yield fut
       if not fut.read():
         if SocketFlag.SafeDisconn in flags:
@@ -380,10 +313,10 @@ proc send*(
   assert socket != nil
   assert(not socket.closed, "Cannot `send` on a closed socket")
   doAssert socket.isSsl
-  sslLoop22(
+  sslLoop2(
     socket, flags, sslWrite(socket.sslHandle, cast[cstring](buf), size.cint)
   )
-  await sendPendingSslData22(socket, flags)
+  await sendPendingSslData2(socket, flags)
 
 proc send*(
   socket: AsyncSock,
@@ -392,9 +325,9 @@ proc send*(
   assert socket != nil
   doAssert socket.isSsl
   var copy = data
-  sslLoop22(socket, flags,
+  sslLoop2(socket, flags,
     sslWrite(socket.sslHandle, cast[cstring](addr copy[0]), copy.len.cint))
-  await sendPendingSslData22(socket, flags)
+  await sendPendingSslData2(socket, flags)
 
 proc close*(socket: AsyncSock) =
   if socket.closed: return

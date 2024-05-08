@@ -277,13 +277,13 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
   # this lock exists because of GoAways. We need to send directly
   # if we close the conn right after
-  withLock client.sendLock:
-    check not client.sock.isClosed, newConnClosedError()
-    GC_ref frm
-    try:
-      await client.sock.send(frm.rawBytesPtr, frm.len)
-    finally:
-      GC_unref frm
+  #withLock client.sendLock:
+  check not client.sock.isClosed, newConnClosedError()
+  GC_ref frm
+  try:
+    await client.sock.send(frm.rawBytesPtr, frm.len)
+  finally:
+    GC_unref frm
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
@@ -371,7 +371,8 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
       frm.sid.StreamId in client.streams:
     # XXX pass stream to write as param
     client.stream(frm.sid).doTransitionSend frm
-  await client.sendMsgs.put frm
+  #await client.sendMsgs.put frm
+  await client.send(frm)
 
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
