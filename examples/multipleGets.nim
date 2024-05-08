@@ -23,4 +23,5 @@ when isMainModule:
   for r in responses:
     doAssert ":status: 200" in r.headers
     doAssert "doctype" in r.text
+  doAssert not hasPendingOperations()
   echo "ok"

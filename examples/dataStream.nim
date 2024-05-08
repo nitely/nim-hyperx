@@ -54,4 +54,5 @@ when isMainModule:
   doAssert dataSentSize == dataSize
   #doAssert dataRecvSize == dataSize
   doAssert dataRecvSize > 0
+  doAssert not hasPendingOperations()
   echo "ok"

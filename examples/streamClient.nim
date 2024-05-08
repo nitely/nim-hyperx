@@ -57,4 +57,5 @@ when isMainModule:
   doAssert completed.len == 2
   doAssert "/foo" in completed
   doAssert "/bar" in completed
+  #doAssert not hasPendingOperations()
   echo "ok"

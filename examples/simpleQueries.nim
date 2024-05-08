@@ -19,6 +19,7 @@ when isMainModule:
       doAssert "doctype" in r.text
       await sleepAsync 2000
   waitFor main()
+  doAssert not hasPendingOperations()
 
   proc mainReqBin() {.async.} =
     var client = newClient("reqbin.com")
@@ -47,5 +48,6 @@ when isMainModule:
         doAssert r.text.len == 0
       await sleepAsync 2000
   waitFor mainReqBin()
+  doAssert not hasPendingOperations()
 
   echo "ok"
