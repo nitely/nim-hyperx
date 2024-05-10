@@ -684,7 +684,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       stream.error = err
       client.close(stream.id)
       # xxx this is too easy to get wrong, try raise conn error instead
-      await client.sendSilently newRstStreamFrame(frm.sid, err.code.int)
+      await client.send newRstStreamFrame(frm.sid, err.code.int)
     if frm.typ == frmtRstStream:
       # need to close in case the stream is waiting
       stream.error = newStrmError(errStreamClosed)
@@ -702,7 +702,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       except StrmError as err:
         stream.error = err
         client.close(stream.id)
-        await client.sendSilently newRstStreamFrame(frm.sid, err.code.int)
+        await client.send newRstStreamFrame(frm.sid, err.code.int)
       continue
     try:
       # XXX a stream can block all streams here,
