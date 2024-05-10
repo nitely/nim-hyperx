@@ -14,7 +14,7 @@ import ./localServer
 const dataSizeMb = 1000
 # do not change:
 const dataSize = dataSizeMb * 1024 * 1024
-const frmSize = 16 * 1024
+const frmSize = 256 * 1024
 
 func newStringRef(s = ""): ref string =
   new result

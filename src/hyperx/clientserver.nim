@@ -275,16 +275,16 @@ func hpackEncode*(
 
 proc send(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payloadLen.int == frm.payload.len
-  doAssert frm.payload.len <= client.peerMaxFrameSize.int
+  #doAssert frm.payload.len <= client.peerMaxFrameSize.int
   # this lock exists because of GoAways. We need to send directly
   # if we close the conn right after
-  withLock client.sendLock:
-    check not client.sock.isClosed, newConnClosedError()
-    GC_ref frm
-    try:
-      awaitc client.sock.send(frm.rawBytesPtr, frm.len)
-    finally:
-      GC_unref frm
+  #withLock client.sendLock:
+  check not client.sock.isClosed, newConnClosedError()
+  GC_ref frm
+  try:
+    awaitc client.sock.send(frm.rawBytesPtr, frm.len)
+  finally:
+    GC_unref frm
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
@@ -372,7 +372,8 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
       frm.sid.StreamId in client.streams:
     # XXX pass stream to write as param
     client.stream(frm.sid).doTransitionSend frm
-  await client.sendMsgs.put frm
+  #await client.sendMsgs.put frm
+  await client.send(frm)
 
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
@@ -435,14 +436,14 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
     debugInfo $frm2
     check frm2.sid == frm.sid, newConnError(errProtocolError)
     check frm2.typ == frmtContinuation, newConnError(errProtocolError)
-    check frm2.payloadLen <= stgInitialMaxFrameSize, newConnError(errProtocolError)
+    #check frm2.payloadLen <= stgInitialMaxFrameSize, newConnError(errProtocolError)
     check frm2.payloadLen >= 0, newConnError(errProtocolError)
     if frm2.payloadLen == 0:
       continue
     # XXX the spec does not limit total headers size,
     #     but there needs to be a limit unless we stream
     let totalPayloadLen = frm2.payloadLen.int + frm.payload.len
-    check totalPayloadLen <= stgInitialMaxFrameSize.int, newConnError(errProtocolError)
+    #check totalPayloadLen <= stgInitialMaxFrameSize.int, newConnError(errProtocolError)
     let oldFrmLen = frm.len
     frm.grow frm2.payloadLen.int
     check not client.sock.isClosed, newConnClosedError()
@@ -464,7 +465,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
-  check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errFrameSizeError)
+  #check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errFrameSizeError)
   var paddingLen = 0
   if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
     debugInfo "Padding"
