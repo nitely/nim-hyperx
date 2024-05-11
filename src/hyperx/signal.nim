@@ -15,63 +15,51 @@ type
     ## Wait for a signal. When triggers wakes everyone up
     # XXX use/reuse FutureVars
     waiters: Deque[Future[void]]
-    wakingUp: bool
     isClosed: bool
 
 proc newSignal*(): SignalAsync {.raises: [].} =
   new result
   result = SignalAsync(
     waiters: initDeque[Future[void]](0),
-    wakingUp: false,
     isClosed: false
   )
 
-proc wakeupLastWaiter(sig: SignalAsync) {.raises: [].} =
-  if sig.waiters.len == 0:
-    return
-  if sig.wakingUp:
-    return
-  proc wakeup =
-    sig.wakingUp = false
-    if sig.waiters.len > 0:
-      let fut = sig.waiters.peekLast()
-      if not fut.finished:
-        fut.complete()
-  untrackExceptions:
-    sig.wakingUp = true
-    callSoon wakeup
-
-proc waitFor*(sig: SignalAsync): Future[void] {.async.} =
+proc waitFor*(sig: SignalAsync) {.async.} =
   if sig.isClosed:
     raise newSignalClosedError()
   let fut = newFuture[void]()
   sig.waiters.addFirst fut
   await fut
-  if sig.isClosed:
-    raise newSignalClosedError()
-  let fut2 = sig.waiters.popLast()
-  doAssert fut == fut2
-  sig.wakeupLastWaiter()
+
+proc wakeupSoon(f: Future[void]) =
+  proc wakeup =
+    if not f.finished:
+      f.complete()
+  untrackExceptions:
+    callSoon wakeup
 
 proc trigger*(sig: SignalAsync) {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
-  sig.wakeupLastWaiter()
+  while sig.waiters.len > 0:
+    wakeupSoon sig.waiters.popLast()
 
 func isClosed*(sig: SignalAsync): bool {.raises: [].} =
   sig.isClosed
+
+proc failSoon(f: Future[void]) =
+  proc wakeup =
+    if not f.finished:
+      f.fail newSignalClosedError()
+  untrackExceptions:
+    callSoon wakeup
 
 proc close*(sig: SignalAsync) {.raises: [].}  =
   if sig.isClosed:
     return
   sig.isClosed = true
-  proc failWaiters =
-    while sig.waiters.len > 0:
-      let fut = sig.waiters.popLast()
-      if not fut.finished:
-        fut.fail newSignalClosedError()
-  untrackExceptions:
-    callSoon failWaiters
+  while sig.waiters.len > 0:
+    failSoon sig.waiters.popLast()
 
 when isMainModule:
   block:
