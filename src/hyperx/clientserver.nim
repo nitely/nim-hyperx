@@ -275,7 +275,7 @@ func hpackEncode*(
 
 proc send(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payloadLen.int == frm.payload.len
-  #doAssert frm.payload.len <= client.peerMaxFrameSize.int
+  doAssert frm.payload.len <= client.peerMaxFrameSize.int
   # this lock exists because of GoAways. We need to send directly
   # if we close the conn right after
   #withLock client.sendLock:
@@ -292,7 +292,7 @@ proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   debugInfo "frm sent silently"
   try:
     await client.send(frm)
-  except HyperxError, SslError:
+  except HyperxError, OsError, SslError:
     debugInfo getCurrentException().getStackTrace()
 
 func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
@@ -332,7 +332,8 @@ proc handshakeNaked(client: ClientContext) {.async.} =
 proc handshake(client: ClientContext) {.async.} =
   try:
     await client.handshakeNaked()
-  except SslError as err:
+  except SslError, OsError:
+    let err = getCurrentException()
     debugInfo err.getStackTrace()
     doAssert client.isConnected
     client.close()
@@ -356,7 +357,7 @@ func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
 # XXX continuations need a mechanism
 #     similar to a stream i.e: if frm without end is
 #     found consume from streamContinuations
-proc write*(client: ClientContext, frm: Frame) {.async.} =
+proc writeNaked(client: ClientContext, frm: Frame) {.async.} =
   ## Frames passed cannot be reused because they are references
   ## added to a queue, and may not have been consumed yet
   # This is done in the next headers after settings ACK put
@@ -374,6 +375,17 @@ proc write*(client: ClientContext, frm: Frame) {.async.} =
     client.stream(frm.sid).doTransitionSend frm
   #await client.sendMsgs.put frm
   await client.send(frm)
+
+proc write(client: ClientContext, frm: Frame) {.async.} =
+  try:
+    await client.writeNaked(frm)
+  except HyperxConnError, OsError, SslError:
+    let err = getCurrentException()
+    if client.isConnected:
+      debugInfo err.getStackTrace()
+      client.error = newHyperxConnError(err.msg)
+      client.close()
+    raise newHyperxConnError(err.msg)
 
 func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
@@ -436,14 +448,14 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
     debugInfo $frm2
     check frm2.sid == frm.sid, newConnError(errProtocolError)
     check frm2.typ == frmtContinuation, newConnError(errProtocolError)
-    #check frm2.payloadLen <= stgInitialMaxFrameSize, newConnError(errProtocolError)
+    check frm2.payloadLen <= stgInitialMaxFrameSize, newConnError(errProtocolError)
     check frm2.payloadLen >= 0, newConnError(errProtocolError)
     if frm2.payloadLen == 0:
       continue
     # XXX the spec does not limit total headers size,
     #     but there needs to be a limit unless we stream
     let totalPayloadLen = frm2.payloadLen.int + frm.payload.len
-    #check totalPayloadLen <= stgInitialMaxFrameSize.int, newConnError(errProtocolError)
+    check totalPayloadLen <= stgInitialMaxFrameSize.int, newConnError(errProtocolError)
     let oldFrmLen = frm.len
     frm.grow frm2.payloadLen.int
     check not client.sock.isClosed, newConnClosedError()
@@ -465,7 +477,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
-  #check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errFrameSizeError)
+  check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errFrameSizeError)
   var paddingLen = 0
   if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
     debugInfo "Padding"
@@ -525,14 +537,16 @@ proc sendTask(client: ClientContext) {.async.} =
   except HyperxError as err:
     debugInfo err.getStackTrace()
     if client.isConnected:
-      client.error = err
-      raise err
+      client.error = newHyperxConnError(err.msg)
+      raise newHyperxConnError(err.msg)
+    raise newHyperxConnError(err.msg)
   except SslError, OsError:
     let err = getCurrentException()
     debugInfo err.getStackTrace()
     if client.isConnected:
       client.error = newHyperxConnError(err.msg)
       raise client.error
+    raise newHyperxConnError(err.msg)
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
@@ -568,14 +582,16 @@ proc recvTask(client: ClientContext) {.async.} =
   except HyperxError as err:
     debugInfo err.getStackTrace()
     if client.isConnected:
-      client.error = err
-      raise err
+      client.error = newHyperxConnError(err.msg)
+      raise newHyperxConnError(err.msg)
+    raise newHyperxConnError(err.msg)
   except SslError, OSError:
     let err = getCurrentException()
     debugInfo err.getStackTrace()
     if client.isConnected:
       client.error = newHyperxConnError(err.msg)
       raise client.error
+    raise newHyperxConnError(err.msg)
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
@@ -593,7 +609,7 @@ const connFrmAllowed = {
   frmtWindowUpdate
 }
 
-proc consumeMainStream(client: ClientContext, frm: Frame) {.asyncClosureExperimental.} =
+proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   case frm.typ
   of frmtWindowUpdate:
     check frm.windowSizeInc > 0, newConnError(errProtocolError)
@@ -714,7 +730,12 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       stream.error = err
       client.close(stream.id)
       # xxx this is too easy to get wrong, try raise conn error instead
-      await client.send newRstStreamFrame(frm.sid, err.code.int)
+      await client.sendSilently newRstStreamFrame(frm.sid, err.code.int)
+    if frm.typ == frmtRstStream:
+      # need to close in case the stream is waiting
+      stream.error = newStrmError(errStreamClosed)
+      client.close(stream.id)
+      continue
     if frm.typ == frmtWindowUpdate:
       try:
         check frm.windowSizeInc > 0, newConnError(errProtocolError)
@@ -727,7 +748,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       except StrmError as err:
         stream.error = err
         client.close(stream.id)
-        await client.send newRstStreamFrame(frm.sid, err.code.int)
+        await client.sendSilently newRstStreamFrame(frm.sid, err.code.int)
       continue
     try:
       # XXX a stream can block all streams here,
@@ -757,8 +778,9 @@ proc recvDispatcher(client: ClientContext) {.async.} =
   except HyperxError as err:
     debugInfo err.getStackTrace()
     if client.isConnected:
-      client.error = err
-      raise err
+      client.error = newHyperxConnError(err.msg)
+      raise newHyperxConnError(err.msg)
+    raise newHyperxConnError(err.msg)
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg

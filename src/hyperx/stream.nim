@@ -233,7 +233,7 @@ func open*(
   s.t[sid] = result
 
 iterator values*(s: Streams): Stream {.inline.} =
-  for v in values s.t:
+  for _, v in pairs s.t:
     yield v
 
 proc close*(s: var Streams, sid: StreamId) {.raises: [].} =
