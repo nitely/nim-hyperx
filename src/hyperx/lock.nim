@@ -16,6 +16,7 @@ type
     used: bool
     # XXX use/reuse FutureVars
     waiters: Deque[Future[void]]
+    wakingUp:bool
     isClosed: bool
 
 proc newLock*(): LockAsync {.raises: [].} =
@@ -23,8 +24,26 @@ proc newLock*(): LockAsync {.raises: [].} =
   result = LockAsync(
     used: false,
     waiters: initDeque[Future[void]](0),
+    wakingUp: false,
     isClosed: false
   )
+
+proc wakeupLastWaiter(lck: LockAsync) =
+  if lck.waiters.len == 0:
+    return
+  if lck.wakingUp:
+    return
+  proc weakup =
+    lck.wakingUp = false
+    if lck.used:
+      return
+    if lck.waiters.len > 0:
+      let fut = lck.waiters.peekLast()
+      if not fut.finished:
+        fut.complete()
+  untrackExceptions:
+    lck.wakingUp = true
+    callSoon weakup
 
 proc acquire(lck: LockAsync) {.async.} =
   if lck.isClosed:
@@ -33,26 +52,19 @@ proc acquire(lck: LockAsync) {.async.} =
     let fut = newFuture[void]()
     lck.waiters.addFirst fut
     await fut
+    if lck.isClosed:
+      raise newLockClosedError()
+    let fut2 = lck.waiters.popLast()
+    doAssert fut == fut2
   doAssert(not lck.used)
   lck.used = true
-
-proc wakeupNext(lck: LockAsync) =
-  if lck.waiters.len == 0:
-    return
-  proc wakeup =
-    if lck.waiters.len > 0:
-      let f = lck.waiters.popLast()
-      if not f.finished:
-        f.complete()
-  untrackExceptions:
-    callSoon wakeup
 
 proc release(lck: LockAsync) {.raises: [LockClosedError].} =
   doAssert lck.used
   if lck.isClosed:
     raise newLockClosedError()
   lck.used = false
-  wakeupNext lck
+  lck.wakeupLastWaiter()
 
 template withLock*(lck: LockAsync, body: untyped): untyped =
   await lck.acquire()
@@ -64,19 +76,17 @@ template withLock*(lck: LockAsync, body: untyped): untyped =
 func isClosed*(lck: LockAsync): bool {.raises: [].} =
   lck.isClosed
 
-proc failSoon(f: Future[void]) =
-  proc wakeup =
-    if not f.finished:
-      f.fail newLockClosedError()
-  untrackExceptions:
-    callSoon wakeup
-
 proc close*(lck: LockAsync) {.raises: [].}  =
   if lck.isClosed:
     return
   lck.isClosed = true
-  while lck.waiters.len > 0:
-    failSoon lck.waiters.popLast()
+  proc failWaiters =
+    while lck.waiters.len > 0:
+      let fut = lck.waiters.popLast()
+      if not fut.finished:
+        fut.fail newLockClosedError()
+  untrackExceptions:
+    callSoon failWaiters
 
 when isMainModule:
   block:
