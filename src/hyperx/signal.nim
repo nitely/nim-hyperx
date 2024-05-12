@@ -85,4 +85,51 @@ when isMainModule:
       )
       doAssert puts == @[1,2,3,4,5,6]
     waitFor test()
+  block:
+    var canceled = false
+    var puts = newSeq[int]()
+    proc test() {.async.} =
+      var sig = newSignal()
+      proc waitLoop(x: int) {.async.} =
+        while true:
+          await sig.waitFor()
+          puts.add x
+      var fut1 = waitLoop(1)
+      var fut2 = waitLoop(2)
+      sig.trigger()
+      for _ in 0 .. 10:
+        await sleepAsync(1)
+      sig.close()
+      try:
+        await (fut1 and fut2)
+      except SignalClosedError:
+        canceled = true
+    waitFor test()
+    doAssert puts == @[1, 2]
+    doAssert canceled
+  block:
+    var canceled = false
+    var puts = newSeq[int]()
+    proc test() {.async.} =
+      var sig = newSignal()
+      proc waitLoop(x: int) {.async.} =
+        while true:
+          await sig.waitFor()
+          puts.add x
+      var fut1 = waitLoop(1)
+      var fut2 = waitLoop(2)
+      sig.trigger()
+      for _ in 0 .. 10:
+        await sleepAsync(1)
+      sig.trigger()
+      for _ in 0 .. 10:
+        await sleepAsync(1)
+      sig.close()
+      try:
+        await (fut1 and fut2)
+      except SignalClosedError:
+        canceled = true
+    waitFor test()
+    doAssert puts == @[1, 2, 1, 2]
+    doAssert canceled
   echo "ok"
