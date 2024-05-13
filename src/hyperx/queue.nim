@@ -103,6 +103,10 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
     callSoon failWaiters
 
 when isMainModule:
+  proc sleepy(x: int) {.async.} =
+    doAssert x > 0
+    for _ in 0 .. x-1:
+      await sleepAsync(1)
   block:
     proc test() {.async.} =
       var q = newQueue[int](1)
@@ -136,17 +140,13 @@ when isMainModule:
     proc test() {.async.} =
       var q = newQueue[int](1)
       proc puts {.async.} =
-        for _ in 0 .. 10:
-          await sleepAsync(1)
+        await sleepy(10)
         await q.put 1
-        for _ in 0 .. 10:
-          await sleepAsync(1)
+        await sleepy(10)
         await q.put 2
-        for _ in 0 .. 10:
-          await sleepAsync(1)
+        await sleepy(10)
         await q.put 3
-        for _ in 0 .. 10:
-          await sleepAsync(1)
+        await sleepy(10)
         await q.put 4
       let puts1 = puts()
       doAssert (await q.pop()) == 1
@@ -192,6 +192,79 @@ when isMainModule:
       await q.put 3
       await q.put 4
       await pops1
+    waitFor test()
+    doAssert not hasPendingOperations()
+  block:
+    proc test() {.async.} =
+      var q = newQueue[int](1)
+      proc pops {.async.} =
+        doAssert (await q.pop()) == 1
+        doAssert (await q.pop()) == 2
+        doAssert (await q.pop()) == 3
+        doAssert (await q.pop()) == 4
+      proc puts {.async.} =
+        await q.put 1
+        await q.put 2
+        await q.put 3
+        await q.put 4
+      let pops1 = pops()
+      let puts1 = puts()
+      await pops1
+      await puts1
+    waitFor test()
+    doAssert not hasPendingOperations()
+  block:
+    proc test() {.async.} =
+      var q = newQueue[int](1)
+      proc pops {.async.} =
+        await sleepy(2)
+        doAssert (await q.pop()) == 1
+        await sleepy(4)
+        doAssert (await q.pop()) == 2
+        await sleepy(8)
+        doAssert (await q.pop()) == 3
+        await sleepy(16)
+        doAssert (await q.pop()) == 4
+      proc puts {.async.} =
+        await sleepy(16)
+        await q.put 1
+        await sleepy(8)
+        await q.put 2
+        await sleepy(4)
+        await q.put 3
+        await sleepy(2)
+        await q.put 4
+      let pops1 = pops()
+      let puts1 = puts()
+      await pops1
+      await puts1
+    waitFor test()
+    doAssert not hasPendingOperations()
+  block:
+    proc test() {.async.} =
+      var q = newQueue[int](1)
+      proc pops {.async.} =
+        await sleepy(16)
+        doAssert (await q.pop()) == 1
+        await sleepy(8)
+        doAssert (await q.pop()) == 2
+        await sleepy(4)
+        doAssert (await q.pop()) == 3
+        await sleepy(2)
+        doAssert (await q.pop()) == 4
+      proc puts {.async.} =
+        await sleepy(2)
+        await q.put 1
+        await sleepy(4)
+        await q.put 2
+        await sleepy(8)
+        await q.put 3
+        await sleepy(16)
+        await q.put 4
+      let pops1 = pops()
+      let puts1 = puts()
+      await pops1
+      await puts1
     waitFor test()
     doAssert not hasPendingOperations()
   block:  # multiple senders not allowed
