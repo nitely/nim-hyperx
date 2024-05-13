@@ -750,6 +750,14 @@ proc connect(client: ClientContext) {.async.} =
     debugInfo err.getStackTrace()
     raise newHyperxConnError(err.msg)
 
+proc failSilently(f: Future[void]) {.async.} =
+  if f == nil:
+    return
+  try:
+    await f
+  except HyperxError:
+    debugInfo getCurrentException().msg
+
 template withClient*(client: ClientContext, body: untyped) =
   {.line: instantiationInfo(fullPaths = true).}:
     doAssert not client.isConnected
@@ -763,24 +771,16 @@ template withClient*(client: ClientContext, body: untyped) =
       dispFut = client.recvDispatcher()
       block:
         body
-    except QueueClosedError as err:
-      doAssert not client.isConnected
-      raise err
-    # do not handle any other error here
+    # do not handle any error here
     finally:
-      client.close()
       # XXX do gracefull shutdown with timeout,
       #     wait for send/recv to drain the queue
       #     before closing
-      
+      client.close()
       # do not bother the user with hyperx errors
       # at this point body completed or errored out
-      for fut in [recvFut, dispFut]:
-        try:
-          if fut != nil:
-            await fut
-        except HyperxError:
-          debugInfo getCurrentException().msg
+      await failSilently(recvFut)
+      await failSilently(dispFut)
 
 type
   ClientStreamState* = enum

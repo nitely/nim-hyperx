@@ -87,10 +87,9 @@ testAsync "multiplex req/resp":
   var serverRecvStrm1 = ""
   var serverRecvStrm2 = ""
   proc processStreamServer(
-    client: ClientContext,
+    strm: ClientStream,
     dataIn, dataOut: ref string
   ) {.async.} =
-    let strm = await client.recvStream()
     withStream strm:
       await strm.recvHeaders(dataIn)
       while not strm.recvEnded:
@@ -112,10 +111,11 @@ testAsync "multiplex req/resp":
         let dataOut1 = newStringref("foobar 1")
         let dataIn2 = newStringref()
         let dataOut2 = newStringref("foobar 2")
-        await (
-          processStreamServer(client, dataIn1, dataOut1) and
-          processStreamServer(client, dataIn2, dataOut2)
-        )
+        let strm1 = await client.recvStream()
+        let strm1Fut = processStreamServer(strm1, dataIn1, dataOut1)
+        let strm2 = await client.recvStream()
+        let strm2Fut = processStreamServer(strm2, dataIn2, dataOut2)
+        await strm1Fut and strm2Fut
         serverRecvStrm1 = dataIn1[]
         serverRecvStrm2 = dataIn2[]
         #await sleepAsync 4000
