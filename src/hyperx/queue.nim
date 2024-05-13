@@ -181,6 +181,22 @@ when isMainModule:
   block:
     proc test() {.async.} =
       var q = newQueue[int](1)
+      proc pops {.async.} =
+        doAssert (await q.pop()) == 1
+        doAssert (await q.pop()) == 2
+        doAssert (await q.pop()) == 3
+        doAssert (await q.pop()) == 4
+      let pops1 = pops()
+      await q.put 1
+      await q.put 2
+      await q.put 3
+      await q.put 4
+      await pops1
+    waitFor test()
+    doAssert not hasPendingOperations()
+  block:  # multiple senders not allowed
+    proc test() {.async.} =
+      var q = newQueue[int](1)
       let put1 = q.put 1
       let put2 = q.put 2
       let put3 = q.put 3
@@ -193,6 +209,27 @@ when isMainModule:
       await put1
       try:
         await put2
+        doAssert false
+      except QueueClosedError:
+        discard
+    waitFor test()
+    doAssert not hasPendingOperations()
+  block:  # multiple receivers not allowed
+    proc test() {.async.} =
+      var q = newQueue[int](1)
+      await q.put 1
+      let pop1 = q.pop()
+      let pop2 = q.pop()
+      let pop3 = q.pop()
+      try:
+        discard await pop3
+        raise newException(Defect, "assertion raise expected")
+      except AssertionDefect:
+        discard
+      doAssert (await pop1) == 1
+      q.close()
+      try:
+        discard await pop2
         doAssert false
       except QueueClosedError:
         discard
