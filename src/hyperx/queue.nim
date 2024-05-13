@@ -166,14 +166,11 @@ when isMainModule:
         await q.put 4
       let puts1 = puts()
       doAssert (await q.pop()) == 1
-      for _ in 0 .. 10:
-        await sleepAsync(1)
+      await sleepy(10)
       doAssert (await q.pop()) == 2
-      for _ in 0 .. 10:
-        await sleepAsync(1)
+      await sleepy(10)
       doAssert (await q.pop()) == 3
-      for _ in 0 .. 10:
-        await sleepAsync(1)
+      await sleepy(10)
       doAssert (await q.pop()) == 4
       await puts1
     waitFor test()
