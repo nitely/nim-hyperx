@@ -941,6 +941,7 @@ proc sendHeaders*(
       raise newStrmError(strm.stream.error.code)
     raise err
 
+# XXX allow sending empty data to close the stream
 proc sendBodyNaked(
   strm: ClientStream,
   data: ref string,
@@ -956,6 +957,7 @@ proc sendBodyNaked(
       while strm.stream.peerWindow <= 0:
         await strm.stream.peerWindowUpdateSig.waitFor()
       while strm.client.peerWindow <= 0:
+        check strm.stream.state != strmClosed, newStrmError(errStreamClosed)
         await strm.client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(strm.client.peerWindow, strm.stream.peerWindow)
     dataIdxB = min(dataIdxA+min(peerWindow, L), L)
@@ -972,9 +974,6 @@ proc sendBodyNaked(
     check strm.stream.state != strmClosed, newStrmError(errStreamClosed)
     await strm.client.write frm
     dataIdxA = dataIdxB
-    # allow sending empty payload
-    if L == 0:
-      break
 
 proc sendBody*(
   strm: ClientStream,
