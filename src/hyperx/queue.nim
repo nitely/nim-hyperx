@@ -20,16 +20,16 @@ type
 proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
   doAssert size > 0
   new result
-  result = QueueAsync[T](
-    s: initDeque[T](size),
-    size: size,
-    putWaiter: newFutureVar[void](),
-    popWaiter: newFutureVar[void](),
-    wakingPut: false,
-    wakingPop: false,
-    isClosed: false
-  )
   {.cast(noSideEffect).}:
+    result = QueueAsync[T](
+      s: initDeque[T](size),
+      size: size,
+      putWaiter: newFutureVar[void](),
+      popWaiter: newFutureVar[void](),
+      wakingPut: false,
+      wakingPop: false,
+      isClosed: false
+    )
     untrackExceptions:
       result.putWaiter.complete()
       result.popWaiter.complete()
@@ -135,21 +135,67 @@ when isMainModule:
   block:
     proc test() {.async.} =
       var q = newQueue[int](1)
+      proc puts {.async.} =
+        for _ in 0 .. 10:
+          await sleepAsync(1)
+        await q.put 1
+        for _ in 0 .. 10:
+          await sleepAsync(1)
+        await q.put 2
+        for _ in 0 .. 10:
+          await sleepAsync(1)
+        await q.put 3
+        for _ in 0 .. 10:
+          await sleepAsync(1)
+        await q.put 4
+      let puts1 = puts()
+      doAssert (await q.pop()) == 1
+      doAssert (await q.pop()) == 2
+      doAssert (await q.pop()) == 3
+      doAssert (await q.pop()) == 4
+      await puts1
+    waitFor test()
+    doAssert not hasPendingOperations()
+  block:
+    proc test() {.async.} =
+      var q = newQueue[int](1)
+      proc puts {.async.} =
+        await q.put 1
+        await q.put 2
+        await q.put 3
+        await q.put 4
+      let puts1 = puts()
+      doAssert (await q.pop()) == 1
+      for _ in 0 .. 10:
+        await sleepAsync(1)
+      doAssert (await q.pop()) == 2
+      for _ in 0 .. 10:
+        await sleepAsync(1)
+      doAssert (await q.pop()) == 3
+      for _ in 0 .. 10:
+        await sleepAsync(1)
+      doAssert (await q.pop()) == 4
+      await puts1
+    waitFor test()
+    doAssert not hasPendingOperations()
+  block:
+    proc test() {.async.} =
+      var q = newQueue[int](1)
       let put1 = q.put 1
       let put2 = q.put 2
-      doAssert (await q.pop()) == 1
       let put3 = q.put 3
-      doAssert (await q.pop()) == 2
-      let put4 = q.put 4
-      doAssert (await q.pop()) == 4
-      await put1
-      await put2
       try:
         await put3
-        doAssert false
+        raise newException(Defect, "assertion raise expected")
       except AssertionDefect:
         discard
-      await put4
+      q.close()
+      await put1
+      try:
+        await put2
+        doAssert false
+      except QueueClosedError:
+        discard
     waitFor test()
     doAssert not hasPendingOperations()
   echo "ok"
