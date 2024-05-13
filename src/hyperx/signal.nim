@@ -85,6 +85,7 @@ when isMainModule:
       )
       doAssert puts == @[1,2,3,4,5,6]
     waitFor test()
+    doAssert not hasPendingOperations()
   block:
     var canceled = false
     var puts = newSeq[int]()
@@ -107,6 +108,7 @@ when isMainModule:
     waitFor test()
     doAssert puts == @[1, 2]
     doAssert canceled
+    doAssert not hasPendingOperations()
   block:
     var canceled = false
     var puts = newSeq[int]()
@@ -132,4 +134,5 @@ when isMainModule:
     waitFor test()
     doAssert puts == @[1, 2, 1, 2]
     doAssert canceled
+    doAssert not hasPendingOperations()
   echo "ok"
