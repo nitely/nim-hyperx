@@ -12,7 +12,6 @@ requires "hpack >= 0.4.0"
 
 task test, "Test":
   exec "nim c -r src/hyperx/utils.nim"
-  exec "nim c -r src/hyperx/lock.nim"
   exec "nim c -r src/hyperx/queue.nim"
   exec "nim c -r src/hyperx/signal.nim"
   exec "nim c -r src/hyperx/stream.nim"
