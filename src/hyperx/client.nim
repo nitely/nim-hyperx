@@ -103,6 +103,18 @@ proc sendHeaders*(
   let finish = contentLen == 0
   await strm.sendHeaders(headers, finish)
 
+proc sendHeaders*(
+  strm: ClientStream,
+  headers: seq[(string, string)],
+  finish: bool
+) {.async.} =
+  template client: untyped = strm.client
+  var henc = new(seq[byte])
+  henc[] = newSeq[byte]()
+  for (n, v) in headers:
+    client.hpackEncode(henc[], n, v)
+  await strm.sendHeaders(henc, finish)
+
 type
   Payload* = ref object
     s: seq[byte]

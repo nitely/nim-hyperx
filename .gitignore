@@ -5,6 +5,8 @@ tests/tests
 tests/testclient
 tests/testclientserver
 tests/testserver
+tests/functional/tserial
+tests/functional/tserver
 src/hyperx/client
 src/hyperx/server
 src/hyperx/clientserver

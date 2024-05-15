@@ -47,5 +47,12 @@ task serve, "Serve":
 task serve2, "Serve":
   exec "nim c -r -d:release examples/localServer.nim"
 
+task funcserve, "Func Serve":
+  exec "nim c -r -d:release tests/functional/tserver.nim"
+
+task functest, "Func test":
+  exec "nim c -r tests/functional/tserial.nim"
+  exec "nim c -r -d:release tests/functional/tserial.nim"
+
 task docs, "Docs":
   exec "nim doc2 -o:./docs --project ./src/hyperx.nim"

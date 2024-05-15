@@ -1,29 +1,42 @@
 ## Make a single client, send all the raw-data
 ## requests serially. Compare all server recv
 ## headers with client sent headers and the other way.
-## Compare server hpack state with client hpack state (enc/dec).
 
 {.define: ssl.}
 
+import std/asyncdispatch
+import ../../src/hyperx/client
 import ./tserver.nim
 import ./tutils.nim
-import ../../src/hyperx/client
 
 proc main() {.async.} =
   var checked = 0
   var client = newClient(localHost, localPort)
   withClient(client):
-    for story in stories:
+    for story in stories("raw-data"):
       for headers in cases(story):
-        var data = newStringref()
+        if not headers.isRequest:
+          continue
+        # there is only one case with content
+        if headers.contentLen != 0:
+          continue
+        let rawHeaders = headers.rawHeaders()
         let strm = client.newClientStream()
         withStream strm:
-          await strm.sendHeaders(headers)
+          await strm.sendHeaders(headers, finish = true)
+          var data = newStringref()
+          await strm.recvHeaders(data)
+          doAssert data[] ==
+            ":status: 200\r\n" &
+            "content-type: text/plain\r\n" &
+            "content-length: " & $rawHeaders.len & "\r\n"
+          data[].setLen 0
           while not strm.recvEnded:
             await strm.recvBody(data)
-        doAssert data[] == headers.rawHeaders
-        inc checked
-  echo checked
+          doAssert data[] == rawHeaders
+          inc checked
+  doAssert checked == 348
+  echo "checked ", $checked
 
 (proc =
   waitFor main()
