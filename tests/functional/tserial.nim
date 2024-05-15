@@ -15,8 +15,7 @@ proc main() {.async.} =
   withClient(client):
     for story in stories("raw-data"):
       for headers in cases(story):
-        if not headers.isRequest:
-          continue
+        doAssert headers.isRequest
         # there is only one case with content
         if headers.contentLen != 0:
           continue
