@@ -53,6 +53,7 @@ task funcserve, "Func Serve":
 task functest, "Func test":
   exec "nim c -r tests/functional/tserial.nim"
   exec "nim c -r -d:release tests/functional/tserial.nim"
+  exec "nim c -r -d:release tests/functional/tconcurrent.nim"
 
 task docs, "Docs":
   exec "nim doc2 -o:./docs --project ./src/hyperx.nim"

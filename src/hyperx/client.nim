@@ -105,13 +105,13 @@ proc sendHeaders*(
 
 proc sendHeaders*(
   strm: ClientStream,
-  headers: seq[(string, string)],
+  headers: ref seq[(string, string)],
   finish: bool
 ) {.async.} =
   template client: untyped = strm.client
   var henc = new(seq[byte])
   henc[] = newSeq[byte]()
-  for (n, v) in headers:
+  for (n, v) in headers[]:
     client.hpackEncode(henc[], n, v)
   await strm.sendHeaders(henc, finish)
 

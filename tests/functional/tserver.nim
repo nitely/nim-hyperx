@@ -22,7 +22,7 @@ proc processStream(strm: ClientStream) {.async.} =
     while not strm.recvEnded:
       await strm.recvBody(dataEcho)
       dataEcho[].setLen 0
-    dataEcho[] = headers[]
+    dataEcho[].add headers[]
     await strm.sendHeaders(
       status = 200,
       contentType = "text/plain",

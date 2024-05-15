@@ -3,7 +3,7 @@ import std/os
 import std/json
 import std/parseutils
 
-type Header = (string, string)
+type Header* = (string, string)
 const testDataBaseDir = "tests/functional/"
 
 const connSpecificHeaders = [
