@@ -22,7 +22,9 @@ proc main() {.async.} =
         let rawHeaders = headers.rawHeaders()
         let strm = client.newClientStream()
         withStream strm:
-          await strm.sendHeaders(headers, finish = true)
+          let headersRef = new(seq[Header])
+          headersRef[] = headers
+          await strm.sendHeaders(headersRef, finish = true)
           var data = newStringref()
           await strm.recvHeaders(data)
           doAssert data[] ==
