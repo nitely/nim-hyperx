@@ -22,6 +22,10 @@ template testAsync*(name: string, body: untyped): untyped =
     when false:  # for finding mem leaks
       setGlobalDispatcher(nil)
       GC_fullCollect()
+    when false:  # when defined(orc):
+      # requires -d:nimAllocStats
+      let stats = getAllocStats()
+      doAssert stats.allocCount == stats.deallocCount
   )()
 
 func toString(bytes: openArray[byte]): string =
