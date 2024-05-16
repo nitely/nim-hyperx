@@ -19,6 +19,9 @@ template testAsync*(name: string, body: untyped): untyped =
     waitFor test()
     # check there are no dangling async futures
     doAssert not hasPendingOperations()
+    when false:  # for finding mem leaks
+      setGlobalDispatcher(nil)
+      GC_fullCollect()
   )()
 
 func toString(bytes: openArray[byte]): string =
