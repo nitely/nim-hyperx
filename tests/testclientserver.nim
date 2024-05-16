@@ -12,6 +12,7 @@ template testAsync(name: string, body: untyped): untyped =
     proc test() {.async.} =
       body
     waitFor test()
+    doAssert not hasPendingOperations()
   )()
 
 func newStringRef(s = ""): ref string =

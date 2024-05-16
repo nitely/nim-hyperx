@@ -22,6 +22,7 @@ task test, "Test":
   exec "nim c -r -f -d:hyperxTest -d:ssl src/hyperx/clientserver.nim"
   exec "nim c -r -f tests/testclient.nim"
   exec "nim c -r -f tests/testserver.nim"
+  # integration tests
   exec "nim c -r -f tests/testclientserver.nim"
   exec "nim c -r -f examples/streamClient.nim"
 
