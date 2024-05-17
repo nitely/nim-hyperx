@@ -13,6 +13,9 @@ template testAsync(name: string, body: untyped): untyped =
       body
     waitFor test()
     doAssert not hasPendingOperations()
+    when false:
+      setGlobalDispatcher(nil)
+      GC_fullCollect()
   )()
 
 func newStringRef(s = ""): ref string =

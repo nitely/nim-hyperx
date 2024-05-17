@@ -35,6 +35,7 @@ template untrackExceptions*(body: untyped): untyped =
       raise err  # raise original error
     except Exception as err:
       debugInfo err.getStackTrace()
+      debugInfo err.msg
       raise newException(Defect, err.msg)
 
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
@@ -116,7 +117,7 @@ iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
     doAssert vb+2 > na
     na = vb+2  # skip /r/n
 
-func contentLen*(s: openArray[byte]): int {.raises: [ValueError].} =
+func contentLen*(s: openArray[byte]): int64 {.raises: [ValueError].} =
   result = -1
   var val = 0 .. -1
   for (nn, vv) in headersIt(s):

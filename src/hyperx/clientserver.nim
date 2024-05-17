@@ -76,11 +76,13 @@ proc defaultSslContext*(
     )
   except CatchableError as err:
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     raise newHyperxConnError(err.msg)
   except Defect as err:
     raise err
   except Exception as err:
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     # workaround for newContext raising Exception
     raise newException(Defect, err.msg)
   doAssert result != nil, "failure to initialize the SSL context"
@@ -165,11 +167,13 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.sock.close()
   except CatchableError as err:
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     raise newHyperxConnError(err.msg)
   except Defect as err:
     raise err  # raise original error
   except Exception as err:
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     raise newException(Defect, err.msg)
   finally:
     client.recvMsgs.close()
@@ -268,6 +272,7 @@ func hpackEncode*(
     discard hencode(name, value, client.headersEnc, payload, huffman = false)
   except HpackError as err:
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     raise newException(HyperxError, err.msg)
 
 proc send(client: ClientContext, frm: Frame) {.async.} =
@@ -291,6 +296,7 @@ proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
     await client.send(frm)
   except HyperxError, OsError, SslError:
     debugInfo getCurrentException().getStackTrace()
+    debugInfo getCurrentException().msg
 
 func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
   result = ""
@@ -332,6 +338,7 @@ proc handshake(client: ClientContext) {.async.} =
   except OsError, SslError:
     let err = getCurrentException()
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     doAssert client.isConnected
     # XXX err.msg includes a traceback for SslError but it should not
     client.error = newHyperxConnError(err.msg)
@@ -377,6 +384,7 @@ proc write(client: ClientContext, frm: Frame) {.async.} =
     let err = getCurrentException()
     if client.isConnected:
       debugInfo err.getStackTrace()
+      debugInfo err.msg
       client.error = newHyperxConnError(err.msg)
       client.close()
     raise newHyperxConnError(err.msg)
@@ -423,9 +431,11 @@ proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
     #doAssert not client.isConnected
     if client.error != nil:
       debugInfo client.error.getStackTrace()
+      debugInfo client.error.msg
       raise newHyperxConnError(client.error.msg)
     if strm.error != nil:
       debugInfo strm.error.getStackTrace()
+      debugInfo strm.error.msg
       raise newStrmError(strm.error.code)
     raise err
 
@@ -530,6 +540,7 @@ proc recvTask(client: ClientContext) {.async.} =
     doAssert not client.isConnected
   except ConnError as err:
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     if client.isConnected:
       # XXX close all streams
       # XXX close queues
@@ -542,6 +553,7 @@ proc recvTask(client: ClientContext) {.async.} =
   except HyperxConnError, OsError, SslError:
     let err = getCurrentException()
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     if client.isConnected:
       client.error = newHyperxConnError(err.msg)
       raise client.error
@@ -721,6 +733,7 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     doAssert not client.isConnected
   except ConnError as err:
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     if client.isConnected:
       client.error = err
       await client.sendSilently newGoAwayFrame(
@@ -729,10 +742,12 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     raise err
   except StrmError:
     debugInfo getCurrentException().getStackTrace()
+    debugInfo getCurrentException().msg
     doAssert false
   except HyperxError as err:
     if client.isConnected:
       debugInfo err.getStackTrace()
+      debugInfo err.msg
       client.error = err
     raise err
   except CatchableError as err:
@@ -748,6 +763,7 @@ proc connect(client: ClientContext) {.async.} =
     await client.sock.connect(client.hostname, client.port)
   except OsError as err:
     debugInfo err.getStackTrace()
+    debugInfo err.msg
     raise newHyperxConnError(err.msg)
 
 proc failSilently(f: Future[void]) {.async.} =
@@ -845,6 +861,7 @@ proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
     strm.contentLen = contentLen(frm.payload)
   except ValueError:
     debugInfo getCurrentException().getStackTrace()
+    debugInfo getCurrentException().msg
     raise newStrmError(errProtocolError)
   if frmfEndStream in frm.flags:
     strm.state = csStateRecvEnded
@@ -935,9 +952,11 @@ proc sendHeaders*(
   except QueueClosedError as err:
     if strm.client.error != nil:
       debugInfo strm.client.error.getStackTrace()
+      debugInfo strm.client.error.msg
       raise newHyperxConnError(strm.client.error.msg)
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
+      debugInfo strm.stream.error.msg
       raise newStrmError(strm.stream.error.code)
     raise err
 
@@ -985,9 +1004,11 @@ proc sendBody*(
   except QueueClosedError as err:
     if strm.client.error != nil:
       debugInfo strm.client.error.getStackTrace()
+      debugInfo strm.client.error.msg
       raise newHyperxConnError(strm.client.error.msg)
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
+      debugInfo strm.stream.error.msg
       raise newStrmError(strm.stream.error.code)
     raise err
 

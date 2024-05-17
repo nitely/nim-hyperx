@@ -50,6 +50,7 @@ when not defined(hyperxTest):
       wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
       debugInfo err.getStackTrace()
+      debugInfo err.msg
       raise newHyperxConnError(err.msg)
 
 proc newClient*(

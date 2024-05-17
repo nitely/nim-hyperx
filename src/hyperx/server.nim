@@ -57,6 +57,7 @@ when not defined(hyperxTest):
       wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
       debugInfo err.getStackTrace()
+      debugInfo err.msg
       raise newHyperxConnError(err.msg)
 
 type
@@ -82,11 +83,22 @@ proc newServer*(
     isConnected: false
   )
 
-proc close(server: ServerContext) =
+proc close*(server: ServerContext) {.raises: [HyperxConnError].} =
   if not server.isConnected:
     return
-  server.sock.close()
   server.isConnected = false
+  try:
+    server.sock.close()
+  except CatchableError as err:
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    raise newHyperxConnError(err.msg)
+  except Defect as err:
+    raise err
+  except Exception as err:
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    raise newException(Defect, err.msg)
 
 proc listen(server: ServerContext) =
   server.sock.setSockOpt(OptReuseAddr, true)
@@ -99,14 +111,19 @@ proc listen(server: ServerContext) =
 
 # XXX limit number of active clients
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
-  # note OptNoDelay is inherited from server.sock
-  let sock = await server.sock.accept()
-  when not defined(hyperxTest):
-    doAssert not sslContext.isNil
-  wrapConnectedSocket(
-    sslContext, sock, handshakeAsServer, server.hostname
-  )
-  result = newClient(ctServer, sock, server.hostname)
+  try:
+    # note OptNoDelay is inherited from server.sock
+    let sock = await server.sock.accept()
+    when not defined(hyperxTest):
+      doAssert not sslContext.isNil
+    wrapConnectedSocket(
+      sslContext, sock, handshakeAsServer, server.hostname
+    )
+    result = newClient(ctServer, sock, server.hostname)
+  except CatchableError as err:
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    raise newHyperxConnError(err.msg)
 
 template withServer*(server: ServerContext, body: untyped): untyped =
   try:
@@ -126,6 +143,7 @@ proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
     if client.error != nil:
       # https://github.com/nim-lang/Nim/issues/15182
       debugInfo client.error.getStackTrace()
+      debugInfo client.error.msg
       raise newHyperxConnError(client.error.msg)
     raise err
 

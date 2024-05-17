@@ -3,6 +3,7 @@
 import std/strutils
 import std/asyncdispatch
 import ../src/hyperx/client
+import ../src/hyperx/server
 import ./localServer
 
 func newStringRef(s = ""): ref string =
@@ -40,11 +41,11 @@ when isMainModule:
         doAssert chunk in data[]
       echo "Path done: " & path
       echo "Received: " & data[]
-    completed.add path
+      completed.add path
 
   proc main() {.async.} =
     var server = newServer()
-    asyncCheck server.serve()
+    let serveFut = server.serve(propagateErr = false)
 
     var client = newClient(localHost, localPort)
     withClient(client):
@@ -52,10 +53,23 @@ when isMainModule:
         streamChunks(client, "/foo", @["foo", "bar"]) and
         streamChunks(client, "/bar", @["baz", "qux"])
       )
+    # we don't keep track of streams and clients
+    # so this may not terminate everything
+    try:
+      server.close()
+      await serveFut
+    except HyperxConnError as err:
+      #debugEcho err.getStackTrace()
+      #debugEcho err.msg
+      debugEcho "server conn err or closed"
+    # let strm/clients handlers terminate
+    await sleepAsync(1000)
 
   waitFor main()
   doAssert completed.len == 2
   doAssert "/foo" in completed
   doAssert "/bar" in completed
   #doAssert not hasPendingOperations()
+  #setGlobalDispatcher(nil)
+  #GC_fullCollect()
   echo "ok"
