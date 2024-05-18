@@ -16,13 +16,10 @@ func newStringRef(s = ""): ref string =
 
 proc processStream(strm: ClientStream) {.async.} =
   withStream strm:
-    var headers = newStringRef()
-    await strm.recvHeaders(headers)
     var dataEcho = newStringRef()
+    await strm.recvHeaders(dataEcho)
     while not strm.recvEnded:
       await strm.recvBody(dataEcho)
-      dataEcho[].setLen 0
-    dataEcho[].add headers[]
     await strm.sendHeaders(
       status = 200,
       contentType = "text/plain",
@@ -30,6 +27,7 @@ proc processStream(strm: ClientStream) {.async.} =
     )
     if dataEcho[].len > 0:
       await strm.sendBody(dataEcho, finish = true)
+  #GC_fullCollect()
 
 proc processStreamHandler(strm: ClientStream) {.async.} =
   try:

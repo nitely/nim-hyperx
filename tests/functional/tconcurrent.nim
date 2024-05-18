@@ -4,6 +4,7 @@ import std/asyncdispatch
 import ../../src/hyperx/client
 import ./tserver.nim
 import ./tutils.nim
+import ../../src/hyperx/signal
 
 type
   Headers = object
@@ -45,6 +46,19 @@ proc spawnStream(
     doAssert data[] == headers.raw[]
     inc checked[]
 
+proc spawnStream(
+  client: ClientContext,
+  headers: Headers,
+  checked: ref int,
+  sig: SignalAsync,
+  inFlight: ref int
+) {.async.} =
+  try:
+    await spawnStream(client, headers, checked)
+  finally:
+    inFlight[] = inFlight[] - 1
+    sig.trigger()
+
 const strmsPerClient = 10000
 const clientsCount = 10
 
@@ -56,12 +70,18 @@ proc spawnClient(
   withClient(client):
     var strms = newSeq[Future[void]]()
     var stmsCount = 0
+    var inFlight = new(int)
+    inFlight[] = 0
+    var sig = newSignal()
     while stmsCount < strmsPerClient:
       for headers in headersCtx.s:
-        strms.add spawnStream(client, headers, checked)
+        inFlight[] = inFlight[] + 1
+        strms.add spawnStream(client, headers, checked, sig, inFlight)
         inc stmsCount
         if stmsCount >= strmsPerClient:
           break
+        #if inFlight[] == 100:
+        #  await sig.waitFor()
     for strmFut in strms:
       await strmFut
 
