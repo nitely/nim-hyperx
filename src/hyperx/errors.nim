@@ -18,6 +18,7 @@ const
   errEnhanceYourCalm* = 0x0b.ErrorCode
   errInadequateSecurity* = 0x0c.ErrorCode
   errHttp11Required* = 0x0d.ErrorCode
+  errUnknown = 0xff.ErrorCode  # not in the spec
 
 func `$`(errCode: ErrorCode): string {.raises: [].} =
   case errCode
@@ -36,6 +37,11 @@ func `$`(errCode: ErrorCode): string {.raises: [].} =
   of errInadequateSecurity: "INADEQUATE_SECURITY"
   of errHttp11Required: "HTTP_1_1_REQUIRED"
   else: "UNKNOWN ERROR CODE"
+
+func toErrorCode(e: uint32): ErrorCode {.raises: [].} =
+  if e in errNoError.uint32 .. errHttp11Required.uint32:
+    return e.ErrorCode
+  return errUnknown
 
 type
   HyperxError* = object of CatchableError
@@ -60,3 +66,6 @@ func newConnError*(errCode: ErrorCode): ref ConnError {.raises: [].} =
 
 func newStrmError*(errCode: ErrorCode): ref StrmError {.raises: [].} =
   result = (ref StrmError)(code: errCode, msg: "Stream Error: " & $errCode)
+
+func newStrmError*(errCode: uint32): ref StrmError {.raises: [].} =
+  result = newStrmError(errCode.toErrorCode)

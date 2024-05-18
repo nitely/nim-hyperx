@@ -209,6 +209,9 @@ func initStreams*(): Streams {.raises: [].} =
     isClosed: false
   )
 
+func len*(s: Streams): int {.inline, raises: [].} =
+  result = s.t.len
+
 func get*(s: var Streams, sid: StreamId): var Stream {.raises: [].} =
   try:
     result = s.t[sid]

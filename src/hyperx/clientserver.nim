@@ -667,6 +667,10 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     if client.typ == ctServer and
         frm.sid.StreamId > client.maxPeerStrmIdSeen and
         frm.sid.int mod 2 != 0:
+      # XXX send refused stream, but we need to keep track
+      #     of fully proceseed streams (closed), so we send
+      #     conn errors for those if we get headers/data
+      check client.streams.len < stgServerMaxConcurrentStreams, newConnError(errProtocolError)
       client.maxPeerStrmIdSeen = frm.sid.StreamId
       # we do not store idle streams, so no need to close them
       let strm = client.streams.open(frm.sid.StreamId, client.peerWindowSize.int32)
@@ -705,7 +709,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       await client.send newRstStreamFrame(frm.sid, err.code.int)
     if frm.typ == frmtRstStream:
       # need to close in case the stream is waiting
-      stream.error = newStrmError(errStreamClosed)
+      stream.error = newStrmError(frm.errorCode)
       client.close(stream.id)
       continue
     if frm.typ == frmtWindowUpdate:
@@ -725,9 +729,10 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     try:
       # XXX a stream can block all streams here,
       #     no way around it. Maybe it can be avoided with
-      #     window update deafult or min size?
+      #     window update default or min size?
       await stream.msgs.put frm
     except QueueClosedError:
+      check frm.typ in {frmtRstStream, frmtWindowUpdate}, newConnError(errStreamClosed)
       debugInfo "stream is closed " & $frm.sid.int
 
 proc recvDispatcher(client: ClientContext) {.async.} =

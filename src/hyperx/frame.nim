@@ -342,6 +342,13 @@ func windowSizeInc*(frm: Frame): uint {.inline, raises: [].} =
   result += frm.s[frmHeaderSize+3].uint
   result.clearBit 31  # clear reserved byte
 
+func errorCode*(frm: Frame): uint32 {.inline, raises: [].} =
+  doAssert frm.typ == frmtRstStream
+  result += frm.s[frmHeaderSize+0].uint32 shl 24
+  result += frm.s[frmHeaderSize+1].uint32 shl 16
+  result += frm.s[frmHeaderSize+2].uint32 shl 8
+  result += frm.s[frmHeaderSize+3].uint32
+
 # XXX add padding field and padding as payload
 #func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =
 #  doAssert frm.typ in {frmtData, frmtHeaders, frmtPushPromise}
