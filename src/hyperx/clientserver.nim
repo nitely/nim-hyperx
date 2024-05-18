@@ -27,9 +27,10 @@ const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
 const
   preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
   statusLineLen* = ":status: xxx\r\n".len
+  stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize* = 4096'u32
-  stgMaxConcurrentStreams* = uint32.high
+  stgInitialMaxConcurrentStreams* = uint32.high
   stgInitialWindowSize* = (1'u32 shl 16) - 1'u32
   stgMaxWindowSize* = (1'u32 shl 31) - 1'u32
   stgInitialMaxFrameSize* = 1'u32 shl 14
@@ -151,7 +152,7 @@ proc newClient*(
     recvMsgs: newQueue[Frame](10),
     streamOpenedMsgs: newQueue[Stream](10),
     maxPeerStrmIdSeen: 0.StreamId,
-    peerMaxConcurrentStreams: stgMaxConcurrentStreams,
+    peerMaxConcurrentStreams: stgInitialMaxConcurrentStreams,
     peerWindow: stgInitialWindowSize.int32,
     peerWindowSize: stgInitialWindowSize,
     peerMaxFrameSize: stgInitialMaxFrameSize,
@@ -301,8 +302,13 @@ proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
 func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
   result = ""
   var frmStg = newSettingsFrame()
-  if typ == ctClient:
+  case typ
+  of ctClient:
     frmStg.addSetting frmsEnablePush, stgDisablePush
+  of ctServer:
+    frmStg.addSetting(
+      frmsMaxConcurrentStreams, stgServerMaxConcurrentStreams.uint32
+    )
   frmStg.addSetting frmsInitialWindowSize, stgMaxWindowSize
   let frmWu = newWindowUpdateFrame(
     frmSidMain, (stgMaxWindowSize-stgInitialWindowSize).int
@@ -1037,7 +1043,7 @@ when defined(hyperxTest):
 when isMainModule:
   block default_settings:
     doAssert stgHeaderTableSize == 4096'u32
-    doAssert stgMaxConcurrentStreams == uint32.high
+    doAssert stgInitialMaxConcurrentStreams == uint32.high
     doAssert stgInitialWindowSize == 65_535'u32
     doAssert stgMaxWindowSize == 2_147_483_647'u32
     doAssert stgInitialMaxFrameSize == 16_384'u32

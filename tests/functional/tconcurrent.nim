@@ -45,9 +45,7 @@ proc spawnStream(
     doAssert data[] == headers.raw[]
     inc checked[]
 
-# beware 348 streams are created per client,
-# then that gets multiplied by this value
-const strmsMultiplier = 50
+const strmsPerClient = 10000
 const clientsCount = 10
 
 proc spawnClient(
@@ -57,9 +55,13 @@ proc spawnClient(
   var client = newClient(localHost, localPort)
   withClient(client):
     var strms = newSeq[Future[void]]()
-    for headers in headersCtx.s:
-      for _ in 0 .. strmsMultiplier-1:
+    var stmsCount = 0
+    while stmsCount < strmsPerClient:
+      for headers in headersCtx.s:
         strms.add spawnStream(client, headers, checked)
+        inc stmsCount
+        if stmsCount >= strmsPerClient:
+          break
     for strmFut in strms:
       await strmFut
 
@@ -78,7 +80,7 @@ proc main() {.async.} =
     clients.add spawnClient(headersCtx, checked)
   for clientFut in clients:
     await clientFut
-  doAssert checked[] == 348 * clientsCount * strmsMultiplier
+  doAssert checked[] == clientsCount * strmsPerClient
   echo "checked ", $checked[]
 
 (proc =
