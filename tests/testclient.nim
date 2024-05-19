@@ -10,7 +10,7 @@ import ../src/hyperx/frame
 import ../src/hyperx/errors
 
 const
-  userAgent = "Nim - HyperX"
+  userAgent = "Nim-HyperX/0.1"
 
 func toBytes(s: string): seq[byte] =
   result = newSeq[byte]()

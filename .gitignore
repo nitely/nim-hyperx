@@ -8,6 +8,7 @@ tests/testserver
 tests/functional/tserial
 tests/functional/tserver
 tests/functional/tconcurrent
+tests/functional/tconcurrentdata
 src/hyperx/client
 src/hyperx/server
 src/hyperx/clientserver

@@ -82,7 +82,7 @@ testAsync "simple req/resp":
     ":scheme: https\r\n" &
     ":path: /\r\n" &
     ":authority: 127.0.0.1\r\n" &
-    "user-agent: Nim - HyperX\r\n" &
+    "user-agent: Nim-HyperX/0.1\r\n" &
     "accept: */*\r\n"
   doAssert serverRecvBody == ""
 
@@ -185,7 +185,7 @@ testAsync "multiplex req/resp":
     ":scheme: https\r\n" &
     ":path: /foo\r\n" &
     ":authority: 127.0.0.1\r\n" &
-    "user-agent: Nim - HyperX\r\n" &
+    "user-agent: Nim-HyperX/0.1\r\n" &
     "content-type: application/json\r\n" &
     "content-length: 6\r\n" &
     "foobar"
@@ -194,7 +194,7 @@ testAsync "multiplex req/resp":
     ":scheme: https\r\n" &
     ":path: /bar\r\n" &
     ":authority: 127.0.0.1\r\n" &
-    "user-agent: Nim - HyperX\r\n" &
+    "user-agent: Nim-HyperX/0.1\r\n" &
     "content-type: application/json\r\n" &
     "content-length: 6\r\n" &
     "bazqux"

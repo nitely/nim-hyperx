@@ -74,7 +74,7 @@ func `$`(hm: HttpMethod): string =
   of hmPatch: "PATCH"
 
 const
-  defaultUserAgent = "Nim - HyperX"
+  defaultUserAgent = "Nim-HyperX/0.1"
   defaultAccept = "*/*"
   defaultContentType = "application/json"
 
