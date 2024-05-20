@@ -501,7 +501,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
     var prio = [byte 0, 0, 0, 0, 0]
     check not client.sock.isClosed, newConnClosedError()
-    let prioRln = await client.sock.recvInto(addr prio, frmPrioritySize)
+    let prioRln = await client.sock.recvInto(addr prio, prio.len)
     check prioRln == frmPrioritySize, newConnClosedError()
     check prioDependency(prio) != frm.sid, newConnError(errProtocolError)
     payloadLen -= frmPrioritySize
@@ -785,7 +785,7 @@ proc failSilently(f: Future[void]) {.async.} =
   except HyperxError:
     debugInfo getCurrentException().msg
 
-template withClient*(client: ClientContext, body: untyped) =
+template withClient*(client: ClientContext, body: untyped): untyped =
   {.line: instantiationInfo(fullPaths = true).}:
     doAssert not client.isConnected
     var recvFut, dispFut: Future[void]
