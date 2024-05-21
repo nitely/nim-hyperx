@@ -607,13 +607,13 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         client.peerMaxConcurrentStreams = value
       of frmsInitialWindowSize:
         check value <= stgMaxWindowSize, newConnError(errFlowControlError)
-        template negativeBoundCheck(a, b: untyped): untyped =
+        template subtBoundCheck(a, b: untyped): untyped =
           if b < 0 and a > int32.high + b: raise newConnError(errFlowControlError)
           if b > 0 and a < int32.low + b: raise newConnError(errFlowControlError)
         for strm in values client.streams:
-          negativeBoundCheck(client.peerWindowSize.int32, strm.peerWindow)
+          subtBoundCheck(client.peerWindowSize.int32, strm.peerWindow)
           strm.peerWindow = client.peerWindowSize.int32 - strm.peerWindow
-          negativeBoundCheck(value.int32, strm.peerWindow)
+          subtBoundCheck(value.int32, strm.peerWindow)
           strm.peerWindow = value.int32 - strm.peerWindow
           if not strm.peerWindowUpdateSig.isClosed:
             strm.peerWindowUpdateSig.trigger()

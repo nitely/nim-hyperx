@@ -4,15 +4,10 @@ from std/os import getEnv
 import std/strutils
 import std/asyncdispatch
 import ../../src/hyperx/server
+import ./tutils
 
-const localHost* = "127.0.0.1"
-const localPort* = Port 8443
 const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
-
-func newStringRef(s = ""): ref string =
-  new result
-  result[] = s
 
 proc processStream(strm: ClientStream) {.async.} =
   withStream strm:

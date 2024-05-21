@@ -3,7 +3,6 @@
 import std/asyncdispatch
 import ../../src/hyperx/client
 import ../../src/hyperx/signal
-import ./tserver.nim
 import ./tutils.nim
 
 type

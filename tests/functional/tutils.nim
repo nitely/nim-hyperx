@@ -3,8 +3,11 @@ import std/os
 import std/json
 import std/parseutils
 
-type Header* = (string, string)
+const localHost* = "127.0.0.1"
+const localPort* = Port 8443
 const testDataBaseDir = "tests/functional/"
+
+type Header* = (string, string)
 
 const connSpecificHeaders = [
   "connection",

@@ -6,7 +6,6 @@
 
 import std/asyncdispatch
 import ../../src/hyperx/client
-import ./tserver.nim
 import ./tutils.nim
 
 proc main() {.async.} =

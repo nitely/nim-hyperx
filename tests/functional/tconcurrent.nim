@@ -2,9 +2,8 @@
 
 import std/asyncdispatch
 import ../../src/hyperx/client
-import ./tserver.nim
-import ./tutils.nim
 import ../../src/hyperx/signal
+import ./tutils.nim
 
 type
   Headers = object
