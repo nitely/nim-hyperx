@@ -132,6 +132,10 @@ type
     peerWindowUpdateSig: SignalAsync
     window: int
     error*: ref HyperxError
+    when defined(hyperxStats):
+      frmsSent: int
+      frmsSentTyp: array[10, int]
+      bytesSent: int
 
 proc newClient*(
   typ: ClientTyp,
@@ -204,6 +208,14 @@ func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} 
   result = client.streams.open(client.currStreamId, client.peerWindowSize.int32)
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
+
+when defined(hyperxStats):
+  func echoStats*(client: ClientContext) =
+    debugEcho(
+      "frmSent: ", $client.frmsSent, "\n",
+      "frmsSentTyp: ", $client.frmsSentTyp, "\n",
+      "bytesSent: ", $client.bytesSent
+    )
 
 func validateHeader(
   ss: string,
@@ -285,6 +297,10 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
     await client.sock.send(frm.rawBytesPtr, frm.len)
   finally:
     GC_unref frm
+  when defined(hyperxStats):
+    client.frmsSent += 1
+    client.frmsSentTyp[frm.typ.int] += 1
+    client.bytesSent += frm.len
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except

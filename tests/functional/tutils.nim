@@ -2,6 +2,7 @@
 import std/os
 import std/json
 import std/parseutils
+import std/asyncdispatch
 
 const localHost* = "127.0.0.1"
 const localPort* = Port 8443

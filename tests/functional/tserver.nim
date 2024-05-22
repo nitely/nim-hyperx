@@ -43,6 +43,8 @@ proc processClientHandler(client: ClientContext) {.async.} =
     await processClient(client)
   except HyperxConnError as err:
     debugEcho err.msg
+  when defined(hyperxStats):
+    echoStats client
 
 proc serve(server: ServerContext) {.async.} =
   withServer server:

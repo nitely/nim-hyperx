@@ -17,6 +17,8 @@ import ./utils
 
 when defined(hyperxTest):
   import ./testsocket
+when defined(hyperxStats):
+  export echoStats
 
 export
   withClient,
