@@ -683,10 +683,8 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     if client.typ == ctServer and
         frm.sid.StreamId > client.maxPeerStrmIdSeen and
         frm.sid.int mod 2 != 0:
-      # XXX send refused stream, but we need to keep track
-      #     of fully proceseed streams (closed), so we send
-      #     conn errors for those if we get headers/data
-      check client.streams.len <= stgServerMaxConcurrentStreams, newConnError(errProtocolError)
+      check client.streams.len <= stgServerMaxConcurrentStreams,
+        newConnError(errProtocolError)
       client.maxPeerStrmIdSeen = frm.sid.StreamId
       # we do not store idle streams, so no need to close them
       let strm = client.streams.open(frm.sid.StreamId, client.peerWindowSize.int32)
