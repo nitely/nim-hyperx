@@ -800,28 +800,27 @@ proc failSilently(f: Future[void]) {.async.} =
     debugInfo getCurrentException().msg
 
 template withClient*(client: ClientContext, body: untyped): untyped =
-  {.line: instantiationInfo(fullPaths = true).}:
-    doAssert not client.isConnected
-    var recvFut, dispFut: Future[void]
-    try:
-      client.isConnected = true
-      if client.typ == ctClient:
-        await client.connect()
-      await client.handshake()
-      recvFut = client.recvTask()
-      dispFut = client.recvDispatcher()
-      block:
-        body
-    # do not handle any error here
-    finally:
-      # XXX do gracefull shutdown with timeout,
-      #     wait for send/recv to drain the queue
-      #     before closing
-      client.close()
-      # do not bother the user with hyperx errors
-      # at this point body completed or errored out
-      await failSilently(recvFut)
-      await failSilently(dispFut)
+  doAssert not client.isConnected
+  var recvFut, dispFut: Future[void]
+  try:
+    client.isConnected = true
+    if client.typ == ctClient:
+      await client.connect()
+    await client.handshake()
+    recvFut = client.recvTask()
+    dispFut = client.recvDispatcher()
+    block:
+      body
+  # do not handle any error here
+  finally:
+    # XXX do gracefull shutdown with timeout,
+    #     wait for send/recv to drain the queue
+    #     before closing
+    client.close()
+    # do not bother the user with hyperx errors
+    # at this point body completed or errored out
+    await failSilently(recvFut)
+    await failSilently(dispFut)
 
 type
   ClientStreamState* = enum
@@ -1038,17 +1037,16 @@ proc sendBody*(
     raise err
 
 template withStream*(strm: ClientStream, body: untyped): untyped =
-  {.line: instantiationInfo(fullPaths = true).}:
-    doAssert strm.state == csStateInitial
-    strm.state = csStateOpened
-    try:
-      block:
-        body
-      case strm.client.typ
-      of ctClient: doAssert strm.state == csStateRecvEnded
-      of ctServer: doAssert strm.state == csStateSentEnded
-    finally:
-      strm.close()
+  doAssert strm.state == csStateInitial
+  strm.state = csStateOpened
+  try:
+    block:
+      body
+    case strm.client.typ
+    of ctClient: doAssert strm.state == csStateRecvEnded
+    of ctServer: doAssert strm.state == csStateSentEnded
+  finally:
+    strm.close()
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =
