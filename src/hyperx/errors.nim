@@ -20,6 +20,8 @@ const
   errHttp11Required* = 0x0d.ErrorCode
   errUnknown = 0xff.ErrorCode  # not in the spec
 
+proc `==`*(a, b: ErrorCode): bool {.borrow.}
+
 func `$`(errCode: ErrorCode): string {.raises: [].} =
   case errCode
   of errNoError: "NO_ERROR"

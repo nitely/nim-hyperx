@@ -826,16 +826,13 @@ type
   ClientStreamState* = enum
     csStateInitial,
     csStateOpened,
-    csStateSentHeaders,
-    csStateSentData,
-    csStateSentEnded,
-    csStateRecvHeaders,
-    csStateRecvData,
-    csStateRecvEnded
+    csStateHeaders,
+    csStateData,
+    csStateEnded
   ClientStream* = ref object
     client*: ClientContext
     stream*: Stream
-    state: ClientStreamState
+    stateRecv, stateSend: ClientStreamState
     contentLen: int64
     contentLenRecv: int64
 
@@ -843,7 +840,10 @@ func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   ClientStream(
     client: client,
     stream: stream,
-    state: csStateInitial
+    stateRecv: csStateInitial,
+    stateSend: csStateInitial,
+    contentLen: 0,
+    contentLenRecv: 0
   )
 
 func newClientStream*(client: ClientContext): ClientStream =
@@ -854,7 +854,7 @@ proc close*(strm: ClientStream) =
   strm.client.close(strm.stream.id)
 
 func recvEnded*(strm: ClientStream): bool =
-  strm.state == csStateRecvEnded
+  strm.stateRecv == csStateEnded
 
 func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].} =
   case typ
@@ -862,10 +862,8 @@ func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].}
   of ctClient: clientHeadersValidation(s)
 
 proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
-  case strm.client.typ
-  of ctClient: doAssert strm.state == csStateSentEnded
-  of ctServer: doAssert strm.state == csStateOpened
-  strm.state = csStateRecvHeaders
+  doAssert strm.stateRecv == csStateOpened
+  strm.stateRecv = csStateHeaders
   # https://httpwg.org/specs/rfc9113.html#HttpFraming
   var frm: Frame
   while true:
@@ -888,7 +886,7 @@ proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
     debugInfo getCurrentException().msg
     raise newStrmError(errProtocolError)
   if frmfEndStream in frm.flags:
-    strm.state = csStateRecvEnded
+    strm.stateRecv = csStateEnded
     # XXX dont do for no content status 1xx/204/304 and HEAD response
     if strm.client.typ == ctServer:
       check strm.contentLen <= 0, newStrmError(errProtocolError)
@@ -911,14 +909,14 @@ func contentLenCheck(strm: ClientStream) {.raises: [StrmError].} =
   )
 
 proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
-  doAssert strm.state in {csStateRecvHeaders, csStateRecvData}
-  strm.state = csStateRecvData
+  doAssert strm.stateRecv in {csStateHeaders, csStateData}
+  strm.stateRecv = csStateData
   let frm = await strm.client.read(strm.stream)
   # XXX store trailer headers
   # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
   if frm.typ == frmtHeaders:
     check frmfEndStream in frm.flags, newStrmError(errProtocolError)
-    strm.state = csStateRecvEnded
+    strm.stateRecv = csStateEnded
     if strm.client.typ == ctServer:
       strm.contentLenCheck()
     validateTrailers(frm.payload)
@@ -927,7 +925,7 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   data[].add frm.payload
   strm.contentLenRecv += frm.payloadLen.int
   if frmfEndStream in frm.flags:
-    strm.state = csStateRecvEnded
+    strm.stateRecv = csStateEnded
     # XXX dont do for no content status 1xx/204/304 and HEAD response
     #     they could send empty data to close the stream so this is called
     if strm.client.typ == ctServer:
@@ -951,10 +949,8 @@ proc sendHeadersNaked(
 ) {.async.} =
   ## Headers must be HPACK encoded
   template client: untyped = strm.client
-  case strm.client.typ
-  of ctClient: doAssert strm.state == csStateOpened
-  of ctServer: doAssert strm.state == csStateRecvEnded
-  strm.state = csStateSentHeaders
+  doAssert strm.stateSend == csStateOpened
+  strm.stateSend = csStateHeaders
   var frm = newFrame()
   frm.add headers[]
   frm.setTyp frmtHeaders
@@ -963,7 +959,7 @@ proc sendHeadersNaked(
   frm.flags.incl frmfEndHeaders
   if finish:
     frm.flags.incl frmfEndStream
-    strm.state = csStateSentEnded
+    strm.stateSend = csStateEnded
   await client.write frm
 
 proc sendHeaders*(
@@ -990,32 +986,36 @@ proc sendBodyNaked(
   data: ref string,
   finish = false
 ) {.async.} =
-  doAssert strm.state in {csStateSentHeaders, csStateSentData}
-  strm.state = csStateSentData
+  template stream: untyped = strm.stream
+  template client: untyped = strm.client
+  doAssert strm.stateSend in {csStateHeaders, csStateData}
+  strm.stateSend = csStateData
   var dataIdxA = 0
   var dataIdxB = 0
   let L = data[].len
   while dataIdxA < L:
-    while strm.stream.peerWindow <= 0 or strm.client.peerWindow <= 0:
-      while strm.stream.peerWindow <= 0:
-        await strm.stream.peerWindowUpdateSig.waitFor()
-      while strm.client.peerWindow <= 0:
-        check strm.stream.state != strmClosed, newStrmError(errStreamClosed)
-        await strm.client.peerWindowUpdateSig.waitFor()
-    let peerWindow = min(strm.client.peerWindow, strm.stream.peerWindow)
+    while stream.peerWindow <= 0 or client.peerWindow <= 0:
+      while stream.peerWindow <= 0:
+        await stream.peerWindowUpdateSig.waitFor()
+      while client.peerWindow <= 0:
+        check stream.state != strmClosed, 
+          newStrmError(stream.errCodeOrDefault errStreamClosed)
+        await client.peerWindowUpdateSig.waitFor()
+    let peerWindow = min(client.peerWindow, stream.peerWindow)
     dataIdxB = min(dataIdxA+min(peerWindow, L), L)
     var frm = newFrame()
     frm.setTyp frmtData
-    frm.setSid strm.stream.id.FrmSid
+    frm.setSid stream.id.FrmSid
     frm.setPayloadLen (dataIdxB-dataIdxA).FrmPayloadLen
     if finish and dataIdxB == L:
       frm.flags.incl frmfEndStream
-      strm.state = csStateSentEnded
+      strm.stateSend = csStateEnded
     frm.s.add toOpenArray(data[], dataIdxA, dataIdxB-1)
-    strm.stream.peerWindow -= frm.payloadLen.int32
-    strm.client.peerWindow -= frm.payloadLen.int32
-    check strm.stream.state != strmClosed, newStrmError(errStreamClosed)
-    await strm.client.write frm
+    stream.peerWindow -= frm.payloadLen.int32
+    client.peerWindow -= frm.payloadLen.int32
+    check stream.state != strmClosed,
+      newStrmError(stream.errCodeOrDefault errStreamClosed)
+    await client.write frm
     dataIdxA = dataIdxB
 
 proc sendBody*(
@@ -1037,14 +1037,15 @@ proc sendBody*(
     raise err
 
 template withStream*(strm: ClientStream, body: untyped): untyped =
-  doAssert strm.state == csStateInitial
-  strm.state = csStateOpened
+  doAssert strm.stateRecv == csStateInitial
+  doAssert strm.stateSend == csStateInitial
+  strm.stateRecv = csStateOpened
+  strm.stateSend = csStateOpened
   try:
     block:
       body
-    case strm.client.typ
-    of ctClient: doAssert strm.state == csStateRecvEnded
-    of ctServer: doAssert strm.state == csStateSentEnded
+    doAssert strm.stateRecv == csStateEnded
+    doAssert strm.stateSend == csStateEnded
   finally:
     strm.close()
 

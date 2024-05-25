@@ -22,9 +22,9 @@ func toString(s: openArray[byte]): string =
   for c in s:
     result.add c.char
 
-func newStringRef(): ref string =
+func newStringRef(s = ""): ref string =
   new result
-  result[] = ""
+  result[] = s
 
 proc checkHandshake(tc: TestClientContext) {.async.} =
   const preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".toBytes
@@ -398,3 +398,69 @@ testAsync "request stream":
   doAssert frm3.sid.int == 1
   doAssert frm3.payload.toString == data2
   doAssert frmfEndStream in frm3.flags
+
+# https://httpwg.org/specs/rfc7540.html#HttpSequence
+testAsync "stream error NO_ERROR handling":
+  const headers = ":status: 200\r\nerror: foo error\r\n"
+  proc send(strm: ClientStream, data: ref string) {.async.} =
+    await strm.sendHeaders(
+      hmPost, "/foo", contentLen = data[].len
+    )
+    await strm.sendBody(data, finish = true)
+  proc recv(strm: ClientStream, data: ref string) {.async.} =
+    await strm.recvHeaders(data)
+    while not strm.recvEnded:
+      await strm.recvBody(data)
+  proc replyNoError(tc: TestClientContext, sid: FrmSid) {.async.} =
+    var frm = frame(frmtHeaders, sid, @[frmfEndHeaders, frmfEndStream])
+    frm.add hencode(tc, headers).toBytes
+    await tc.reply frm
+    await tc.reply newRstStreamFrame(sid, frmeNoError.int)
+  let dataIn = newStringRef()
+  let dataOut = newStringRef("123")
+  var tc = newTestClient("foo.bar")
+  withClient tc.client:
+    await tc.checkHandshake()
+    let strm = tc.client.newClientStream()
+    withStream strm:
+      # recv before send for NO_ERROR handling
+      let recvFut = strm.recv(dataIn)
+      let sendFut = strm.send(dataOut)
+      await tc.replyNoError(strm.stream.id.FrmSid)
+      await sendFut  # this could raise
+      await recvFut  # this should never raise
+  doAssert dataIn[] == headers
+
+testAsync "stream NO_ERROR before request completes":
+  const headers = ":status: 200\r\nerror: foo error\r\n"
+  proc recv(strm: ClientStream, data: ref string) {.async.} =
+    await strm.recvHeaders(data)
+    while not strm.recvEnded:
+      await strm.recvBody(data)
+  proc replyNoError(tc: TestClientContext, sid: FrmSid) {.async.} =
+    var frm = frame(frmtHeaders, sid, @[frmfEndHeaders, frmfEndStream])
+    frm.add hencode(tc, headers).toBytes
+    await tc.reply frm
+    await tc.reply newRstStreamFrame(sid, frmeNoError.int)
+  let dataIn = newStringRef()
+  let dataOut = newStringRef("123")
+  var tc = newTestClient("foo.bar")
+  withClient tc.client:
+    await tc.checkHandshake()
+    let strm = tc.client.newClientStream()
+    withStream strm:
+      # recv before send for NO_ERROR handling
+      let recvFut = strm.recv(dataIn)
+      await strm.sendHeaders(
+        hmPost, "/foo", contentLen = dataOut[].len
+      )
+      await tc.replyNoError(strm.stream.id.FrmSid)
+      await recvFut  # this should never raise
+      # XXX await for stream close (rst received);
+      #     this seems to work by chance
+      try:
+        await strm.sendBody(dataOut, finish = true)
+        doAssert false
+      except StrmError as err:
+        doAssert err.code == errNoError
+  doAssert dataIn[] == headers
