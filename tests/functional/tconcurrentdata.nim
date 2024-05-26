@@ -119,7 +119,9 @@ proc main() {.async.} =
         ("user-agent", "HyperX/0.1"),
         ("content-type", "text/plain"),
         ("content-length", $data[i].len),
-        ("custom-concurrecy-counter-0", $i)
+        ("custom-concurrency-counter-header-0-" & $i, "custom-concurrency-counter-value-0-" & $i),
+        ("custom-concurrency-counter-header-1-" & $i, "custom-concurrency-counter-value-1-" & $i),
+        ("custom-concurrency-counter-header-2-" & $i, "custom-concurrency-counter-value-2-" & $i)
       ]),
       newData(data[i])
     )
