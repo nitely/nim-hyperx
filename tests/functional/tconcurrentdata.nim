@@ -1,5 +1,6 @@
 {.define: ssl.}
 
+import std/random
 import std/asyncdispatch
 import ../../src/hyperx/client
 import ../../src/hyperx/signal
@@ -77,6 +78,7 @@ proc spawnStream(
 const strmsPerClient = 10000
 const clientsCount = 10
 const strmsInFlight = 100
+const dataPayloadLen = 2000
 
 proc spawnClient(
   reqsCtx: ReqsCtx,
@@ -102,10 +104,10 @@ proc spawnClient(
 
 proc main() {.async.} =
   var data = newSeq[string]()
-  for c in 'a' .. 'z':
+  for i in 0 .. 50:
     data.add ""
-    for _ in 0 .. 1024:
-      data[^1].add c
+    for _ in 0 .. dataPayloadLen-1:
+      data[^1].add rand('a' .. 'z')
   let reqsCtx = newReqsCtx()
   for i in 0 .. data.len-1:
     reqsCtx.s.add newReq(
@@ -116,7 +118,8 @@ proc main() {.async.} =
         (":authority", "foo.bar"),
         ("user-agent", "HyperX/0.1"),
         ("content-type", "text/plain"),
-        ("content-length", $data[i].len)
+        ("content-length", $data[i].len),
+        ("custom-concurrecy-counter-0", $i)
       ]),
       newData(data[i])
     )
