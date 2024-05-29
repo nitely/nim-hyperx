@@ -138,6 +138,36 @@ func text*(r: Response): string {.raises: [].} =
   result = ""
   result.add r.data.s
 
+proc send(
+  strm: ClientStream,
+  httpMethod: HttpMethod,
+  path: string,
+  data: seq[byte],
+  userAgent, accept, contentType: string
+) {.async.} =
+  await strm.sendHeaders(
+    httpMethod, path,
+    userAgent = userAgent,
+    accept = accept,
+    contentType = contentType,
+    contentLen = data.len
+  )
+  let body = new string
+  body[] = ""
+  if data.len > 0:
+    body[].add data
+    await strm.sendBody(body, finish = true)
+
+proc recv(strm: ClientStream, response: Response) {.async.} =
+  let body = new string
+  body[] = ""
+  await strm.recvHeaders(body)
+  response.headers.add body[]
+  body[].setLen 0
+  while not strm.recvEnded:
+    await strm.recvBody(body)
+  response.data.s.add body[]
+
 proc request(
   client: ClientContext,
   httpMethod: HttpMethod,
@@ -150,25 +180,14 @@ proc request(
   result = newResponse()
   let strm = client.newClientStream()
   withStream strm:
-    await strm.sendHeaders(
-      httpMethod, path,
-      userAgent = userAgent,
-      accept = accept,
-      contentType = contentType,
-      contentLen = data.len
+    let sendFut = strm.send(
+      httpMethod, path, data, userAgent, accept, contentType
     )
-    let body = new string
-    body[] = ""
-    if data.len > 0:
-      body[].add data
-      await strm.sendBody(body, finish = true)
-    body[].setLen 0
-    await strm.recvHeaders(body)
-    result.headers.add body[]
-    body[].setLen 0
-    while not strm.recvEnded:
-      await strm.recvBody(body)
-    result.data.s.add body[]
+    let recvFut = strm.recv(result)
+    try:
+      await sendFut
+    finally:
+      await recvFut
 
 proc get*(
   client: ClientContext,
