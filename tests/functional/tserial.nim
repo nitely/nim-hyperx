@@ -26,10 +26,7 @@ proc main() {.async.} =
           await strm.sendHeaders(headersRef, finish = true)
           var data = newStringref()
           await strm.recvHeaders(data)
-          doAssert data[] ==
-            ":status: 200\r\n" &
-            "content-type: text/plain\r\n" &
-            "content-length: " & $rawHeaders.len & "\r\n"
+          doAssert data[] == ":status: 200\r\n"
           data[].setLen 0
           while not strm.recvEnded:
             await strm.recvBody(data)

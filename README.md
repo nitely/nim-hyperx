@@ -20,6 +20,10 @@ nimble install hyperx
 
 > Nim +2.0
 
+## Requirements
+
+- OpenSSL
+
 ## Client
 
 ```nim
@@ -67,6 +71,26 @@ debugging messages
 ```
 nim c -r -d:hyperxDebug client.nim
 ```
+
+## FAQ
+
+### What if I need to serve http/1 and http/3 traffic?
+
+You may use a reverse proxy such a [Caddy](https://github.com/caddyserver/caddy) or a cloud offering such as AWS ALB for this. There are many ways to enumerate them all, but basically look for a service that can receive http/1, 2, 3 traffic and forward it as http/2.
+
+### Is data streaming supported?
+
+Yes. Both server and client support data streaming. See the examples.
+
+### Can I use http/2 in place of WebSockets?
+
+If you don't need to serve web-browsers, then yes. Http/2 allows full-duplex data communication over a single stream. Web-browsers only support half-duplex streaming [for whatever reason](https://github.com/whatwg/fetch/issues/1254).
+
+If you need to support web-browsers it gets tricky for some use cases, as you need to do two fetches, one to stream the request, one to stream the response, and something like an ID in the URL so the server can associate both streams.
+
+### Are there benchmarks?
+
+The CI runs h2load on it, but it only starts a single server instance. Proper bench-marking would start a server per CPU, and run a few combinations of load. To save you the trip, the CI results show around 30K requests/s.
 
 ## LICENSE
 

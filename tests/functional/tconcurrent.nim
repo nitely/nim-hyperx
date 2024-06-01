@@ -1,3 +1,7 @@
+## READ: this goes over the default max number of
+## concurrent streams; define -d:hyperxMaxConcurrentStrms=1000000
+## on the server
+
 {.define: ssl.}
 
 import std/asyncdispatch
@@ -25,6 +29,13 @@ func newHeadersCtx(): HeadersCtx =
     s: newSeq[Headers]()
   )
 
+proc recv(strm: ClientStream, data: ref string) {.async.} =
+  await strm.recvHeaders(data)
+  doAssert data[] == ":status: 200\r\n"
+  data[].setLen 0
+  while not strm.recvEnded:
+    await strm.recvBody(data)
+
 proc spawnStream(
   client: ClientContext,
   headers: Headers,
@@ -32,16 +43,11 @@ proc spawnStream(
 ) {.async.} =
   let strm = client.newClientStream()
   withStream strm:
-    await strm.sendHeaders(headers.s, finish = true)
-    var data = newStringref()
-    await strm.recvHeaders(data)
-    doAssert data[] ==
-      ":status: 200\r\n" &
-      "content-type: text/plain\r\n" &
-      "content-length: " & $headers.raw[].len & "\r\n"
-    data[].setLen 0
-    while not strm.recvEnded:
-      await strm.recvBody(data)
+    let data = newStringref()
+    let recvFut = strm.recv(data)
+    let sendFut = strm.sendHeaders(headers.s, finish = true)
+    await recvFut
+    await sendFut
     doAssert data[] == headers.raw[]
     inc checked[]
 

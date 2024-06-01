@@ -40,6 +40,21 @@ func newReqsCtx(): ReqsCtx =
     s: newSeq[Req]()
   )
 
+proc send(strm: ClientStream, req: Req) {.async.} =
+  # XXX send multiple data frames
+  await strm.sendHeaders(req.headers.s, finish = false)
+  await strm.sendBody(req.data.s, finish = true)
+
+proc recv(strm: ClientStream, req: Req) {.async.} =
+  var data = newStringref()
+  await strm.recvHeaders(data)
+  let exptLen = req.headers.raw[].len + req.data.s[].len
+  doAssert data[] == ":status: 200\r\n"
+  data[].setLen 0
+  while not strm.recvEnded:
+    await strm.recvBody(data)
+  doAssert data[] == req.headers.raw[] & req.data.s[]
+
 proc spawnStream(
   client: ClientContext,
   req: Req,
@@ -47,19 +62,10 @@ proc spawnStream(
 ) {.async.} =
   let strm = client.newClientStream()
   withStream strm:
-    await strm.sendHeaders(req.headers.s, finish = false)
-    await strm.sendBody(req.data.s, finish = true)
-    var data = newStringref()
-    await strm.recvHeaders(data)
-    let exptLen = req.headers.raw[].len + req.data.s[].len
-    doAssert data[] ==
-      ":status: 200\r\n" &
-      "content-type: text/plain\r\n" &
-      "content-length: " & $exptLen & "\r\n"
-    data[].setLen 0
-    while not strm.recvEnded:
-      await strm.recvBody(data)
-    doAssert data[] == req.headers.raw[] & req.data.s[]
+    let recvFut = strm.recv(req)
+    let sendFut = strm.send(req)
+    await recvFut
+    await sendFut
     inc checked[]
 
 proc spawnStream(

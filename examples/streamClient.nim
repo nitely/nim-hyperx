@@ -46,10 +46,10 @@ when isMainModule:
     withStream strm:
       # send and recv concurrently
       var data = newStringRef()
-      let sendFut = strm.send(path, chunks)
       let recvFut = strm.recv(data)
-      await sendFut
+      let sendFut = strm.send(path, chunks)
       await recvFut
+      await sendFut
       var expectedData = ""
       for chunk in chunks:
         expectedData.add chunk

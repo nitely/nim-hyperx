@@ -54,10 +54,10 @@ when isMainModule:
   ) {.async.} =
     let strm = client.newClientStream()
     withStream strm:
-      let sendFut = strm.send(path)
       let recvFut = strm.recv()
-      await sendFut
+      let sendFut = strm.send(path)
       await recvFut
+      await sendFut
 
   proc main() {.async.} =
     var client = newClient(localHost, localPort)

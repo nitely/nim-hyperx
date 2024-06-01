@@ -180,14 +180,14 @@ proc request(
   result = newResponse()
   let strm = client.newClientStream()
   withStream strm:
+    let recvFut = strm.recv(result)
     let sendFut = strm.send(
       httpMethod, path, data, userAgent, accept, contentType
     )
-    let recvFut = strm.recv(result)
     try:
-      await sendFut
-    finally:
       await recvFut
+    finally:
+      await sendFut
 
 proc get*(
   client: ClientContext,
