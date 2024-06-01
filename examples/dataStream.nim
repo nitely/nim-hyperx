@@ -7,12 +7,14 @@
 import std/strutils
 import std/asyncdispatch
 import ../src/hyperx/client
-import ./localServer
+from ./localServer import localHost, localPort
 
 const dataSizeMb = 1000
 # do not change:
 const dataSize = dataSizeMb * 1024 * 1024
 const frmSize = 16 * 1024
+doAssert dataSize mod frmSize == 0
+const chunks = dataSize div frmSize
 
 func newStringRef(s = ""): ref string =
   new result
@@ -21,29 +23,41 @@ func newStringRef(s = ""): ref string =
 when isMainModule:
   var dataSentSize = 0
   var dataRecvSize = 0
+
+  proc send(
+    strm: ClientStream, path: string
+  ) {.async.} =
+    await strm.sendHeaders(
+      hmPost, path,
+      contentLen = dataSize
+    )
+    var data = newStringref()
+    for _ in 0 .. frmSize-1:
+      data[].add 'a'
+    for i in 0 .. chunks-1:
+      await strm.sendBody(data, finish = i == chunks-1)
+      dataSentSize += data[].len
+
+  proc recv(
+    strm: ClientStream
+  ) {.async.} =
+    var data = newStringRef()
+    await strm.recvHeaders(data)
+    doAssert ":status:" in data[]
+    while not strm.recvEnded:
+      data[].setLen 0
+      await strm.recvBody(data)
+      dataRecvSize += data[].len
+
   proc streamChunks(
     client: ClientContext, path: string
   ) {.async.} =
     let strm = client.newClientStream()
     withStream strm:
-      await strm.sendHeaders(
-        hmPost, path,
-        contentLen = dataSize
-      )
-      var data = newStringref()
-      for _ in 0 .. frmSize-1:
-        data[].add 'a'
-      let chunks = dataSize div frmSize
-      for i in 0 .. chunks-1:
-        await strm.sendBody(data, finish = i == chunks-1)
-        dataSentSize += data[].len
-      data[].setLen 0
-      await strm.recvHeaders(data)
-      doAssert ":status:" in data[]
-      while not strm.recvEnded:
-        data[].setLen 0
-        await strm.recvBody(data)
-        dataRecvSize += data[].len
+      let sendFut = strm.send(path)
+      let recvFut = strm.recv()
+      await sendFut
+      await recvFut
 
   proc main() {.async.} =
     var client = newClient(localHost, localPort)

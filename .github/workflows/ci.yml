@@ -37,6 +37,18 @@ jobs:
           (nimble funcserve &) && \
           sleep 10s && \
           nimble functest"
+    - name: Run Examples
+      run: |
+        docker pull nimlang/nim:${{ matrix.nim }}
+        docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
+        /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
+          apt update && \
+          apt install -y make && \ 
+          make install_mkcert && \
+          nimble install -y && \
+          (nimble serve2 &) && \
+          sleep 10s && \
+          nimble testexamples"
     - name: Run h2spec
       run: |
         docker pull nimlang/nim:${{ matrix.nim }}
@@ -46,7 +58,7 @@ jobs:
           apt install -y make && \ 
           make install_mkcert && \
           nimble install -y && \
-          (nimble serve &) && \
+          (nimble serve2 &) && \
           sleep 10s && \
           curl -JLO \"https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz\" && \
           tar -xvf h2spec_linux_amd64.tar.gz && \
