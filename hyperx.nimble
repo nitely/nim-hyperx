@@ -24,7 +24,6 @@ task test, "Test":
   exec "nim c -r -f tests/testserver.nim"
   # integration tests
   exec "nim c -r -f tests/testclientserver.nim"
-  exec "nim c -r -f examples/streamClient.nim"
 
 task testexamples, "Test examples":
   exec "nim c -r -f examples/streamClient.nim"
@@ -44,7 +43,6 @@ task test2, "Test2":
   exec "nim c -r -f tests/testclient.nim"
   exec "nim c -r -f tests/testserver.nim"
   exec "nim c -r -f tests/testclientserver.nim"
-  exec "nim c -r -f examples/streamClient.nim"
 
 task serve, "Serve":
   exec "nim c -r examples/localServer.nim"
