@@ -76,4 +76,5 @@ jobs:
           (nimble serve2 &) && \
           sleep 10s && \
           apt install -y nghttp2-client && \
-          h2load -n100000 -c100 -m10 https://127.0.0.1:4443 | tee /dev/stdout | grep \"100000 2xx\""
+          h2load -n100000 -c100 -m10 https://127.0.0.1:4443 | grep \"100000 2xx\" && \
+          h2load -n100000 -c10 -m1000 -t2 https://127.0.0.1:4443"
