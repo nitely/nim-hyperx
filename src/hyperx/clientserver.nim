@@ -27,7 +27,6 @@ const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
 const
   preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
   statusLineLen* = ":status: xxx\r\n".len
-  stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize* = 4096'u32
   stgInitialMaxConcurrentStreams* = uint32.high
@@ -36,6 +35,9 @@ const
   stgInitialMaxFrameSize* = 1'u32 shl 14
   stgMaxFrameSize* = (1'u32 shl 24) - 1'u32
   stgDisablePush* = 0'u32
+const
+  stgWindowSize* {.intdefine: "hyperxWindowSize".} = stgInitialWindowSize
+  stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
 
 type
   ClientTyp* = enum
@@ -325,14 +327,15 @@ func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
     frmStg.addSetting(
       frmsMaxConcurrentStreams, stgServerMaxConcurrentStreams.uint32
     )
-  frmStg.addSetting frmsInitialWindowSize, stgMaxWindowSize
-  let frmWu = newWindowUpdateFrame(
-    frmSidMain, (stgMaxWindowSize-stgInitialWindowSize).int
-  )
+  frmStg.addSetting frmsInitialWindowSize, stgWindowSize
   if typ == ctClient:
     result.add preface
   result.add frmStg.s
-  result.add frmWu.s
+  if stgWindowSize > stgInitialWindowSize:
+    let frmWu = newWindowUpdateFrame(
+      frmSidMain, (stgWindowSize-stgInitialWindowSize).int
+    )
+    result.add frmWu.s
 
 const clientHandshakeBlob = handshakeBlob(ctClient)
 const serverHandshakeBlob = handshakeBlob(ctServer)
@@ -437,13 +440,6 @@ func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError
 proc readNaked(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
   let frm = await strm.msgs.pop()
   doAssert strm.id == frm.sid.StreamId
-  if frm.typ == frmtData and
-      frm.payloadLen.int > 0 and
-      frmfEndStream notin frm.flags:
-    strm.window += frm.payloadLen.int
-    if strm.window > stgMaxWindowSize.int div 2:
-      await client.write newWindowUpdateFrame(frm.sid, strm.window)
-      strm.window = 0
   return frm
 
 proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
@@ -700,7 +696,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       frm.s.add headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
       client.window += frm.payloadLen.int
-      if client.window > stgMaxWindowSize.int div 2:
+      if client.window > stgWindowSize.int div 2:
         await client.write newWindowUpdateFrame(frmSidMain, client.window)
         client.window = 0
     if frm.typ == frmtWindowUpdate:
@@ -741,9 +737,6 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         await client.send newRstStreamFrame(frm.sid, err.code.int)
       continue
     try:
-      # XXX a stream can block all streams here,
-      #     no way around it. Maybe it can be avoided with
-      #     window update default or min size?
       await stream.msgs.put frm
     except QueueClosedError:
       check frm.typ in {frmtRstStream, frmtWindowUpdate}, newConnError(errStreamClosed)
@@ -985,8 +978,16 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
 proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   if strm.stateRecv != csStateEnded and strm.bodyRecv.len == 0:
     await strm.bodyRecvSig.waitFor()
+  let bodyL = strm.bodyRecv.len
   data[].add strm.bodyRecv
   strm.bodyRecv.setLen 0
+  if strm.stateRecv != csStateEnded and bodyL > 0:
+    strm.stream.window += bodyL
+    if strm.stream.window > stgWindowSize.int div 2:
+      await strm.client.write newWindowUpdateFrame(
+        strm.stream.id.FrmSid, strm.stream.window
+      )
+      strm.stream.window = 0
 
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   try:
