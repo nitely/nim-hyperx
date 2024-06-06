@@ -27,8 +27,11 @@ proc processStream(strm: ClientStream) {.async.} =
     await strm.recvHeaders(data)
     await strm.sendHeaders(
       newSeqRef(@[(":status", "200")]),
-      finish = strm.recvEnded
+      finish = false
     )
+    if strm.recvEnded:
+      data[] = "Hello world!"
+      await strm.sendBody(data, finish = true)
     while not strm.recvEnded:
       data[].setLen 0
       await strm.recvBody(data)
