@@ -1,3 +1,5 @@
+## Echo server
+
 {.define: ssl.}
 
 from std/os import getEnv
@@ -14,27 +16,23 @@ func newStringRef(s = ""): ref string =
   new result
   result[] = s
 
+func newSeqRef[T](s: seq[T] = @[]): ref seq[T] =
+  new result
+  result[] = s
+
 proc processStream(strm: ClientStream) {.async.} =
-  ## This receives the headers & body from a stream
-  ## opened by the client, and sends back whatever
-  ## data it received (up to 16KB). It's an echo server.
+  ## Full-duplex echo stream
   withStream strm:
-    var headers = newStringRef()
-    await strm.recvHeaders(headers)
-    #doAssert ":authority: " & localHost in headers[]
-    var dataEcho = newStringRef()
-    while not strm.recvEnded:
-      await strm.recvBody(dataEcho)
-      if dataEcho[].len >= (16 * 1024)-1:
-        dataEcho[].setLen 0
-    if dataEcho[].len == 0:
-      dataEcho[] = "Hello world!"
+    let data = newStringRef()
+    await strm.recvHeaders(data)
     await strm.sendHeaders(
-      status = 200,
-      contentType = "text/plain",
-      contentLen = dataEcho[].len
+      newSeqRef(@[(":status", "200")]),
+      finish = strm.recvEnded
     )
-    await strm.sendBody(dataEcho, finish = true)
+    while not strm.recvEnded:
+      data[].setLen 0
+      await strm.recvBody(data)
+      await strm.sendBody(data, finish = strm.recvEnded)
 
 proc processStreamHandler(strm: ClientStream, propagateErr: bool) {.async.} =
   try:

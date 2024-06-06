@@ -1063,7 +1063,7 @@ proc sendBodyNaked(
           newStrmError(stream.errCodeOrDefault errStreamClosed)
         await client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(client.peerWindow, stream.peerWindow)
-    dataIdxB = min(dataIdxA+min(peerWindow, L), L)
+    dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
     var frm = newFrame()
     frm.setTyp frmtData
     frm.setSid stream.id.FrmSid
