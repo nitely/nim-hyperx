@@ -8,6 +8,8 @@ import ../src/hyperx/client
 import ../src/hyperx/testutils
 import ../src/hyperx/frame
 import ../src/hyperx/errors
+from ../src/hyperx/clientserver import
+  stgWindowSize, stgInitialWindowSize
 
 const
   userAgent = "Nim-HyperX/0.1"
@@ -33,9 +35,10 @@ proc checkHandshake(tc: TestClientContext) {.async.} =
   let frm1 = await tc.sent()
   doAssert frm1.typ == frmtSettings
   doAssert frm1.sid == frmSidMain
-  let frm2 = await tc.sent()
-  doAssert frm2.typ == frmtWindowUpdate
-  doAssert frm2.sid == frmSidMain
+  if stgWindowSize > stgInitialWindowSize:
+    let frm2 = await tc.sent()
+    doAssert frm2.typ == frmtWindowUpdate
+    doAssert frm2.sid == frmSidMain
 
 proc checkTableSizeAck(tc: TestClientContext) {.async.} =
   let frm1 = await tc.sent()

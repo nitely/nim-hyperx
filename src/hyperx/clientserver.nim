@@ -27,7 +27,6 @@ const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
 const
   preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
   statusLineLen* = ":status: xxx\r\n".len
-  stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize* = 4096'u32
   stgInitialMaxConcurrentStreams* = uint32.high
@@ -36,6 +35,9 @@ const
   stgInitialMaxFrameSize* = 1'u32 shl 14
   stgMaxFrameSize* = (1'u32 shl 24) - 1'u32
   stgDisablePush* = 0'u32
+const
+  stgWindowSize* {.intdefine: "hyperxWindowSize".} = stgInitialWindowSize
+  stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
 
 type
   ClientTyp* = enum
@@ -325,14 +327,15 @@ func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
     frmStg.addSetting(
       frmsMaxConcurrentStreams, stgServerMaxConcurrentStreams.uint32
     )
-  frmStg.addSetting frmsInitialWindowSize, stgMaxWindowSize
-  let frmWu = newWindowUpdateFrame(
-    frmSidMain, (stgMaxWindowSize-stgInitialWindowSize).int
-  )
+  frmStg.addSetting frmsInitialWindowSize, stgWindowSize
   if typ == ctClient:
     result.add preface
   result.add frmStg.s
-  result.add frmWu.s
+  if stgWindowSize > stgInitialWindowSize:
+    let frmWu = newWindowUpdateFrame(
+      frmSidMain, (stgWindowSize-stgInitialWindowSize).int
+    )
+    result.add frmWu.s
 
 const clientHandshakeBlob = handshakeBlob(ctClient)
 const serverHandshakeBlob = handshakeBlob(ctServer)
@@ -437,13 +440,6 @@ func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError
 proc readNaked(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
   let frm = await strm.msgs.pop()
   doAssert strm.id == frm.sid.StreamId
-  if frm.typ == frmtData and
-      frm.payloadLen.int > 0 and
-      frmfEndStream notin frm.flags:
-    strm.window += frm.payloadLen.int
-    if strm.window > stgMaxWindowSize.int div 2:
-      await client.write newWindowUpdateFrame(frm.sid, strm.window)
-      strm.window = 0
   return frm
 
 proc read*(client: ClientContext, strm: Stream): Future[Frame] {.async.} =
@@ -700,7 +696,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       frm.s.add headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
       client.window += frm.payloadLen.int
-      if client.window > stgMaxWindowSize.int div 2:
+      if client.window > stgWindowSize.int div 2:
         await client.write newWindowUpdateFrame(frmSidMain, client.window)
         client.window = 0
     if frm.typ == frmtWindowUpdate:
@@ -740,10 +736,10 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         client.close(stream.id)
         await client.send newRstStreamFrame(frm.sid, err.code.int)
       continue
+    if frm.typ == frmtData:
+      stream.window += frm.payloadLen.int
+      check stream.window <= stgWindowSize.int, newConnError(errFlowControlError)
     try:
-      # XXX a stream can block all streams here,
-      #     no way around it. Maybe it can be avoided with
-      #     window update default or min size?
       await stream.msgs.put frm
     except QueueClosedError:
       check frm.typ in {frmtRstStream, frmtWindowUpdate}, newConnError(errStreamClosed)
@@ -835,6 +831,10 @@ type
     stateRecv, stateSend: ClientStreamState
     contentLen: int64
     contentLenRecv: int64
+    bodyRecv: string
+    bodyRecvSig: SignalAsync
+    headersRecv: string
+    headersRecvSig: SignalAsync
 
 func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   ClientStream(
@@ -843,7 +843,11 @@ func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
     stateRecv: csStateInitial,
     stateSend: csStateInitial,
     contentLen: 0,
-    contentLenRecv: 0
+    contentLenRecv: 0,
+    bodyRecv: "",
+    bodyRecvSig: newSignal(),
+    headersRecv: "",
+    headersRecvSig: newSignal()
   )
 
 func newClientStream*(client: ClientContext): ClientStream =
@@ -852,16 +856,20 @@ func newClientStream*(client: ClientContext): ClientStream =
 
 proc close*(strm: ClientStream) =
   strm.client.close(strm.stream.id)
+  strm.bodyRecvSig.close()
+  strm.headersRecvSig.close()
 
 func recvEnded*(strm: ClientStream): bool =
-  strm.stateRecv == csStateEnded
+  strm.stateRecv == csStateEnded and
+  strm.headersRecv.len == 0 and
+  strm.bodyRecv.len == 0
 
 func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].} =
   case typ
   of ctServer: serverHeadersValidation(s)
   of ctClient: clientHeadersValidation(s)
 
-proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
+proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
   doAssert strm.stateRecv == csStateOpened
   strm.stateRecv = csStateHeaders
   # https://httpwg.org/specs/rfc9113.html#HttpFraming
@@ -878,7 +886,7 @@ proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
       check frmfEndStream notin frm.flags, newStrmError(errProtocolError)
     else:
       break
-  data[].add frm.payload
+  strm.headersRecv.add frm.payload
   try:
     strm.contentLen = contentLen(frm.payload)
   except ValueError:
@@ -886,21 +894,12 @@ proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
     debugInfo getCurrentException().msg
     raise newStrmError(errProtocolError)
   if frmfEndStream in frm.flags:
-    strm.stateRecv = csStateEnded
     # XXX dont do for no content status 1xx/204/304 and HEAD response
     if strm.client.typ == ctServer:
       check strm.contentLen <= 0, newStrmError(errProtocolError)
-
-proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
-  try:
-    await recvHeadersNaked(strm, data)
-  except StrmError as err:
-    strm.stream.error = err
-    strm.close()
-    await strm.client.sendSilently newRstStreamFrame(
-      strm.stream.id.FrmSid, err.code.int
-    )
-    raise err
+    strm.stateRecv = csStateEnded
+  strm.headersRecvSig.trigger()
+  strm.headersRecvSig.close()
 
 func contentLenCheck(strm: ClientStream) {.raises: [StrmError].} =
   check(
@@ -908,38 +907,107 @@ func contentLenCheck(strm: ClientStream) {.raises: [StrmError].} =
     newStrmError(errProtocolError)
   )
 
-proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
+proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
   doAssert strm.stateRecv in {csStateHeaders, csStateData}
   strm.stateRecv = csStateData
-  let frm = await strm.client.read(strm.stream)
-  # XXX store trailer headers
-  # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
-  if frm.typ == frmtHeaders:
-    check frmfEndStream in frm.flags, newStrmError(errProtocolError)
-    strm.stateRecv = csStateEnded
-    if strm.client.typ == ctServer:
-      strm.contentLenCheck()
-    validateTrailers(frm.payload)
-    return
-  check frm.typ == frmtData, newStrmError(errProtocolError)
-  data[].add frm.payload
-  strm.contentLenRecv += frm.payloadLen.int
-  if frmfEndStream in frm.flags:
-    strm.stateRecv = csStateEnded
-    # XXX dont do for no content status 1xx/204/304 and HEAD response
-    #     they could send empty data to close the stream so this is called
-    if strm.client.typ == ctServer:
-      strm.contentLenCheck()
+  var frm: Frame
+  while true:
+    frm = await strm.client.read(strm.stream)
+    # XXX store trailer headers
+    # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
+    if frm.typ == frmtHeaders:
+      check frmfEndStream in frm.flags, newStrmError(errProtocolError)
+      if strm.client.typ == ctServer:
+        strm.contentLenCheck()
+      validateTrailers(frm.payload)
+      strm.stateRecv = csStateEnded
+      break
+    check frm.typ == frmtData, newStrmError(errProtocolError)
+    strm.bodyRecv.add frm.payload
+    strm.contentLenRecv += frm.payloadLen.int
+    if frmfEndStream in frm.flags:
+      # XXX dont do for no content status 1xx/204/304 and HEAD response
+      #     they could send empty data to close the stream so this is called
+      if strm.client.typ == ctServer:
+        strm.contentLenCheck()
+      strm.stateRecv = csStateEnded
+      break
+    strm.bodyRecvSig.trigger()
+  strm.bodyRecvSig.trigger()
+  strm.bodyRecvSig.close()
 
-proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
+proc recvTask(strm: ClientStream) {.async.} =
   try:
-    await recvBodyNaked(strm, data)
+    await recvHeadersTaskNaked(strm)
+    if strm.stateRecv != csStateEnded:
+      await recvBodyTaskNaked(strm)
+  except QueueClosedError as err:
+    strm.close()
+    raise err
   except StrmError as err:
     strm.stream.error = err
     strm.close()
     await strm.client.sendSilently newRstStreamFrame(
       strm.stream.id.FrmSid, err.code.int
     )
+    raise err
+  except Exception as err:
+    strm.close()
+    raise err
+  finally:
+    strm.headersRecvSig.close()
+    strm.bodyRecvSig.close()
+
+proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
+  if strm.stateRecv != csStateEnded and strm.headersRecv.len == 0:
+    await strm.headersRecvSig.waitFor()
+  data[].add strm.headersRecv
+  strm.headersRecv.setLen 0
+
+proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
+  try:
+    await recvHeadersNaked(strm, data)
+  except QueueClosedError as err:
+    if strm.client.error != nil:
+      debugInfo strm.client.error.getStackTrace()
+      debugInfo strm.client.error.msg
+      raise newHyperxConnError(strm.client.error.msg)
+    if strm.stream.error != nil:
+      debugInfo strm.stream.error.getStackTrace()
+      debugInfo strm.stream.error.msg
+      raise newStrmError(strm.stream.error.code)
+    raise err
+
+proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
+  if strm.stateRecv != csStateEnded and strm.bodyRecv.len == 0:
+    await strm.bodyRecvSig.waitFor()
+  let bodyL = strm.bodyRecv.len
+  data[].add strm.bodyRecv
+  strm.bodyRecv.setLen 0
+  if not strm.client.isConnected:
+    # this avoids raising when sending a window update
+    # if the conn is closed. Unsure if it's useful
+    return
+  if strm.stateRecv != csStateEnded and bodyL > 0:
+    if strm.stream.window > stgWindowSize.int div 2:
+      let oldWindow = strm.stream.window
+      strm.stream.window = 0
+      await strm.client.write newWindowUpdateFrame(
+        strm.stream.id.FrmSid, oldWindow
+      )
+
+proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
+  try:
+    await recvBodyNaked(strm, data)
+  except QueueClosedError as err:
+    if strm.client.error != nil:
+      debugInfo strm.client.error.getStackTrace()
+      debugInfo strm.client.error.msg
+      raise newHyperxConnError(strm.client.error.msg)
+    if strm.stream.error != nil:
+      debugInfo strm.stream.error.getStackTrace()
+      debugInfo strm.stream.error.msg
+      raise newStrmError(strm.stream.error.code)
     raise err
 
 proc sendHeadersNaked(
@@ -962,6 +1030,7 @@ proc sendHeadersNaked(
     strm.stateSend = csStateEnded
   await client.write frm
 
+# XXX rename so it does not get exported in server/client
 proc sendHeaders*(
   strm: ClientStream,
   headers: ref seq[byte],  # XXX ref string
@@ -979,6 +1048,18 @@ proc sendHeaders*(
       debugInfo strm.stream.error.msg
       raise newStrmError(strm.stream.error.code)
     raise err
+
+proc sendHeaders*(
+  strm: ClientStream,
+  headers: ref seq[(string, string)],
+  finish: bool
+) {.async.} =
+  template client: untyped = strm.client
+  var henc = new(seq[byte])
+  henc[] = newSeq[byte]()
+  for (n, v) in headers[]:
+    client.hpackEncode(henc[], n, v)
+  await strm.sendHeaders(henc, finish)
 
 # XXX allow sending empty data to close the stream
 proc sendBodyNaked(
@@ -1002,7 +1083,7 @@ proc sendBodyNaked(
           newStrmError(stream.errCodeOrDefault errStreamClosed)
         await client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(client.peerWindow, stream.peerWindow)
-    dataIdxB = min(dataIdxA+min(peerWindow, L), L)
+    dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
     var frm = newFrame()
     frm.setTyp frmtData
     frm.setSid stream.id.FrmSid
@@ -1041,13 +1122,16 @@ template withStream*(strm: ClientStream, body: untyped): untyped =
   doAssert strm.stateSend == csStateInitial
   strm.stateRecv = csStateOpened
   strm.stateSend = csStateOpened
+  var recvFut: Future[void]
   try:
+    recvFut = recvTask(strm)
     block:
       body
     doAssert strm.stateRecv == csStateEnded
     doAssert strm.stateSend == csStateEnded
   finally:
     strm.close()
+    await failSilently(recvFut)
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =

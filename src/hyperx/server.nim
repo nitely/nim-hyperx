@@ -25,7 +25,7 @@ export
   withStream,
   recvHeaders,
   recvBody,
-  #sendHeaders,
+  sendHeaders,
   sendBody,
   recvEnded,
   ClientStream,
@@ -165,15 +165,3 @@ proc sendHeaders*(
     client.hpackEncode(headers[], "content-length", $contentLen)
   let finish = contentLen <= 0
   await strm.sendHeaders(headers, finish)
-
-proc sendHeaders*(
-  strm: ClientStream,
-  headers: ref seq[(string, string)],
-  finish: bool
-) {.async.} =
-  template client: untyped = strm.client
-  var henc = new(seq[byte])
-  henc[] = newSeq[byte]()
-  for (n, v) in headers[]:
-    client.hpackEncode(henc[], n, v)
-  await strm.sendHeaders(henc, finish)

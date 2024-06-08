@@ -65,8 +65,7 @@ when isMainModule:
       await streamChunks(client, "/foo")
 
   waitFor main()
-  doAssert dataSentSize == dataSize
-  #doAssert dataRecvSize == dataSize
-  doAssert dataRecvSize > 0
   doAssert not hasPendingOperations()
+  doAssert dataSentSize == dataSize
+  doAssert dataRecvSize == dataSize
   echo "ok"

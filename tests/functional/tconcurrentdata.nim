@@ -48,7 +48,6 @@ proc send(strm: ClientStream, req: Req) {.async.} =
 proc recv(strm: ClientStream, req: Req) {.async.} =
   var data = newStringref()
   await strm.recvHeaders(data)
-  let exptLen = req.headers.raw[].len + req.data.s[].len
   doAssert data[] == ":status: 200\r\n"
   data[].setLen 0
   while not strm.recvEnded:
