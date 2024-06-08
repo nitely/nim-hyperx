@@ -120,6 +120,18 @@ proc recv*(tc: TestClientContext, headers: string) {.async.} =
   await tc.client.putRecvTestData frm1.s
   tc.sid += 2
 
+proc recv*(
+  tc: TestClientContext,
+  headers: string,
+  sid: int,
+  finish: bool
+) {.async.} =
+  var frm1 = frame(frmtHeaders, sid.FrmSid, @[frmfEndHeaders])
+  if finish:
+    frm1.flags.incl frmfEndStream
+  frm1.add hencode(tc, headers).toBytes
+  await tc.client.putRecvTestData frm1.s
+
 proc recv*(tc: TestClientContext, s: seq[byte]) {.async.} =
   await tc.client.putRecvTestData s
 

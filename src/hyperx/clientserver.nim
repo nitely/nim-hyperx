@@ -736,6 +736,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         client.close(stream.id)
         await client.send newRstStreamFrame(frm.sid, err.code.int)
       continue
+    if frm.typ == frmtData:
+      stream.window += frm.payloadLen.int
+      check stream.window <= stgWindowSize.int, newConnError(errFlowControlError)
     try:
       await stream.msgs.put frm
     except QueueClosedError:
@@ -981,13 +984,17 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   let bodyL = strm.bodyRecv.len
   data[].add strm.bodyRecv
   strm.bodyRecv.setLen 0
+  if not strm.client.isConnected:
+    # this avoids raising when sending a window update
+    # if the conn is closed. Unsure if it's useful
+    return
   if strm.stateRecv != csStateEnded and bodyL > 0:
-    strm.stream.window += bodyL
     if strm.stream.window > stgWindowSize.int div 2:
-      await strm.client.write newWindowUpdateFrame(
-        strm.stream.id.FrmSid, strm.stream.window
-      )
+      let oldWindow = strm.stream.window
       strm.stream.window = 0
+      await strm.client.write newWindowUpdateFrame(
+        strm.stream.id.FrmSid, oldWindow
+      )
 
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   try:
@@ -1023,6 +1030,7 @@ proc sendHeadersNaked(
     strm.stateSend = csStateEnded
   await client.write frm
 
+# XXX rename so it does not get exported in server/client
 proc sendHeaders*(
   strm: ClientStream,
   headers: ref seq[byte],  # XXX ref string
@@ -1040,6 +1048,18 @@ proc sendHeaders*(
       debugInfo strm.stream.error.msg
       raise newStrmError(strm.stream.error.code)
     raise err
+
+proc sendHeaders*(
+  strm: ClientStream,
+  headers: ref seq[(string, string)],
+  finish: bool
+) {.async.} =
+  template client: untyped = strm.client
+  var henc = new(seq[byte])
+  henc[] = newSeq[byte]()
+  for (n, v) in headers[]:
+    client.hpackEncode(henc[], n, v)
+  await strm.sendHeaders(henc, finish)
 
 # XXX allow sending empty data to close the stream
 proc sendBodyNaked(
