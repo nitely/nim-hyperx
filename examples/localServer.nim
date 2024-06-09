@@ -36,6 +36,10 @@ proc processStream(strm: ClientStream) {.async.} =
       data[].setLen 0
       await strm.recvBody(data)
       await strm.sendBody(data, finish = strm.recvEnded)
+    if not strm.sendEnded:
+      # recv ended while sending; trailer headers or empty data recv
+      data[].setLen 0
+      await strm.sendBody(data, finish = true)
 
 proc processStreamHandler(strm: ClientStream, propagateErr: bool) {.async.} =
   try:

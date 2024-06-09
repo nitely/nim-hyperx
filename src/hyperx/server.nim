@@ -28,6 +28,7 @@ export
   sendHeaders,
   sendBody,
   recvEnded,
+  sendEnded,
   ClientStream,
   newClientStream,
   ClientContext,

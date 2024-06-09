@@ -27,6 +27,7 @@ export
   recvBody,
   sendHeaders,
   sendBody,
+  sendEnded,
   ClientStream,
   ClientContext,
   HyperxConnError,

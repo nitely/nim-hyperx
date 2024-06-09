@@ -864,6 +864,9 @@ func recvEnded*(strm: ClientStream): bool =
   strm.headersRecv.len == 0 and
   strm.bodyRecv.len == 0
 
+func sendEnded*(strm: ClientStream): bool =
+  strm.stateSend == csStateEnded
+
 func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].} =
   case typ
   of ctServer: serverHeadersValidation(s)
@@ -945,6 +948,8 @@ proc recvTask(strm: ClientStream) {.async.} =
     strm.close()
     raise err
   except StrmError as err:
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
     strm.stream.error = err
     strm.close()
     await strm.client.sendSilently newRstStreamFrame(
@@ -952,6 +957,8 @@ proc recvTask(strm: ClientStream) {.async.} =
     )
     raise err
   except Exception as err:
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
     strm.close()
     raise err
   finally:
@@ -1074,7 +1081,7 @@ proc sendBodyNaked(
   var dataIdxA = 0
   var dataIdxB = 0
   let L = data[].len
-  while dataIdxA < L:
+  while dataIdxA <= L:
     while stream.peerWindow <= 0 or client.peerWindow <= 0:
       while stream.peerWindow <= 0:
         await stream.peerWindowUpdateSig.waitFor()
@@ -1098,6 +1105,9 @@ proc sendBodyNaked(
       newStrmError(stream.errCodeOrDefault errStreamClosed)
     await client.write frm
     dataIdxA = dataIdxB
+    # allow sending empty data frame
+    if dataIdxA == L:
+      break
 
 proc sendBody*(
   strm: ClientStream,
