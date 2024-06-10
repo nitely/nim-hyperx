@@ -132,7 +132,8 @@ type
     peerWindow: int32  # can be negative
     peerMaxFrameSize: uint32
     peerWindowUpdateSig: SignalAsync
-    window: int
+    windowPending, windowProcessed: int
+    windowUpdateSig: SignalAsync
     error*: ref HyperxError
     when defined(hyperxStats):
       frmsSent: int
@@ -163,7 +164,9 @@ proc newClient*(
     peerWindowSize: stgInitialWindowSize,
     peerMaxFrameSize: stgInitialMaxFrameSize,
     peerWindowUpdateSig: newSignal(),
-    window: 0
+    windowPending: 0,
+    windowProcessed: 0,
+    windowUpdateSig: newSignal()
   )
 
 proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
@@ -187,6 +190,7 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.streamOpenedMsgs.close()
     client.streams.close()
     client.peerWindowUpdateSig.close()
+    client.windowUpdateSig.close()
 
 func stream*(client: ClientContext, sid: StreamId): var Stream {.raises: [].} =
   client.streams.get sid
@@ -695,10 +699,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       frm.shrink frm.payload.len
       frm.s.add headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
-      client.window += frm.payloadLen.int
-      if client.window > stgWindowSize.int div 2:
-        await client.write newWindowUpdateFrame(frmSidMain, client.window)
-        client.window = 0
+      check client.windowPending <= stgWindowSize.int - frm.payloadLen.int,
+        newConnError(errFlowControlError)
+      client.windowPending += frm.payloadLen.int
     if frm.typ == frmtWindowUpdate:
       check frm.windowSizeInc > 0, newConnError(errProtocolError)
     if frm.typ == frmtPushPromise:
@@ -737,8 +740,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         await client.send newRstStreamFrame(frm.sid, err.code.int)
       continue
     if frm.typ == frmtData:
-      stream.window += frm.payloadLen.int
-      check stream.window <= stgWindowSize.int, newConnError(errFlowControlError)
+      check stream.windowPending <= stgWindowSize.int - frm.payloadLen.int,
+        newConnError(errFlowControlError)
+      stream.windowPending += frm.payloadLen.int
     try:
       await stream.msgs.put frm
     except QueueClosedError:
@@ -779,6 +783,36 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     debugInfo "responseDispatcher exited"
     client.close()
 
+proc windowUpdateTaskNaked(client: ClientContext) {.async.} =
+  while client.isConnected:
+    while client.windowProcessed <= stgWindowSize.int div 2:
+      await client.windowUpdateSig.waitFor()
+    doAssert client.windowProcessed > 0
+    doAssert client.windowPending >= client.windowProcessed
+    client.windowPending -= client.windowProcessed
+    let oldWindow = client.windowProcessed
+    client.windowProcessed = 0
+    await client.write newWindowUpdateFrame(frmSidMain, oldWindow)
+
+proc windowUpdateTask(client: ClientContext) {.async.} =
+  try:
+    await client.windowUpdateTaskNaked()
+  except QueueClosedError:
+    doAssert not client.isConnected
+  except HyperxError as err:
+    if client.isConnected:
+      debugInfo err.getStackTrace()
+      debugInfo err.msg
+      client.error = err
+    raise err
+  except CatchableError as err:
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    raise err
+  finally:
+    debugInfo "windowUpdateTask exited"
+    client.close()
+
 proc connect(client: ClientContext) {.async.} =
   try:
     await client.sock.connect(client.hostname, client.port)
@@ -797,7 +831,7 @@ proc failSilently(f: Future[void]) {.async.} =
 
 template withClient*(client: ClientContext, body: untyped): untyped =
   doAssert not client.isConnected
-  var recvFut, dispFut: Future[void]
+  var recvFut, dispFut, winupFut: Future[void]
   try:
     client.isConnected = true
     if client.typ == ctClient:
@@ -805,6 +839,7 @@ template withClient*(client: ClientContext, body: untyped): untyped =
     await client.handshake()
     recvFut = client.recvTask()
     dispFut = client.recvDispatcher()
+    winupFut = client.windowUpdateTask()
     block:
       body
   # do not handle any error here
@@ -817,6 +852,7 @@ template withClient*(client: ClientContext, body: untyped): untyped =
     # at this point body completed or errored out
     await failSilently(recvFut)
     await failSilently(dispFut)
+    await failSilently(winupFut)
 
 type
   ClientStreamState* = enum
@@ -986,22 +1022,33 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
     raise err
 
 proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
   if strm.stateRecv != csStateEnded and strm.bodyRecv.len == 0:
     await strm.bodyRecvSig.waitFor()
   let bodyL = strm.bodyRecv.len
   data[].add strm.bodyRecv
   strm.bodyRecv.setLen 0
-  if not strm.client.isConnected:
+  if not client.isConnected:
     # this avoids raising when sending a window update
     # if the conn is closed. Unsure if it's useful
     return
-  if strm.stateRecv != csStateEnded and bodyL > 0:
-    if strm.stream.window > stgWindowSize.int div 2:
-      let oldWindow = strm.stream.window
-      strm.stream.window = 0
-      await strm.client.write newWindowUpdateFrame(
-        strm.stream.id.FrmSid, oldWindow
-      )
+  if client.isClosed(stream.id):
+    return
+  client.windowProcessed += bodyL
+  stream.windowProcessed += bodyL
+  doAssert stream.windowPending >= stream.windowProcessed
+  doAssert client.windowPending >= client.windowProcessed
+  if client.windowProcessed > stgWindowSize.int div 2:
+    client.windowUpdateSig.trigger()
+  if strm.stateRecv != csStateEnded and
+      stream.windowProcessed > stgWindowSize.int div 2:
+    stream.windowPending -= stream.windowProcessed
+    let oldWindow = stream.windowProcessed
+    stream.windowProcessed = 0
+    await client.write newWindowUpdateFrame(
+      stream.id.FrmSid, oldWindow
+    )
 
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   try:

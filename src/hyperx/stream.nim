@@ -178,7 +178,8 @@ type
     msgs*: QueueAsync[Frame]
     peerWindow*: int32
     peerWindowUpdateSig*: SignalAsync
-    window*: int
+    windowPending*: int
+    windowProcessed*: int
     error*: ref StrmError
 
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
@@ -189,7 +190,8 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
     msgs: newQueue[Frame](1),
     peerWindow: peerWindow,
     peerWindowUpdateSig: newSignal(),
-    window: 0
+    windowPending: 0,
+    windowProcessed: 0
   )
 
 proc close*(stream: Stream) {.raises: [].} =
@@ -244,14 +246,14 @@ iterator values*(s: Streams): Stream {.inline.} =
   for v in values s.t:
     yield v
 
-proc close*(s: var Streams, sid: StreamId) {.raises: [].} =
+proc close2*(s: var Streams, sid: StreamId) {.raises: [].} =
   if sid notin s:
     return
   let stream = s.get sid
   stream.close()
   s.del sid
 
-proc close*(s: var Streams) {.raises: [].} =
+proc close2*(s: var Streams) {.raises: [].} =
   if s.isClosed:
     return
   s.isClosed = true
