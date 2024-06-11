@@ -36,7 +36,7 @@ const
   stgMaxFrameSize* = (1'u32 shl 24) - 1'u32
   stgDisablePush* = 0'u32
 const
-  stgWindowSize* {.intdefine: "hyperxWindowSize".} = stgInitialWindowSize
+  stgWindowSize* {.intdefine: "hyperxWindowSize".} = 262_144
   stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
 
 type

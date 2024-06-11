@@ -9,7 +9,7 @@ import ../src/hyperx/testutils
 import ../src/hyperx/frame
 import ../src/hyperx/errors
 from ../src/hyperx/clientserver import
-  stgWindowSize, stgInitialWindowSize
+  stgWindowSize, stgInitialWindowSize, stgInitialMaxFrameSize
 
 func toBytes(s: string): seq[byte] =
   result = newSeq[byte]()
@@ -100,7 +100,7 @@ testAsync "exceed window size":
     let strmId = tc.sid
     await tc.recv(headers, strmId, finish = false)
     var text = ""
-    for _ in 0 .. frmsMaxFrameSize.int-1:
+    for _ in 0 .. stgInitialMaxFrameSize.int-1:
       text.add 'a'
     var frmData1 = frame(frmtData, strmId.FrmSid)
     frmData1.add text.toBytes
@@ -110,7 +110,11 @@ testAsync "exceed window size":
         break
       await tc.recv frmData1.s
       sentCount += text.len
-    doAssert not tc.client.isConnected
+    var i = 0
+    while tc.client.isConnected:
+      await sleepAsync(0)
+      inc i
+      doAssert i < 1000
 
   withServer server:
     let client1 = await server.recvClient()
