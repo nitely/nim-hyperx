@@ -246,14 +246,14 @@ iterator values*(s: Streams): Stream {.inline.} =
   for v in values s.t:
     yield v
 
-proc close2*(s: var Streams, sid: StreamId) {.raises: [].} =
+proc close*(s: var Streams, sid: StreamId) {.raises: [].} =
   if sid notin s:
     return
   let stream = s.get sid
   stream.close()
   s.del sid
 
-proc close2*(s: var Streams) {.raises: [].} =
+proc close*(s: var Streams) {.raises: [].} =
   if s.isClosed:
     return
   s.isClosed = true

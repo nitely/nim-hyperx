@@ -890,18 +890,31 @@ func newClientStream*(client: ClientContext): ClientStream =
   let stream = client.openStream()
   newClientStream(client, stream)
 
-proc close*(strm: ClientStream) =
+proc close(strm: ClientStream) {.raises: [].} =
   strm.client.close(strm.stream.id)
   strm.bodyRecvSig.close()
   strm.headersRecvSig.close()
 
-func recvEnded*(strm: ClientStream): bool =
+func recvEnded*(strm: ClientStream): bool {.raises: [].} =
   strm.stateRecv == csStateEnded and
   strm.headersRecv.len == 0 and
   strm.bodyRecv.len == 0
 
-func sendEnded*(strm: ClientStream): bool =
+func sendEnded*(strm: ClientStream): bool {.raises: [].} =
   strm.stateSend == csStateEnded
+
+proc windowEnd(strm: ClientStream) {.raises: [].} =
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  # XXX strm.isClosed
+  doAssert strm.bodyRecvSig.isClosed
+  doAssert stream.windowPending >= stream.windowProcessed
+  client.windowProcessed += stream.windowPending - stream.windowProcessed
+  try:
+    if client.windowProcessed > stgWindowSize.int div 2:
+      client.windowUpdateSig.trigger()
+  except SignalClosedError:
+    doAssert not client.isConnected
 
 func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].} =
   case typ
@@ -1033,8 +1046,6 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
     # this avoids raising when sending a window update
     # if the conn is closed. Unsure if it's useful
     return
-  if client.isClosed(stream.id):
-    return
   client.windowProcessed += bodyL
   stream.windowProcessed += bodyL
   doAssert stream.windowPending >= stream.windowProcessed
@@ -1108,11 +1119,10 @@ proc sendHeaders*(
   headers: ref seq[(string, string)],
   finish: bool
 ) {.async.} =
-  template client: untyped = strm.client
   var henc = new(seq[byte])
   henc[] = newSeq[byte]()
   for (n, v) in headers[]:
-    client.hpackEncode(henc[], n, v)
+    strm.client.hpackEncode(henc[], n, v)
   await strm.sendHeaders(henc, finish)
 
 # XXX allow sending empty data to close the stream
@@ -1188,6 +1198,7 @@ template withStream*(strm: ClientStream, body: untyped): untyped =
     doAssert strm.stateSend == csStateEnded
   finally:
     strm.close()
+    strm.windowEnd()
     await failSilently(recvFut)
 
 when defined(hyperxTest):
