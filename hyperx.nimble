@@ -58,6 +58,7 @@ task functest, "Func test":
   exec "nim c -r -d:release tests/functional/tserial.nim"
   exec "nim c -r -d:release tests/functional/tconcurrent.nim"
   exec "nim c -r -d:release tests/functional/tconcurrentdata.nim"
+  exec "nim c -r -d:release tests/functional/tflowcontrol.nim"
 
 task docs, "Docs":
   exec "nim doc2 -o:./docs --project ./src/hyperx.nim"

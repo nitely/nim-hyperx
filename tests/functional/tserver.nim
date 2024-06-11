@@ -2,6 +2,7 @@
 {.define: hyperxSanityCheck.}
 
 from std/os import getEnv
+from std/strutils import contains
 import std/asyncdispatch
 import ../../src/hyperx/server
 import ./tutils
@@ -13,6 +14,10 @@ proc processStream(strm: ClientStream) {.async.} =
   withStream strm:
     let data = newStringRef()
     await strm.recvHeaders(data)
+    if "x-flow-control-check" in data[]:
+      # let recv buff for a bit
+      #debugEcho "sleeping"
+      await sleepAsync(10_000)
     await strm.sendHeaders(
       newSeqRef(@[(":status", "200")]),
       finish = false

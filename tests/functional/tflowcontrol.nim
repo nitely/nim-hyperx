@@ -6,6 +6,7 @@ import std/asyncdispatch
 import ../../src/hyperx/client
 import ../../src/hyperx/signal
 import ./tutils.nim
+from ../../src/hyperx/clientserver import stgWindowSize
 
 type
   Headers = object
@@ -81,10 +82,10 @@ proc spawnStream(
     inFlight[] -= 1
     sig.trigger()
 
-const strmsPerClient = 11000
+const strmsPerClient = 110
 const clientsCount = 11
 const strmsInFlight = 100
-const dataPayloadLen = 2000
+const dataPayloadLen = stgWindowSize.int * 2 + 123
 
 proc spawnClient(
   reqsCtx: ReqsCtx,
@@ -125,9 +126,7 @@ proc main() {.async.} =
         ("user-agent", "HyperX/0.1"),
         ("content-type", "text/plain"),
         ("content-length", $data[i].len),
-        ("custom-concurrency-counter-header-0-" & $i, "custom-concurrency-counter-value-0-" & $i),
-        ("custom-concurrency-counter-header-1-" & $i, "custom-concurrency-counter-value-1-" & $i),
-        ("custom-concurrency-counter-header-2-" & $i, "custom-concurrency-counter-value-2-" & $i)
+        ("x-flow-control-check", $i),
       ]),
       newData(data[i])
     )

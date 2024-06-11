@@ -62,11 +62,11 @@ proc spawnStream(
   try:
     await spawnStream(client, headers, checked)
   finally:
-    inFlight[] = inFlight[] - 1
+    inFlight[] -= 1
     sig.trigger()
 
-const strmsPerClient = 10000
-const clientsCount = 10
+const strmsPerClient = 11000
+const clientsCount = 11
 
 proc spawnClient(
   headersCtx: HeadersCtx,
