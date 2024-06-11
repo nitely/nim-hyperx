@@ -331,6 +331,7 @@ func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
     frmStg.addSetting(
       frmsMaxConcurrentStreams, stgServerMaxConcurrentStreams.uint32
     )
+  doAssert stgWindowSize <= stgMaxWindowSize
   frmStg.addSetting frmsInitialWindowSize, stgWindowSize
   if typ == ctClient:
     result.add preface
