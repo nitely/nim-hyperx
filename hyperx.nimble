@@ -26,8 +26,8 @@ task test, "Test":
   exec "nim c -r -f tests/testclientserver.nim"
 
 task testexamples, "Test examples":
-  exec "nim c -r -f examples/streamClient.nim"
-  exec "nim c -r -f -d:release examples/dataStream.nim"
+  exec "nim c -r -f -d:hyperxSanityCheck examples/streamClient.nim"
+  exec "nim c -r -f -d:hyperxSanityCheck -d:release examples/dataStream.nim"
 
 task testclient, "Test client only":
   exec "nim c -r -f tests/testclient.nim"

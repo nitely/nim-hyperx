@@ -1,4 +1,5 @@
 {.define: ssl.}
+{.define: hyperxSanityCheck.}
 
 import std/random
 import std/asyncdispatch

@@ -1,4 +1,5 @@
 {.define: ssl.}
+{.define: hyperxSanityCheck.}
 
 from std/os import getEnv
 import std/asyncdispatch

@@ -3,6 +3,7 @@
 ## on the server
 
 {.define: ssl.}
+{.define: hyperxSanityCheck.}
 
 import std/asyncdispatch
 import ../../src/hyperx/client

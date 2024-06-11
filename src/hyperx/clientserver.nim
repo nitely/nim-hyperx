@@ -223,6 +223,18 @@ when defined(hyperxStats):
       "bytesSent: ", $client.bytesSent
     )
 
+when defined(hyperxSanityCheck):
+  func sanityCheckAfterClose(client: ClientContext) {.raises: [].} =
+    doAssert not client.isConnected
+    doAssert client.recvMsgs.isClosed
+    doAssert client.streamOpenedMsgs.isClosed
+    doAssert client.peerWindowUpdateSig.isClosed
+    doAssert client.windowUpdateSig.isClosed
+    doAssert client.windowProcessed >= 0
+    doAssert client.windowPending >= 0
+    doAssert client.windowPending == client.windowProcessed
+    #debugEcho "sanity checked"
+
 func validateHeader(
   ss: string,
   nn, vv: Slice[int]
@@ -854,6 +866,8 @@ template withClient*(client: ClientContext, body: untyped): untyped =
     await failSilently(recvFut)
     await failSilently(dispFut)
     await failSilently(winupFut)
+    when defined(hyperxSanityCheck):
+      client.sanityCheckAfterClose()
 
 type
   ClientStreamState* = enum

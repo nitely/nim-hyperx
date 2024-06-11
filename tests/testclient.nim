@@ -1,5 +1,6 @@
 {.define: ssl.}
 {.define: hyperxTest.}
+{.define: hyperxSanityCheck.}
 
 import std/strutils
 import std/asyncdispatch

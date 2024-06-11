@@ -84,6 +84,8 @@ Backpressure is based on the http2 spec flow-control. The amount of data a conne
 
 The window size can be set using the `hyperxWindowSize` define. For example `-d:hyperxWindowSize:65536` will set the size to the http/2 spec default of 64KB. Setting a window smaller than 64KB is not well supported.
 
+There is built-in backpressure based on bounded queues for the rest of non-data frames.
+
 ### Using http/2 in place of WebSockets
 
 Http/2 allows full-duplex data communication over a single stream. If you plan to only ever use this client and server, you won't need websockets.

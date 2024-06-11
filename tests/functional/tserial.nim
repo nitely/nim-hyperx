@@ -3,6 +3,7 @@
 ## headers with client sent headers and the other way.
 
 {.define: ssl.}
+{.define: hyperxSanityCheck.}
 
 import std/asyncdispatch
 import ../../src/hyperx/client
