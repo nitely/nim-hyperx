@@ -175,7 +175,7 @@ type
   Stream* = ref object
     id*: StreamId
     state*: StreamState
-    msgs*: QueueAsync[Frame]
+    msgs*: QueueAsync[Frame]  # XXX remove and use ValueAsync[Frame] 
     peerWindow*: int32
     peerWindowUpdateSig*: SignalAsync
     windowPending*: int

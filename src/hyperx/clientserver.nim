@@ -880,12 +880,9 @@ type
     client*: ClientContext
     stream*: Stream
     stateRecv, stateSend: ClientStreamState
-    contentLen: int64
-    contentLenRecv: int64
-    bodyRecv: string
-    bodyRecvSig: SignalAsync
-    headersRecv: string
-    headersRecvSig: SignalAsync
+    contentLen, contentLenRecv: int64
+    headersRecv, bodyRecv, trailersRecv: string
+    headersRecvSig, bodyRecvSig: SignalAsync
 
 func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   ClientStream(
@@ -898,7 +895,8 @@ func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
     bodyRecv: "",
     bodyRecvSig: newSignal(),
     headersRecv: "",
-    headersRecvSig: newSignal()
+    headersRecvSig: newSignal(),
+    trailersRecv: "",
   )
 
 func newClientStream*(client: ClientContext): ClientStream =
@@ -980,9 +978,9 @@ proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
   var frm: Frame
   while true:
     frm = await strm.client.read(strm.stream)
-    # XXX store trailer headers
     # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
     if frm.typ == frmtHeaders:
+      strm.trailersRecv.add frm.payload
       check frmfEndStream in frm.flags, newStrmError(errProtocolError)
       if strm.client.typ == ctServer:
         strm.contentLenCheck()
@@ -1090,6 +1088,9 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
       raise newStrmError(strm.stream.error.code)
     raise err
 
+func recvTrailers*(strm: ClientStream): string =
+  result = strm.trailersRecv
+
 proc sendHeadersNaked(
   strm: ClientStream,
   headers: ref seq[byte],  # XXX ref string
@@ -1140,7 +1141,6 @@ proc sendHeaders*(
     strm.client.hpackEncode(henc[], n, v)
   await strm.sendHeaders(henc, finish)
 
-# XXX allow sending empty data to close the stream
 proc sendBodyNaked(
   strm: ClientStream,
   data: ref string,
