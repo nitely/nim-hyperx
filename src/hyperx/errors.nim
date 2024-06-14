@@ -54,6 +54,7 @@ type
     code*: ErrorCode
   StrmError* = object of HyperxStrmError
     code*: ErrorCode
+  GotRstError* = object of StrmError
   QueueError* = object of HyperxError
   QueueClosedError* = object of QueueError
 
@@ -71,3 +72,9 @@ func newStrmError*(errCode: ErrorCode): ref StrmError {.raises: [].} =
 
 func newStrmError*(errCode: uint32): ref StrmError {.raises: [].} =
   result = newStrmError(errCode.toErrorCode)
+
+func newGotRstError*(errCode: ErrorCode): ref GotRstError {.raises: [].} =
+  result = (ref GotRstError)(code: errCode, msg: "Got Rst Error: " & $errCode)
+
+func newGotRstError*(errCode: uint32): ref GotRstError {.raises: [].} =
+  result = newGotRstError(errCode.toErrorCode)

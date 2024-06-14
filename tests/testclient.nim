@@ -427,10 +427,9 @@ testAsync "stream error NO_ERROR handling":
     await tc.checkHandshake()
     let strm = tc.client.newClientStream()
     withStream strm:
-      # recv before send for NO_ERROR handling
-      let recvFut = strm.recv(dataIn)
-      let sendFut = strm.send(dataOut)
       await tc.replyNoError(strm.stream.id.FrmSid)
+      let sendFut = strm.send(dataOut)
+      let recvFut = strm.recv(dataIn)
       await sendFut  # this could raise
       await recvFut  # this should never raise
   doAssert dataIn[] == headers
@@ -453,12 +452,12 @@ testAsync "stream NO_ERROR before request completes":
     await tc.checkHandshake()
     let strm = tc.client.newClientStream()
     withStream strm:
-      # recv before send for NO_ERROR handling
-      let recvFut = strm.recv(dataIn)
-      await strm.sendHeaders(
+      await tc.replyNoError(strm.stream.id.FrmSid)
+      let sendFut = strm.sendHeaders(
         hmPost, "/foo", contentLen = dataOut[].len
       )
-      await tc.replyNoError(strm.stream.id.FrmSid)
+      let recvFut = strm.recv(dataIn)
+      await sendFut
       await recvFut  # this should never raise
       # XXX await for stream close (rst received);
       #     this seems to work by chance

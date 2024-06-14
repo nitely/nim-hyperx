@@ -34,6 +34,10 @@ proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
       result.putWaiter.complete()
       result.popWaiter.complete()
 
+iterator items*[T](q: QueueAsync[T]): T {.inline.} =
+  for elm in items q.s:
+    yield elm
+
 func used[T](q: QueueAsync[T]): int {.raises: [].} =
   q.s.len
 
