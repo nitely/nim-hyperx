@@ -61,24 +61,6 @@ proc close*(sig: SignalAsync) {.raises: [].}  =
   while sig.waiters.len > 0:
     failSoon sig.waiters.popLast()
 
-type
-  ValueAsync*[T] = ref object
-    sigPut, sigPop: SignalAsync
-    val: T
-
-proc put*[T](vala: ValueAsync[T], val: T) {.async.} =
-  while vala.val != nil:
-    await vala.sigPut.waitFor()
-  vala.val = val
-  vala.sigPop.trigger()
-
-proc pop*[T](vala: ValueAsync[T]): Future[T] {.async.} =
-  while vala.val == nil:
-    await vala.sigPop.waitFor()
-  result = vala.val
-  vala.val = nil
-  vala.sigPut.trigger()
-
 when isMainModule:
   block:
     proc test() {.async.} =
