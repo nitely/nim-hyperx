@@ -431,7 +431,7 @@ proc write(client: ClientContext, frm: Frame) {.async.} =
       client.close()
     raise newHyperxConnError(err.msg)
 
-func doTransitionRecv(s: var Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
+func doTransitionRecv(s: Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
   doAssert frm.sid != frmSidMain
   doAssert s.state != strmInvalid
@@ -673,6 +673,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       # Settings need to be applied before consuming following messages
       await consumeMainStream(client, frm)
       continue
+    check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
     if client.typ == ctServer and
         frm.sid.StreamId > client.maxPeerStrmIdSeen and
         frm.sid.int mod 2 != 0:
@@ -889,13 +890,12 @@ func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].}
   of ctServer: serverHeadersValidation(s)
   of ctClient: clientHeadersValidation(s)
 
-proc recv(strm: ClientStream): Future[Frame] {.async.} =
-  template client: untyped = strm.client
-  template stream: untyped = strm.stream
+proc read(stream: Stream): Future[Frame] {.async.} =
   var frm: Frame
   while true:
     frm = await stream.msgs.pop()
     doAssert stream.id == frm.sid.StreamId
+    doAssert frm.typ in frmStreamAllowed
     # this can raise stream/conn error
     stream.doTransitionRecv frm
     if frm.typ == frmtRstStream:
@@ -922,7 +922,7 @@ proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
   # https://httpwg.org/specs/rfc9113.html#HttpFraming
   var frm: Frame
   while true:
-    frm = await strm.recv()
+    frm = await strm.stream.read()
     check frm.typ == frmtHeaders, newStrmError(errProtocolError)
     validateHeaders(frm.payload, strm.client.typ)
     if strm.client.typ == ctServer:
@@ -959,7 +959,7 @@ proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
   strm.stateRecv = csStateData
   var frm: Frame
   while true:
-    frm = await strm.recv()
+    frm = await strm.stream.read()
     # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
     if frm.typ == frmtHeaders:
       strm.trailersRecv.add frm.payload
@@ -992,24 +992,23 @@ proc recvTask(strm: ClientStream) {.async.} =
     if strm.stateRecv != csStateEnded:
       await recvBodyTaskNaked(strm)
     while true:
-      discard await strm.recv()
+      discard await stream.read()
   except QueueClosedError:
     discard
+  except GotRstError as err:
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    stream.error = err
+    raise err
   except ConnError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
     connErr = true
     if client.isConnected:
       client.error = err
-      strm.close()
       await client.sendSilently newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
       )
-    raise err
-  except GotRstError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    stream.error = err
     raise err
   except StrmError as err:
     debugInfo err.getStackTrace()
@@ -1020,7 +1019,7 @@ proc recvTask(strm: ClientStream) {.async.} =
       stream.id.FrmSid, err.code.int
     )
     raise err
-  except Exception as err:
+  except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
     raise err
