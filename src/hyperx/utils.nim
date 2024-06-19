@@ -146,8 +146,9 @@ func serverHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
       inc regularFieldCount
       check toOpenArray(s, nn.a, nn.b) notin connSpecificHeaders,
         newStrmError(errProtocolError)
-      check toOpenArray(s, nn.a, nn.b) != "te",
-        newStrmError(errProtocolError)
+      if toOpenArray(s, nn.a, nn.b) == "te":
+        check toOpenArray(s, vv.a, vv.b) == "trailers",
+          newStrmError(errProtocolError)
     else:
       check regularFieldCount == 0, newStrmError(errProtocolError)
       if toOpenArray(s, nn.a, nn.b) == ":path":

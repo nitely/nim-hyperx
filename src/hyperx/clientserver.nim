@@ -1097,9 +1097,11 @@ proc sendHeadersNaked(
   headers: ref seq[byte],  # XXX ref string
   finish: bool
 ) {.async.} =
-  ## Headers must be HPACK encoded
+  ## Headers must be HPACK encoded;
+  ## headers may be trailers
   template client: untyped = strm.client
-  doAssert strm.stateSend == csStateOpened
+  doAssert strm.stateSend == csStateOpened or
+    (strm.stateSend in {csStateHeaders, csStateData} and finish)
   strm.stateSend = csStateHeaders
   var frm = newFrame()
   frm.add headers[]
