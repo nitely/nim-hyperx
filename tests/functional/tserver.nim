@@ -11,7 +11,7 @@ const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
 proc processStream(strm: ClientStream) {.async.} =
-  withStream strm:
+  with strm:
     let data = newStringRef()
     await strm.recvHeaders(data)
     if "x-flow-control-check" in data[]:
@@ -38,7 +38,7 @@ proc processStreamHandler(strm: ClientStream) {.async.} =
     debugEcho err.msg
 
 proc processClient(client: ClientContext) {.async.} =
-  withClient client:
+  with client:
     while client.isConnected:
       let strm = await client.recvStream()
       asyncCheck processStreamHandler(strm)
@@ -52,7 +52,7 @@ proc processClientHandler(client: ClientContext) {.async.} =
     echoStats client
 
 proc serve(server: ServerContext) {.async.} =
-  withServer server:
+  with server:
     while server.isConnected:
       let client = await server.recvClient()
       asyncCheck processClientHandler(client)

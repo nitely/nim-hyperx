@@ -22,7 +22,7 @@ func newSeqRef[T](s: seq[T] = @[]): ref seq[T] =
 
 proc processStream(strm: ClientStream) {.async.} =
   ## Full-duplex echo stream
-  withStream strm:
+  with strm:
     let data = newStringRef()
     await strm.recvHeaders(data)
     await strm.sendHeaders(
@@ -54,7 +54,7 @@ proc processStreamHandler(strm: ClientStream, propagateErr: bool) {.async.} =
     debugEcho err.msg
 
 proc processClient(client: ClientContext, propagateErr: bool) {.async.} =
-  withClient client:
+  with client:
     while client.isConnected:
       let strm = await client.recvStream()
       asyncCheck processStreamHandler(strm, propagateErr)
@@ -69,7 +69,7 @@ proc processClientHandler(client: ClientContext, propagateErr: bool) {.async.} =
 
 # xxx propagateErr = false
 proc serve*(server: ServerContext, propagateErr = true) {.async.} =
-  withServer server:
+  with server:
     while server.isConnected:
       let client = await server.recvClient()
       asyncCheck processClientHandler(client, propagateErr)

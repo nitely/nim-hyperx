@@ -37,8 +37,8 @@ import std/asyncdispatch
 import pkg/hyperx/client
 
 proc main() {.async.} =
-  var client = newClient("www.google.com")
-  withClient(client):
+  let client = newClient("www.google.com")
+  with client:
     let queries = ["john+wick", "winston", "ms+perkins"]
     var tasks = newSeq[Future[Response]]()
     for q in queries:

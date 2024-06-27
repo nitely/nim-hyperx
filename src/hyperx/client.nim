@@ -19,8 +19,7 @@ when defined(hyperxStats):
   export echoStats
 
 export
-  withClient,
-  withStream,
+  with,
   newClientStream,
   recvHeaders,
   recvBody,
@@ -169,7 +168,7 @@ proc request(
 ): Future[Response] {.async.} =
   result = newResponse()
   let strm = client.newClientStream()
-  withStream strm:
+  with strm:
     let recvFut = strm.recv(result)
     let sendFut = strm.send(
       httpMethod, path, data, userAgent, accept, contentType
@@ -232,7 +231,7 @@ when isMainModule:
   block sock_state:
     proc test() {.async.} =
       var client = newClient("example.com")
-      withClient client:
+      with client:
         doAssert client.sock.isConnected
         doAssert client.sock.hostname == "example.com"
         doAssert client.sock.port == Port 443

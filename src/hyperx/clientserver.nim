@@ -797,8 +797,7 @@ proc failSilently(f: Future[void]) {.async.} =
   except HyperxError:
     debugInfo getCurrentException().msg
 
-# XXX rename to with
-template withClient*(client: ClientContext, body: untyped): untyped =
+template with*(client: ClientContext, body: untyped): untyped =
   doAssert not client.isConnected
   var recvFut, dispFut, winupFut: Future[void]
   try:
@@ -1202,8 +1201,7 @@ proc sendBody*(
       raise newStrmError(strm.stream.error.code)
     raise err
 
-# XXX rename to with
-template withStream*(strm: ClientStream, body: untyped): untyped =
+template with*(strm: ClientStream, body: untyped): untyped =
   doAssert strm.stateRecv == csStateInitial
   doAssert strm.stateSend == csStateInitial
   strm.stateRecv = csStateOpened

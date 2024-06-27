@@ -4,7 +4,6 @@
 
 import std/strutils
 import std/asyncdispatch
-import pkg/hpack
 import ../src/hyperx/server
 import ../src/hyperx/testutils
 import ../src/hyperx/frame
@@ -27,7 +26,6 @@ func newStringRef(s = ""): ref string =
   result[] = s
 
 const
-  userAgent = "Nim - HyperX"
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".toBytes
 
 proc checkHandshake(tc: TestClientContext) {.async.} =
@@ -50,15 +48,15 @@ testAsync "simple request":
   var server = newServer(
     "foo.bar", Port 443, "./cert", "./key"
   )
-  withServer server:
+  with server:
     let client1 = await server.recvClient()
     let tc1 = newTestClient(client1)
     await tc1.recv(preface)
-    withClient tc1.client:
+    with tc1.client:
       await tc1.checkHandshake()
       await tc1.recv(headers)
       let strm = await client1.recvStream()
-      withStream strm:
+      with strm:
         var data = newStringRef()
         await strm.recvHeaders(data)
         doAssert data[] == headers
@@ -117,16 +115,16 @@ testAsync "exceed window size":
       inc i
       doAssert i < 1000
 
-  withServer server:
+  with server:
     let client1 = await server.recvClient()
     let tc1 = newTestClient(client1)
     await tc1.recv(preface)
-    withClient tc1.client:
+    with tc1.client:
       await tc1.checkHandshake()
       let senderFut = tc1.sender()
       let strm = await client1.recvStream()
       try:
-        withStream strm:
+        with strm:
           await senderFut
           var data = newStringRef()
           await strm.recvHeaders(data)
@@ -181,15 +179,15 @@ testAsync "consume window size":
     frmEnd.add toOpenArray(text.toBytes, 0, stgWindowSize.int-sentCount-1)
     await tc.recv frmEnd.s
 
-  withServer server:
+  with server:
     let client1 = await server.recvClient()
     let tc1 = newTestClient(client1)
     await tc1.recv(preface)
-    withClient tc1.client:
+    with tc1.client:
       await tc1.checkHandshake()
       let senderFut = tc1.sender()
       let strm = await client1.recvStream()
-      withStream strm:
+      with strm:
         await senderFut
         var data = newStringRef()
         await strm.recvHeaders(data)

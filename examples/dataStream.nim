@@ -53,7 +53,7 @@ when isMainModule:
     client: ClientContext, path: string
   ) {.async.} =
     let strm = client.newClientStream()
-    withStream strm:
+    with strm:
       let recvFut = strm.recv()
       let sendFut = strm.send(path)
       await recvFut
@@ -61,7 +61,7 @@ when isMainModule:
 
   proc main() {.async.} =
     var client = newClient(localHost, localPort)
-    withClient(client):
+    with client:
       await streamChunks(client, "/foo")
 
   waitFor main()

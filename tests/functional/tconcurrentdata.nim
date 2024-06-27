@@ -61,7 +61,7 @@ proc spawnStream(
   checked: ref int
 ) {.async.} =
   let strm = client.newClientStream()
-  withStream strm:
+  with strm:
     let recvFut = strm.recv(req)
     let sendFut = strm.send(req)
     await recvFut
@@ -91,7 +91,7 @@ proc spawnClient(
   checked: ref int
 ) {.async.} =
   var client = newClient(localHost, localPort)
-  withClient(client):
+  with client:
     var stmsCount = 0
     var inFlight = new(int)
     inFlight[] = 0

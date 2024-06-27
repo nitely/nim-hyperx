@@ -43,7 +43,7 @@ proc spawnStream(
   checked: ref int
 ) {.async.} =
   let strm = client.newClientStream()
-  withStream strm:
+  with strm:
     let data = newStringref()
     let recvFut = strm.recv(data)
     let sendFut = strm.sendHeaders(headers.s, finish = true)
@@ -73,7 +73,7 @@ proc spawnClient(
   checked: ref int
 ) {.async.} =
   var client = newClient(localHost, localPort)
-  withClient(client):
+  with client:
     var strms = newSeq[Future[void]]()
     var stmsCount = 0
     var inFlight = new(int)

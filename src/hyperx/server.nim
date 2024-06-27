@@ -21,8 +21,7 @@ when defined(hyperxStats):
   export echoStats
 
 export
-  withClient,
-  withStream,
+  with,
   recvHeaders,
   recvBody,
   recvTrailers,
@@ -129,7 +128,7 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
     debugInfo err.msg
     raise newHyperxConnError(err.msg)
 
-template withServer*(server: ServerContext, body: untyped): untyped =
+template with*(server: ServerContext, body: untyped): untyped =
   try:
     server.isConnected = true
     server.listen()

@@ -8,7 +8,7 @@ when isMainModule:
   var responses = newSeq[Response]()
   proc main() {.async.} =
     var client = newClient("www.google.com")
-    withClient(client):
+    with client:
       let queries = [
         "john+wick",
         "winston",

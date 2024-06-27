@@ -12,7 +12,7 @@ import ./tutils.nim
 proc main() {.async.} =
   var checked = 0
   var client = newClient(localHost, localPort)
-  withClient(client):
+  with client:
     for story in stories("raw-data"):
       for headers in cases(story):
         doAssert headers.isRequest
@@ -21,7 +21,7 @@ proc main() {.async.} =
           continue
         let rawHeaders = headers.rawHeaders()
         let strm = client.newClientStream()
-        withStream strm:
+        with strm:
           let headersRef = new(seq[Header])
           headersRef[] = headers
           await strm.sendHeaders(headersRef, finish = true)

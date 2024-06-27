@@ -36,11 +36,11 @@ testAsync "simple req/resp":
     let server = newServer(
       localHost, localPort, certFile, keyFile
     )
-    withServer server:
+    with server:
       let client = await server.recvClient()
-      withClient client:
+      with client:
         let strm = await client.recvStream()
-        withStream strm:
+        with strm:
           let data = newStringref()
           await strm.recvHeaders(data)
           serverRecvHeaders = data[]
@@ -62,7 +62,7 @@ testAsync "simple req/resp":
   var clientRecvBody = ""
   proc doClientWork() {.async.} =
     var client = newClient(localHost, localPort)
-    withClient client:
+    with client:
       let r = await client.get("/")
       clientRecvHeaders = r.headers
       clientRecvBody = r.text
@@ -95,7 +95,7 @@ testAsync "multiplex req/resp":
     strm: ClientStream,
     dataIn, dataOut: ref string
   ) {.async.} =
-    withStream strm:
+    with strm:
       await strm.recvHeaders(dataIn)
       while not strm.recvEnded:
         await strm.recvBody(dataIn)
@@ -109,9 +109,9 @@ testAsync "multiplex req/resp":
     let server = newServer(
       localHost, localPort, certFile, keyFile
     )
-    withServer server:
+    with server:
       let client = await server.recvClient()
-      withClient client:
+      with client:
         let dataIn1 = newStringref()
         let dataOut1 = newStringref("foobar 1")
         let dataIn2 = newStringref()
@@ -137,11 +137,11 @@ testAsync "multiplex req/resp":
   var clientRecvBodyStrm2 = ""
   proc doClientWork() {.async.} =
     var client = newClient(localHost, localPort)
-    withClient client:
+    with client:
       let strm1 = client.newClientStream()
       let strm2 = client.newClientStream()
-      withStream strm1:
-        withStream strm2:
+      with strm1:
+        with strm2:
           await strm1.sendHeaders(
             hmPost, "/foo",
             contentLen = data1a.len+data1b.len

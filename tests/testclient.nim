@@ -52,7 +52,7 @@ testAsync "simple response":
   const text = "foobar body"
   var resp1: Response
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     let get1 = tc.client.get("/")
     let rep1 = tc.reply(headers, text)
@@ -69,7 +69,7 @@ testAsync "multiple responses":
     text2 = "bar body"
   var resp1, resp2: Response
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     let get1 = tc.client.get("/")
     let rep1 = tc.reply(headers, text)
@@ -86,7 +86,7 @@ testAsync "multiple responses":
 testAsync "simple request":
   var frm1: Frame
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     await (
       tc.client.get("/") and
@@ -106,7 +106,7 @@ testAsync "simple request":
 testAsync "multiple requests":
   var frm1, frm2, frm3: Frame
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     await (
       tc.client.get("/1") and
@@ -146,7 +146,7 @@ testAsync "response with bad header compression":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     try:
       await (
@@ -175,7 +175,7 @@ testAsync "response with headers prio":
     text2 = "bar body"
   var resp1, resp2: Response
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     let get1 = tc.client.get("/")
     let rep1 = tc.replyPrio(headers, text)
@@ -198,7 +198,7 @@ testAsync "response with bad prio length":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     try:
       await (
@@ -227,7 +227,7 @@ testAsync "response with headers padding":
     text2 = "bar body"
   var resp1, resp2: Response
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     let get1 = tc.client.get("/")
     let rep1 = tc.replyPadding(headers, text)
@@ -250,7 +250,7 @@ testAsync "response with bad over padding length":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     try:
       await (
@@ -269,7 +269,7 @@ testAsync "response with bad missing padding length":
     await tc.reply(frm1)
   var errorMsg = ""
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     try:
       await (
@@ -283,7 +283,7 @@ testAsync "response with bad missing padding length":
 testAsync "header table is populated":
   var frm1: Frame
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     await (
       tc.client.get("/foo") and
@@ -313,7 +313,7 @@ testAsync "header table size setting is applied":
     await tc.reply(frm1)
   var frm1: Frame
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     await tc.recvTableSizeSetting(0)
     await tc.checkTableSizeAck()
@@ -342,10 +342,10 @@ testAsync "response stream":
   const text = "foobar body"
   let content = newStringRef()
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     let strm = tc.client.newClientStream()
-    withStream strm:
+    with strm:
       await strm.sendHeaders(hmGet, "/")
       await tc.reply(headers, text)
       await strm.recvHeaders(content)
@@ -361,10 +361,10 @@ testAsync "request stream":
   var frm1, frm2, frm3: Frame
   let content = newStringRef()
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     let strm = tc.client.newClientStream()
-    withStream strm:
+    with strm:
       await strm.sendHeaders(
         hmPost, "/foo",
         contentLen = data1.len+data2.len
@@ -423,10 +423,10 @@ testAsync "stream error NO_ERROR handling":
   let dataIn = newStringRef()
   let dataOut = newStringRef("123")
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     let strm = tc.client.newClientStream()
-    withStream strm:
+    with strm:
       await tc.replyNoError(strm.stream.id.FrmSid)
       let sendFut = strm.send(dataOut)
       let recvFut = strm.recv(dataIn)
@@ -448,10 +448,10 @@ testAsync "stream NO_ERROR before request completes":
   let dataIn = newStringRef()
   let dataOut = newStringRef("123")
   var tc = newTestClient("foo.bar")
-  withClient tc.client:
+  with tc.client:
     await tc.checkHandshake()
     let strm = tc.client.newClientStream()
-    withStream strm:
+    with strm:
       await tc.replyNoError(strm.stream.id.FrmSid)
       let sendFut = strm.sendHeaders(
         hmPost, "/foo", contentLen = dataOut[].len

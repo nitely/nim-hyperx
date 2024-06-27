@@ -43,7 +43,7 @@ when isMainModule:
     client: ClientContext, path: string, chunks: seq[string]
   ) {.async.} =
     let strm = client.newClientStream()
-    withStream strm:
+    with strm:
       # send and recv concurrently
       var data = newStringRef()
       let recvFut = strm.recv(data)
@@ -60,7 +60,7 @@ when isMainModule:
 
   proc main() {.async.} =
     var client = newClient(localHost, localPort)
-    withClient(client):
+    with client:
       # send chunks concurrently
       let chunkFut1 = streamChunks(client, "/foo", @["foo", "bar"])
       let chunkFut2 = streamChunks(client, "/bar", @["baz", "qux"])
