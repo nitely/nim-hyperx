@@ -14,11 +14,14 @@ import ./client
 template testAsync*(name: string, body: untyped): untyped =
   (proc () = 
     echo "test " & name
+    var checked = false
     proc test() {.async.} =
       body
+      checked = true
     waitFor test()
     # check there are no dangling async futures
     doAssert not hasPendingOperations()
+    doAssert checked
     when false:  # for finding mem leaks
       setGlobalDispatcher(nil)
       GC_fullCollect()
