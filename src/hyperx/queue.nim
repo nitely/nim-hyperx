@@ -61,6 +61,8 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
     doAssert q.putWaiter.finished
     q.putWaiter.clean()
     await Future[void](q.putWaiter)
+    if q.isClosed:
+      raise newQueueClosedError()
   doAssert q.putWaiter.finished
   doAssert q.used < q.size
   q.s.addFirst v
@@ -86,6 +88,8 @@ proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
     doAssert q.popWaiter.finished
     q.popWaiter.clean()
     await Future[void](q.popWaiter)
+    if q.isClosed:
+      raise newQueueClosedError()
   doAssert q.popWaiter.finished
   doAssert q.used > 0
   result = q.s.popLast()

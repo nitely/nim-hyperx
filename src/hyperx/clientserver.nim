@@ -900,6 +900,7 @@ proc read(stream: Stream): Future[Frame] {.async.} =
     if frm.typ == frmtRstStream:
       for frm2 in stream.msgs:
         stream.doTransitionRecv frm2
+      stream.close()
       raise newGotRstError(frm.errorCode)
     if frm.typ == frmtPushPromise:
       raise newStrmError(errProtocolError)
