@@ -98,6 +98,10 @@ If you need to support web-browsers it gets tricky for some use cases, as you ne
 
 The CI runs h2load on it, but it only starts a single server instance. Proper bench-marking would start a server per CPU, and run a few combinations of load. To save you the trip, the CI results show around 30K requests/s.
 
+### Related libs
+
+- [nim-grpc](https://github.com/nitely/nim-grpc)
+
 ## LICENSE
 
 MIT
