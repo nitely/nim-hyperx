@@ -28,6 +28,7 @@ export
   sendHeaders,
   sendBody,
   sendEnded,
+  sendRst,
   ClientStream,
   ClientContext,
   HyperxConnError,

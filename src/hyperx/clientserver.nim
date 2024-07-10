@@ -1219,6 +1219,20 @@ template with*(strm: ClientStream, body: untyped): untyped =
     strm.windowEnd()
     await failSilently(recvFut)
 
+proc sendRst*(strm: ClientStream, code: ErrorCode) {.async.} =
+  doAssert strm.stream.state != strmIdle
+  doAssert code in {
+    errNoError,
+    errInternalError,
+    errCancel,
+    errEnhanceYourCalm,
+    errInadequateSecurity
+  }
+  strm.stateSend = csStateEnded
+  await strm.client.send newRstStreamFrame(
+    strm.stream.id.FrmSid, code.int
+  )
+
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =
     await client.sock.putRecvData data

@@ -29,6 +29,7 @@ export
   sendHeaders,
   sendBody,
   sendEnded,
+  sendRst,
   ClientStream,
   newClientStream,
   ClientContext,

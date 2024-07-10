@@ -1,6 +1,7 @@
 ## Exception types
 
 # https://httpwg.org/specs/rfc9113.html#ErrorCodes
+# XXX HyperxErrCode
 type
   ErrorCode* = distinct uint8
 const
@@ -45,6 +46,7 @@ func toErrorCode(e: uint32): ErrorCode {.raises: [].} =
     return e.ErrorCode
   return errUnknown
 
+# XXX remove ConnError and StrmError; expose code in Hyperx*
 type
   HyperxError* = object of CatchableError
   HyperxConnError* = object of HyperxError
