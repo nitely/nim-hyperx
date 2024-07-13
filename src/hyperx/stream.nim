@@ -199,11 +199,6 @@ proc close*(stream: Stream) {.raises: [].} =
   stream.msgs.close()
   stream.peerWindowUpdateSig.close()
 
-func errCodeOrDefault*(stream: Stream, default: ErrorCode): ErrorCode =
-  if stream.error != nil:
-    return stream.error.code
-  return default
-
 type
   StreamsClosedError* = object of HyperxError
   Streams* = object

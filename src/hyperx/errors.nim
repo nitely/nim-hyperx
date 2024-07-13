@@ -48,6 +48,8 @@ func toErrorCode(e: uint32): ErrorCode {.raises: [].} =
 
 # XXX remove ConnError and StrmError; expose code in Hyperx*
 type
+  HyperxErrTyp* = enum
+    hxLocalErr, hxRemoteErr
   HyperxError* = object of CatchableError
   HyperxConnError* = object of HyperxError
   HyperxStrmError* = object of HyperxError
@@ -55,8 +57,8 @@ type
   ConnError* = object of HyperxConnError
     code*: ErrorCode
   StrmError* = object of HyperxStrmError
+    typ*: HyperxErrTyp
     code*: ErrorCode
-  GotRstError* = object of StrmError
   QueueError* = object of HyperxError
   QueueClosedError* = object of QueueError
 
@@ -69,14 +71,22 @@ func newConnClosedError*(): ref ConnClosedError {.raises: [].} =
 func newConnError*(errCode: ErrorCode): ref ConnError {.raises: [].} =
   result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
 
-func newStrmError*(errCode: ErrorCode): ref StrmError {.raises: [].} =
-  result = (ref StrmError)(code: errCode, msg: "Stream Error: " & $errCode)
+func newStrmError*(errCode: ErrorCode, typ = hxLocalErr): ref StrmError {.raises: [].} =
+  let msg = case typ
+    of hxLocalErr: "Stream Error: " & $errCode
+    of hxRemoteErr: "Got Rst Error: " & $errCode
+  result = (ref StrmError)(typ: typ, code: errCode, msg: msg)
 
-func newStrmError*(errCode: uint32): ref StrmError {.raises: [].} =
-  result = newStrmError(errCode.toErrorCode)
+func newStrmError*(errCode: uint32, typ = hxLocalErr): ref StrmError {.raises: [].} =
+  result = newStrmError(errCode.toErrorCode, typ)
 
-func newGotRstError*(errCode: ErrorCode): ref GotRstError {.raises: [].} =
-  result = (ref GotRstError)(code: errCode, msg: "Got Rst Error: " & $errCode)
+func newError*(err: ref StrmError): ref StrmError {.raises: [].} =
+  result = (ref StrmError)(
+    typ: err.typ, code: err.code, msg: err.msg
+  )
 
-func newGotRstError*(errCode: uint32): ref GotRstError {.raises: [].} =
-  result = newGotRstError(errCode.toErrorCode)
+func newErrorOrDefault*(err, default: ref StrmError): ref StrmError {.raises: [].} =
+  if err != nil:
+    return newError(err)
+  else:
+    return default

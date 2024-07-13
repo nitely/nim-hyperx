@@ -900,15 +900,16 @@ proc read(stream: Stream): Future[Frame] {.async.} =
     if frm.typ == frmtRstStream:
       for frm2 in stream.msgs:
         stream.doTransitionRecv frm2
+      stream.error = newStrmError(frm.errorCode, hxRemoteErr)
       stream.close()
-      raise newGotRstError(frm.errorCode)
+      raise newStrmError(frm.errorCode, hxRemoteErr)
     if frm.typ == frmtPushPromise:
-      raise newStrmError(errProtocolError)
+      raise newStrmError errProtocolError
     if frm.typ == frmtWindowUpdate:
-      check frm.windowSizeInc > 0, newStrmError(errProtocolError)
-      check frm.windowSizeInc <= stgMaxWindowSize, newStrmError(errProtocolError)
+      check frm.windowSizeInc > 0, newStrmError errProtocolError
+      check frm.windowSizeInc <= stgMaxWindowSize, newStrmError errProtocolError
       check stream.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
-        newStrmError(errFlowControlError)
+        newStrmError errFlowControlError
       stream.peerWindow += frm.windowSizeInc.int32
       if not stream.peerWindowUpdateSig.isClosed:
         stream.peerWindowUpdateSig.trigger()
@@ -923,12 +924,11 @@ proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
   var frm: Frame
   while true:
     frm = await strm.stream.read()
-    check frm.typ == frmtHeaders, newStrmError(errProtocolError)
+    check frm.typ == frmtHeaders, newStrmError errProtocolError
     validateHeaders(frm.payload, strm.client.typ)
     if strm.client.typ == ctServer:
       break
-    check frm.payload.len >= statusLineLen, newStrmError(errProtocolError)
-    #check frm.payload.startsWith ":status: ", newStrmError(errProtocolError)
+    check frm.payload.len >= statusLineLen, newStrmError errProtocolError
     if frm.payload[9] == '1'.byte:
       check frmfEndStream notin frm.flags, newStrmError(errProtocolError)
     else:
@@ -995,11 +995,6 @@ proc recvTask(strm: ClientStream) {.async.} =
       discard await stream.read()
   except QueueClosedError:
     discard
-  except GotRstError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    stream.error = err
-    raise err
   except ConnError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
@@ -1015,9 +1010,10 @@ proc recvTask(strm: ClientStream) {.async.} =
     debugInfo err.msg
     stream.error = err
     strm.close()
-    await client.sendSilently newRstStreamFrame(
-      stream.id.FrmSid, err.code.int
-    )
+    if err.typ == hxLocalErr:
+      await client.sendSilently newRstStreamFrame(
+        stream.id.FrmSid, err.code.int
+      )
     raise err
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -1045,7 +1041,7 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
       debugInfo strm.stream.error.msg
-      raise newStrmError(strm.stream.error.code)
+      raise newError strm.stream.error
     raise err
 
 proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
@@ -1086,7 +1082,7 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
       debugInfo strm.stream.error.msg
-      raise newStrmError(strm.stream.error.code)
+      raise newError strm.stream.error
     raise err
 
 func recvTrailers*(strm: ClientStream): string =
@@ -1130,7 +1126,7 @@ proc sendHeaders*(
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
       debugInfo strm.stream.error.msg
-      raise newStrmError(strm.stream.error.code)
+      raise newError strm.stream.error
     raise err
 
 proc sendHeaders*(
@@ -1161,8 +1157,8 @@ proc sendBodyNaked(
       while stream.peerWindow <= 0:
         await stream.peerWindowUpdateSig.waitFor()
       while client.peerWindow <= 0:
-        check stream.state != strmClosed, 
-          newStrmError(stream.errCodeOrDefault errStreamClosed)
+        check stream.state != strmClosed,
+          newErrorOrDefault(stream.error, newStrmError errStreamClosed)
         await client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(client.peerWindow, stream.peerWindow)
     dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
@@ -1177,7 +1173,7 @@ proc sendBodyNaked(
     stream.peerWindow -= frm.payloadLen.int32
     client.peerWindow -= frm.payloadLen.int32
     check stream.state != strmClosed,
-      newStrmError(stream.errCodeOrDefault errStreamClosed)
+      newErrorOrDefault(stream.error, newStrmError errStreamClosed)
     await client.write frm
     dataIdxA = dataIdxB
     # allow sending empty data frame
@@ -1199,7 +1195,7 @@ proc sendBody*(
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
       debugInfo strm.stream.error.msg
-      raise newStrmError(strm.stream.error.code)
+      raise newError strm.stream.error
     raise err
 
 template with*(strm: ClientStream, body: untyped): untyped =
