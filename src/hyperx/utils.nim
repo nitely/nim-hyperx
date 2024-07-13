@@ -169,6 +169,7 @@ func serverHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
   check hasPath, newStrmError(errProtocolError)
 
 func clientHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
+  var hasStatus = false
   var regularFieldCount = 0
   for (nn, vv) in headersIt(s):
     if s[nn.a].char != ':':
@@ -181,6 +182,9 @@ func clientHeadersValidation*(s: openArray[byte]) {.raises: [StrmError].} =
       check regularFieldCount == 0, newStrmError(errProtocolError)
       check toOpenArray(s, nn.a, nn.b) == ":status",
         newStrmError(errProtocolError)
+      check not hasStatus, newStrmError(errProtocolError)
+      hasStatus = true
+  check hasStatus, newStrmError(errProtocolError)
 
 func validateTrailers*(s: openArray[byte]) {.raises: [StrmError].} =
   for (nn, _) in headersIt(s):
