@@ -75,9 +75,7 @@ func newStrmError*(errCode: ErrorCode, typ = hxLocalErr): ref StrmError {.raises
   let msg = case typ
     of hxLocalErr: "Stream Error: " & $errCode
     of hxRemoteErr: "Got Rst Error: " & $errCode
-  result = (ref StrmError)(
-    typ: hxLocalErr, code: errCode, msg: msg
-  )
+  result = (ref StrmError)(typ: typ, code: errCode, msg: msg)
 
 func newStrmError*(errCode: uint32, typ = hxLocalErr): ref StrmError {.raises: [].} =
   result = newStrmError(errCode.toErrorCode, typ)
