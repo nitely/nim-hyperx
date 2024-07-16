@@ -417,6 +417,9 @@ proc writeNaked(client: ClientContext, frm: Frame) {.async.} =
       frm.sid.StreamId in client.streams:
     # XXX pass stream to write as param
     client.stream(frm.sid).doTransitionSend frm
+  debugInfo "===SENT==="
+  debugInfo $frm
+  debugInfo debugPayload(frm)
   await client.send(frm)
 
 proc write(client: ClientContext, frm: Frame) {.async.} =
@@ -438,16 +441,14 @@ func doTransitionRecv(s: Stream, frm: Frame) {.raises: [ConnError, StrmError].} 
   check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
   let nextState = toNextStateRecv(s.state, frm.toStreamEvent)
   if nextState == strmInvalid:
-    #if s.state == strmIdle:
-    #  raise newConnError(errProtocolError)
-    #if frm.typ == frmtData and s.state != strmIdle:
-    #  raise newStrmError(errStreamClosed)
+    if frm.typ == frmtData:
+      # as per section 6.1
+      raise newStrmError(errStreamClosed)
     if s.state == strmHalfClosedRemote:
       raise newStrmError(errStreamClosed)
-    elif s.state == strmClosed:
+    if s.state == strmClosed:
       raise newConnError(errStreamClosed)
-    else:
-      raise newConnError(errProtocolError)
+    raise newConnError(errProtocolError)
   s.state = nextState
   #if oldState == strmIdle:
   #  # XXX do this elsewhere not here
@@ -703,7 +704,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
-      check frm.typ in {frmtRstStream, frmtWindowUpdate}, newConnError(errStreamClosed)
+      check frm.typ in {frmtRstStream, frmtWindowUpdate, frmtData}, newConnError errStreamClosed
+      if frm.typ == frmtData:
+        await client.write newRstStreamFrame(frm.sid, frmeStreamClosed.int)
       debugInfo "stream not found " & $frm.sid.int
       continue
     var stream = client.streams.get frm.sid.StreamId
@@ -714,7 +717,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     try:
       await stream.msgs.put frm
     except QueueClosedError:
-      check frm.typ in {frmtRstStream, frmtWindowUpdate}, newConnError(errStreamClosed)
+      check frm.typ in {frmtRstStream, frmtWindowUpdate, frmtData}, newConnError errStreamClosed
+      if frm.typ == frmtData:
+        await client.write newRstStreamFrame(frm.sid, frmeStreamClosed.int)
       debugInfo "stream is closed " & $frm.sid.int
 
 proc recvDispatcher(client: ClientContext) {.async.} =

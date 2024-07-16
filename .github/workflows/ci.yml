@@ -60,8 +60,7 @@ jobs:
           nimble install -y && \
           (nimble serve2 &) && \
           sleep 10s && \
-          curl -JLO \"https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz\" && \
-          tar -xvf h2spec_linux_amd64.tar.gz && \
+          curl -JLO \"https://github.com/nitely/nim-hyperx/releases/download/v0.1.20/h2spec\" && \
           chmod +x ./h2spec && \
           ./h2spec --tls --port 4443 --strict && \
           ./h2spec --tls --port 4443 --strict && \
