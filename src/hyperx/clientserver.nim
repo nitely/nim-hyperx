@@ -441,9 +441,6 @@ func doTransitionRecv(s: Stream, frm: Frame) {.raises: [ConnError, StrmError].} 
   check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
   let nextState = toNextStateRecv(s.state, frm.toStreamEvent)
   if nextState == strmInvalid:
-    if frm.typ == frmtData:
-      # as per section 6.1
-      raise newStrmError(errStreamClosed)
     if s.state == strmHalfClosedRemote:
       raise newStrmError(errStreamClosed)
     if s.state == strmClosed:
@@ -704,9 +701,8 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
-      check frm.typ in {frmtRstStream, frmtWindowUpdate, frmtData}, newConnError errStreamClosed
-      if frm.typ == frmtData:
-        await client.write newRstStreamFrame(frm.sid, frmeStreamClosed.int)
+      check frm.typ in {frmtRstStream, frmtWindowUpdate},
+        newConnError errStreamClosed
       debugInfo "stream not found " & $frm.sid.int
       continue
     var stream = client.streams.get frm.sid.StreamId
@@ -717,9 +713,8 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     try:
       await stream.msgs.put frm
     except QueueClosedError:
-      check frm.typ in {frmtRstStream, frmtWindowUpdate, frmtData}, newConnError errStreamClosed
-      if frm.typ == frmtData:
-        await client.write newRstStreamFrame(frm.sid, frmeStreamClosed.int)
+      check frm.typ in {frmtRstStream, frmtWindowUpdate},
+        newConnError errStreamClosed
       debugInfo "stream is closed " & $frm.sid.int
 
 proc recvDispatcher(client: ClientContext) {.async.} =
