@@ -1225,9 +1225,17 @@ proc sendRst*(strm: ClientStream, code: ErrorCode) {.async.} =
     errInadequateSecurity
   }
   strm.stateSend = csStateEnded
-  await strm.client.send newRstStreamFrame(
+  await strm.client.write newRstStreamFrame(
     strm.stream.id.FrmSid, code.int
   )
+
+proc cancel*(strm: ClientStream) {.raises: [].} =
+  ## Close the stream internally. Call sendRst before this.
+  doAssert strm.stream.state != strmIdle
+  doAssert strm.stateSend == csStateEnded
+  if strm.stream.error == nil:
+    strm.stream.error = newStrmError errCancel
+  strm.close()
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =

@@ -29,6 +29,7 @@ export
   sendBody,
   sendEnded,
   sendRst,
+  cancel,
   ClientStream,
   ClientContext,
   HyperxConnError,

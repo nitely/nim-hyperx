@@ -30,6 +30,7 @@ export
   sendBody,
   sendEnded,
   sendRst,
+  cancel,
   ClientStream,
   newClientStream,
   ClientContext,
