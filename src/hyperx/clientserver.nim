@@ -252,7 +252,7 @@ func validateHeader(
   for ii in nn:
     check ss[ii].uint8 notin badNameChars, newConnError(errProtocolError)
     if i > 0:
-      check ss[ii].uint8 != ':'.uint8, newConnError(errProtocolError)
+      check ss[ii] != ':', newConnError(errProtocolError)
     inc i
   for ii in vv:
     check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(errProtocolError)
@@ -1110,8 +1110,7 @@ proc sendHeadersNaked(
     strm.stateSend = csStateEnded
   await client.write frm
 
-# XXX rename so it does not get exported in server/client
-proc sendHeaders*(
+proc sendHeadersImpl*(
   strm: ClientStream,
   headers: ref seq[byte],  # XXX ref string
   finish: bool
@@ -1134,11 +1133,15 @@ proc sendHeaders*(
   headers: ref seq[(string, string)],
   finish: bool
 ) {.async.} =
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  check stream.state in strmStateHeaderSendAllowed,
+    newErrorOrDefault(stream.error, newStrmError errStreamClosed)
   var henc = new(seq[byte])
   henc[] = newSeq[byte]()
   for (n, v) in headers[]:
-    strm.client.hpackEncode(henc[], n, v)
-  await strm.sendHeaders(henc, finish)
+    client.hpackEncode(henc[], n, v)
+  await strm.sendHeadersImpl(henc, finish)
 
 proc sendBodyNaked(
   strm: ClientStream,
@@ -1157,7 +1160,7 @@ proc sendBodyNaked(
       while stream.peerWindow <= 0:
         await stream.peerWindowUpdateSig.waitFor()
       while client.peerWindow <= 0:
-        check stream.state != strmClosed,
+        check stream.state in strmStateDataSendAllowed,
           newErrorOrDefault(stream.error, newStrmError errStreamClosed)
         await client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(client.peerWindow, stream.peerWindow)
@@ -1172,7 +1175,7 @@ proc sendBodyNaked(
     frm.s.add toOpenArray(data[], dataIdxA, dataIdxB-1)
     stream.peerWindow -= frm.payloadLen.int32
     client.peerWindow -= frm.payloadLen.int32
-    check stream.state != strmClosed,
+    check stream.state in strmStateDataSendAllowed,
       newErrorOrDefault(stream.error, newStrmError errStreamClosed)
     await client.write frm
     dataIdxA = dataIdxB

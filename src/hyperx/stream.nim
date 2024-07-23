@@ -49,6 +49,18 @@ const frmStreamAllowed* = {
   frmtWindowUpdate
 }
 
+const strmStateHeaderSendAllowed* = {
+  strmIdle,
+  strmOpen,
+  strmReservedLocal,
+  strmHalfClosedRemote
+}
+
+const strmStateDataSendAllowed* = {
+  strmOpen,
+  strmHalfClosedRemote
+}
+
 func toStreamEvent*(frm: Frame): StreamEvent {.raises: [].} =
   case frm.typ
   of frmtData:
@@ -100,7 +112,7 @@ func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
   of strmReservedRemote:
     case e
     of seHeaders: strmHalfClosedLocal
-    of seRstStream: strmClosed
+    of seHeadersEndStream, seRstStream: strmClosed
     of sePriority: strmReservedRemote
     else: strmInvalid
   of strmHalfClosedLocal:
@@ -136,17 +148,14 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     of seRstStream: strmClosed
     else: strmOpen
   of strmClosed:
-    #case e
-    #of sePriority,
-    #  seRstStream: strmClosed
-    #else: strmInvalid
-    # if peer closes the conn they still need
-    # to process anything we send
-    strmClosed
+    case e
+    of sePriority,
+      seRstStream: strmClosed
+    else: strmInvalid
   of strmReservedLocal:
     case e
     of seHeaders: strmHalfClosedRemote
-    of seRstStream: strmClosed
+    of seHeadersEndStream, seRstStream: strmClosed
     of sePriority: strmReservedLocal
     else: strmInvalid
   of strmHalfClosedRemote:
@@ -284,6 +293,16 @@ when isMainModule:
     frmtWindowUpdate,
     frmtContinuation,
   }
+  const allStates = {
+    strmIdle,
+    strmOpen,
+    strmClosed,
+    strmReservedLocal,
+    strmReservedRemote,
+    strmHalfClosedLocal,
+    strmHalfClosedRemote,
+    strmInvalid
+  }
   block:
     for ev in allEvents-streamEvents:
       raisesAssertion:
@@ -312,7 +331,7 @@ when isMainModule:
     doAssert toNextStateRecv(strmReservedRemote, seHeaders) == strmHalfClosedLocal
     doAssert toNextStateRecv(strmReservedRemote, seRstStream) == strmClosed
     doAssert toNextStateRecv(strmReservedRemote, sePriority) == strmReservedRemote
-    for ev in streamEvents-{seHeaders,seRstStream,sePriority}:
+    for ev in streamEvents-{seHeaders,seHeadersEndStream,seRstStream,sePriority}:
       doAssert toNextStateRecv(strmReservedRemote, ev) == strmInvalid
     doAssert toNextStateRecv(strmHalfClosedLocal, seHeadersEndStream) == strmClosed
     doAssert toNextStateRecv(strmHalfClosedLocal, seDataEndStream) == strmClosed
@@ -345,5 +364,15 @@ when isMainModule:
     doAssert toStreamEvent(frmtRstStream.frame) == seRstStream
     doAssert toStreamEvent(frmtPushPromise.frame) == sePushPromise
     doAssert toStreamEvent(frmtWindowUpdate.frame) == seWindowUpdate
+  block:
+    for ev in {seHeaders, seHeadersEndStream}:
+      for state in allStates - {strmInvalid}:
+        let isValid = toNextStateSend(state, ev) != strmInvalid
+        doAssert state in strmStateHeaderSendAllowed == isValid, $state & " " & $ev
+  block:
+    for ev in {seData, seDataEndStream}:
+      for state in allStates - {strmInvalid}:
+        let isValid = toNextStateSend(state, ev) != strmInvalid
+        doAssert state in strmStateDataSendAllowed == isValid, $state & " " & $ev
 
   echo "ok"

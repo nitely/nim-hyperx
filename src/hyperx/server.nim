@@ -159,6 +159,9 @@ proc sendHeaders*(
   contentLen = -1
 ) {.async.} =
   template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  check stream.state in strmStateHeaderSendAllowed,
+    newErrorOrDefault(stream.error, newStrmError errStreamClosed)
   var headers = new(seq[byte])
   headers[] = newSeq[byte]()
   client.hpackEncode(headers[], ":status", $status)
@@ -167,4 +170,4 @@ proc sendHeaders*(
   if contentLen > -1:
     client.hpackEncode(headers[], "content-length", $contentLen)
   let finish = contentLen <= 0
-  await strm.sendHeaders(headers, finish)
+  await strm.sendHeadersImpl(headers, finish)
