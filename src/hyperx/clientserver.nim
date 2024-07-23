@@ -1133,12 +1133,14 @@ proc sendHeaders*(
   headers: ref seq[(string, string)],
   finish: bool
 ) {.async.} =
-  check strm.stream.state in strmStateHeaderSendAllowed,
-    newStrmError errStreamClosed
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  check stream.state in strmStateHeaderSendAllowed,
+    newErrorOrDefault(stream.error, newStrmError errStreamClosed)
   var henc = new(seq[byte])
   henc[] = newSeq[byte]()
   for (n, v) in headers[]:
-    strm.client.hpackEncode(henc[], n, v)
+    client.hpackEncode(henc[], n, v)
   await strm.sendHeadersImpl(henc, finish)
 
 proc sendBodyNaked(
