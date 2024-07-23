@@ -1133,7 +1133,7 @@ proc sendHeaders*(
   headers: ref seq[(string, string)],
   finish: bool
 ) {.async.} =
-  check strm.stream.state in strmStateHeaderAllowed,
+  check strm.stream.state in strmStateHeaderSendAllowed,
     newStrmError errStreamClosed
   var henc = new(seq[byte])
   henc[] = newSeq[byte]()

@@ -94,7 +94,7 @@ proc sendHeaders*(
   contentLen = 0
 ) {.async.} =
   template client: untyped = strm.client
-  check strm.stream.state in strmStateHeaderAllowed,
+  check strm.stream.state in strmStateHeaderSendAllowed,
     newStrmError errStreamClosed
   var headers = new(seq[byte])
   headers[] = newSeq[byte]()
