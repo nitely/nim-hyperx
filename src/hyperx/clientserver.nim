@@ -1158,7 +1158,7 @@ proc sendBodyNaked(
       while stream.peerWindow <= 0:
         await stream.peerWindowUpdateSig.waitFor()
       while client.peerWindow <= 0:
-        check stream.state != strmClosed,
+        check stream.state in strmStateDataSendAllowed,
           newErrorOrDefault(stream.error, newStrmError errStreamClosed)
         await client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(client.peerWindow, stream.peerWindow)
@@ -1173,7 +1173,7 @@ proc sendBodyNaked(
     frm.s.add toOpenArray(data[], dataIdxA, dataIdxB-1)
     stream.peerWindow -= frm.payloadLen.int32
     client.peerWindow -= frm.payloadLen.int32
-    check stream.state != strmClosed,
+    check stream.state in strmStateDataSendAllowed,
       newErrorOrDefault(stream.error, newStrmError errStreamClosed)
     await client.write frm
     dataIdxA = dataIdxB
