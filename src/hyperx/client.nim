@@ -12,6 +12,7 @@ import std/asyncnet
 import ./clientserver
 import ./errors
 import ./utils
+import ./stream
 
 when defined(hyperxTest):
   import ./testsocket
@@ -93,6 +94,8 @@ proc sendHeaders*(
   contentLen = 0
 ) {.async.} =
   template client: untyped = strm.client
+  check strm.stream.state in strmStateHeaderAllowed,
+    newStrmError errStreamClosed
   var headers = new(seq[byte])
   headers[] = newSeq[byte]()
   client.hpackEncode(headers[], ":method", $httpMethod)
@@ -107,7 +110,7 @@ proc sendHeaders*(
     client.hpackEncode(headers[], "content-type", contentType)
     client.hpackEncode(headers[], "content-length", $contentLen)
   let finish = contentLen == 0
-  await strm.sendHeaders(headers, finish)
+  await strm.sendHeadersImpl(headers, finish)
 
 type
   Payload* = ref object

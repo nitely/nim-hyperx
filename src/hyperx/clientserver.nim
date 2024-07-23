@@ -252,7 +252,7 @@ func validateHeader(
   for ii in nn:
     check ss[ii].uint8 notin badNameChars, newConnError(errProtocolError)
     if i > 0:
-      check ss[ii].uint8 != ':'.uint8, newConnError(errProtocolError)
+      check ss[ii] != ':', newConnError(errProtocolError)
     inc i
   for ii in vv:
     check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(errProtocolError)
@@ -1110,8 +1110,7 @@ proc sendHeadersNaked(
     strm.stateSend = csStateEnded
   await client.write frm
 
-# XXX rename so it does not get exported in server/client
-proc sendHeaders*(
+proc sendHeadersImpl*(
   strm: ClientStream,
   headers: ref seq[byte],  # XXX ref string
   finish: bool
@@ -1134,11 +1133,13 @@ proc sendHeaders*(
   headers: ref seq[(string, string)],
   finish: bool
 ) {.async.} =
+  check strm.stream.state in strmStateHeaderAllowed,
+    newStrmError errStreamClosed
   var henc = new(seq[byte])
   henc[] = newSeq[byte]()
   for (n, v) in headers[]:
     strm.client.hpackEncode(henc[], n, v)
-  await strm.sendHeaders(henc, finish)
+  await strm.sendHeadersImpl(henc, finish)
 
 proc sendBodyNaked(
   strm: ClientStream,

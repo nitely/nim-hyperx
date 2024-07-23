@@ -49,6 +49,13 @@ const frmStreamAllowed* = {
   frmtWindowUpdate
 }
 
+const strmStateHeaderAllowed* = {
+  strmIdle,
+  strmOpen,
+  strmReservedLocal,
+  strmHalfClosedRemote
+}
+
 func toStreamEvent*(frm: Frame): StreamEvent {.raises: [].} =
   case frm.typ
   of frmtData:
@@ -146,7 +153,7 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
   of strmReservedLocal:
     case e
     of seHeaders: strmHalfClosedRemote
-    of seRstStream: strmClosed
+    of seHeadersEndStream, seRstStream: strmClosed
     of sePriority: strmReservedLocal
     else: strmInvalid
   of strmHalfClosedRemote:
