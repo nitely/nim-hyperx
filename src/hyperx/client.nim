@@ -92,7 +92,7 @@ proc sendHeaders*(
   accept = defaultAccept,
   contentType = defaultContentType,
   contentLen = 0
-) {.async.} =
+): Future[void] =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   check stream.state in strmStateHeaderSendAllowed,
@@ -111,7 +111,7 @@ proc sendHeaders*(
     client.hpackEncode(headers[], "content-type", contentType)
     client.hpackEncode(headers[], "content-length", $contentLen)
   let finish = contentLen == 0
-  await strm.sendHeadersImpl(headers, finish)
+  result = strm.sendHeadersImpl(headers, finish)
 
 type
   Payload* = ref object
@@ -188,24 +188,24 @@ proc get*(
   client: ClientContext,
   path: string,
   accept = defaultAccept
-): Future[Response] {.async.} =
-  result = await request(client, hmGet, path, accept = accept)
+): Future[Response] =
+  request(client, hmGet, path, accept = accept)
 
 proc head*(
   client: ClientContext,
   path: string,
   accept = defaultAccept
-): Future[Response] {.async.} =
-  result = await request(client, hmHead, path, accept = accept)
+): Future[Response] =
+  request(client, hmHead, path, accept = accept)
 
 proc post*(
   client: ClientContext,
   path: string,
   data: seq[byte],
   contentType = defaultContentType
-): Future[Response] {.async.} =
+): Future[Response] =
   # https://httpwg.org/specs/rfc9113.html#n-complex-request
-  result = await request(
+  request(
     client, hmPost, path, data = data, contentType = contentType
   )
 
@@ -214,16 +214,15 @@ proc put*(
   path: string,
   data: seq[byte],
   contentType = defaultContentType
-): Future[Response] {.async.} =
-  result = await request(
+): Future[Response] =
+  request(
     client, hmPut, path, data = data, contentType = contentType
   )
 
 proc delete*(
-  client: ClientContext,
-  path: string
-): Future[Response] {.async.} =
-  result = await request(client, hmDelete, path)
+  client: ClientContext, path: string
+): Future[Response] =
+  request(client, hmDelete, path)
 
 when isMainModule:
   when not defined(hyperxTest):

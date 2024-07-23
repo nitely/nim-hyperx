@@ -157,7 +157,7 @@ proc sendHeaders*(
   status: int,
   contentType = "",
   contentLen = -1
-) {.async.} =
+): Future[void] =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   check stream.state in strmStateHeaderSendAllowed,
@@ -170,4 +170,4 @@ proc sendHeaders*(
   if contentLen > -1:
     client.hpackEncode(headers[], "content-length", $contentLen)
   let finish = contentLen <= 0
-  await strm.sendHeadersImpl(headers, finish)
+  result = strm.sendHeadersImpl(headers, finish)
