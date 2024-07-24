@@ -60,5 +60,14 @@ task functest, "Func test":
   exec "nim c -r -d:release tests/functional/tconcurrentdata.nim"
   exec "nim c -r -d:release tests/functional/tflowcontrol.nim"
 
+task h2spec, "h2spec test":
+  exec "./h2spec --tls --port 8783 --strict"
+
+task h2load, "h2load test":
+  exec "h2load -n100000 -c100 -m10 https://127.0.0.1:8783 | grep ""100000 2xx"""
+
+task h2load2, "h2load test":
+  exec "h2load -n100000 -c10 -m1000 -t2 https://127.0.0.1:8783"
+
 task docs, "Docs":
   exec "nim doc2 -o:./docs --project ./src/hyperx.nim"
