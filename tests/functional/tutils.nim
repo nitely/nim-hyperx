@@ -5,7 +5,7 @@ import std/parseutils
 import std/asyncdispatch
 
 const localHost* = "127.0.0.1"
-const localPort* = Port 8443
+const localPort* = Port 8763
 const testDataBaseDir = "tests/functional/"
 
 type Header* = (string, string)

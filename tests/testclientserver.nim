@@ -23,7 +23,7 @@ func newStringRef(s = ""): ref string =
   new result
   result[] = s
 
-const localPort = Port 4443
+const localPort = Port 8773
 const localHost = "127.0.0.1"
 const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"

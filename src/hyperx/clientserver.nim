@@ -702,11 +702,10 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
-      #check frm.typ in {frmtRstStream, frmtWindowUpdate},
-      #  newConnError errStreamClosed
+      check frm.typ in {frmtRstStream, frmtWindowUpdate},
+        newConnError errStreamClosed
       debugInfo "stream not found " & $frm.sid.int
-      raise newConnError errStreamClosed
-      #continue
+      continue
     var stream = client.streams.get frm.sid.StreamId
     if frm.typ == frmtData:
       check stream.windowPending <= stgWindowSize.int - frm.payloadLen.int,
@@ -715,10 +714,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     try:
       await stream.msgs.put frm
     except QueueClosedError:
-      #check frm.typ in {frmtRstStream, frmtWindowUpdate},
-      #  newConnError errStreamClosed
+      check frm.typ in {frmtRstStream, frmtWindowUpdate},
+        newConnError errStreamClosed
       debugInfo "stream is closed " & $frm.sid.int
-      raise newConnError errStreamClosed
 
 proc recvDispatcher(client: ClientContext) {.async.} =
   # XXX always store error for all errors
@@ -1072,8 +1070,7 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   doAssert client.windowPending >= client.windowProcessed
   if client.windowProcessed > stgWindowSize.int div 2:
     client.windowUpdateSig.trigger()
-  # XXX stream.state in strmStateWindowSendAllowed
-  if strm.stateRecv != csStateEnded and
+  if stream.state in strmStateWindowSendAllowed and
       stream.windowProcessed > stgWindowSize.int div 2:
     stream.windowPending -= stream.windowProcessed
     let oldWindow = stream.windowProcessed

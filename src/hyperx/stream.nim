@@ -69,6 +69,13 @@ const strmStateRstSendAllowed* = {
   strmReservedRemote
 }
 
+const strmStateWindowSendAllowed* = {
+  strmOpen,
+  strmHalfClosedRemote,
+  strmHalfClosedLocal,
+  strmReservedRemote
+}
+
 func toStreamEvent*(frm: Frame): StreamEvent {.raises: [].} =
   case frm.typ
   of frmtData:
@@ -385,5 +392,9 @@ when isMainModule:
     for state in allStates - {strmInvalid}:
       let isValid = toNextStateSend(state, seRstStream) != strmInvalid
       doAssert state in strmStateRstSendAllowed == isValid, $state
+  block:
+    for state in allStates - {strmInvalid}:
+      let isValid = toNextStateSend(state, seWindowUpdate) != strmInvalid
+      doAssert state in strmStateWindowSendAllowed == isValid, $state
 
   echo "ok"
