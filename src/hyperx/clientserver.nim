@@ -702,10 +702,11 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
-      check frm.typ in {frmtRstStream, frmtWindowUpdate},
-        newConnError errStreamClosed
+      #check frm.typ in {frmtRstStream, frmtWindowUpdate},
+      #  newConnError errStreamClosed
       debugInfo "stream not found " & $frm.sid.int
-      continue
+      raise newConnError errStreamClosed
+      #continue
     var stream = client.streams.get frm.sid.StreamId
     if frm.typ == frmtData:
       check stream.windowPending <= stgWindowSize.int - frm.payloadLen.int,
@@ -714,9 +715,10 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     try:
       await stream.msgs.put frm
     except QueueClosedError:
-      check frm.typ in {frmtRstStream, frmtWindowUpdate},
-        newConnError errStreamClosed
+      #check frm.typ in {frmtRstStream, frmtWindowUpdate},
+      #  newConnError errStreamClosed
       debugInfo "stream is closed " & $frm.sid.int
+      raise newConnError errStreamClosed
 
 proc recvDispatcher(client: ClientContext) {.async.} =
   # XXX always store error for all errors
@@ -918,6 +920,16 @@ proc read(stream: Stream): Future[Frame] {.async.} =
       break
   return frm
 
+proc writeRst(strm: ClientStream, code: ErrorCode): Future[void] =
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  check stream.state in strmStateRstSendAllowed,
+    newStrmError errStreamClosed
+  strm.stateSend = csStateEnded
+  result = client.write newRstStreamFrame(
+    stream.id.FrmSid, code.int
+  )
+
 proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
   doAssert strm.stateRecv == csStateOpened
   strm.stateRecv = csStateHeaders
@@ -1010,11 +1022,8 @@ proc recvTask(strm: ClientStream) {.async.} =
     debugInfo err.getStackTrace()
     debugInfo err.msg
     stream.error = err
-    strm.close()
     if err.typ == hxLocalErr:
-      await client.sendSilently newRstStreamFrame(
-        stream.id.FrmSid, err.code.int
-      )
+      await failSilently strm.writeRst(err.code)
     raise err
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -1063,6 +1072,7 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   doAssert client.windowPending >= client.windowProcessed
   if client.windowProcessed > stgWindowSize.int div 2:
     client.windowUpdateSig.trigger()
+  # XXX stream.state in strmStateWindowSendAllowed
   if strm.stateRecv != csStateEnded and
       stream.windowProcessed > stgWindowSize.int div 2:
     stream.windowPending -= stream.windowProcessed
@@ -1131,8 +1141,10 @@ proc sendBodyNaked(
   data: ref string,
   finish = false
 ) {.async.} =
-  template stream: untyped = strm.stream
   template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  check stream.state in strmStateDataSendAllowed,
+    newErrorOrDefault(stream.error, newStrmError errStreamClosed)
   doAssert strm.stateSend in {csStateHeaders, csStateData}
   strm.stateSend = csStateData
   var dataIdxA = 0
@@ -1202,7 +1214,6 @@ template with*(strm: ClientStream, body: untyped): untyped =
     await failSilently(recvFut)
 
 proc sendRst*(strm: ClientStream, code: ErrorCode): Future[void] =
-  doAssert strm.stream.state != strmIdle
   doAssert code in {
     errNoError,
     errInternalError,
@@ -1210,10 +1221,7 @@ proc sendRst*(strm: ClientStream, code: ErrorCode): Future[void] =
     errEnhanceYourCalm,
     errInadequateSecurity
   }
-  strm.stateSend = csStateEnded
-  result = strm.client.write newRstStreamFrame(
-    strm.stream.id.FrmSid, code.int
-  )
+  result = strm.writeRst(code)
 
 proc cancel*(strm: ClientStream) {.raises: [].} =
   ## Close the stream internally. Call sendRst before this.
