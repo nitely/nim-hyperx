@@ -64,7 +64,7 @@ task h2spec, "h2spec test":
   exec "./h2spec --tls --port 8783 --strict"
 
 task h2load, "h2load test":
-  exec "h2load -n100000 -c100 -m10 https://127.0.0.1:8783 | grep ""100000 2xx"""
+  exec "h2load -n100000 -c100 -m10 https://127.0.0.1:8783 | grep \"100000 2xx\""
 
 task h2load2, "h2load test":
   exec "h2load -n100000 -c10 -m1000 -t2 https://127.0.0.1:8783"
