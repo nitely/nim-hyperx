@@ -657,6 +657,8 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   of frmtPing:
     if frmfAck notin frm.flags:
       await client.write newPingFrame(ackPayload = frm.payload)
+    else:
+      client.pingClose frm.pingData
   of frmtGoAway:
     # XXX close streams lower than Last-Stream-ID
     # XXX don't allow new streams creation
@@ -1226,13 +1228,15 @@ proc ping*(strm: ClientStream, ackTimeout: int) {.async.} =
     newStrmError errStreamClosed
   let pid = client.openPing()
   try:
-    await client.send newPingFrame(pid)
+    await client.write newPingFrame(pid)
     var timeLeft = min(ackTimeout, 1000)
     while timeLeft > 0 and pid in client.pings:
       check not strm.isClosed,
         newStrmError errStreamClosed
       await sleepAsync min(timeLeft, 1000)
       timeLeft -= min(timeLeft, 1000)
+    check not strm.isClosed,
+      newStrmError errStreamClosed
     check pid notin client.pings,
       newStrmPingTimeoutError()
   finally:
