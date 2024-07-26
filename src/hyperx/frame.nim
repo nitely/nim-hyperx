@@ -273,6 +273,13 @@ func newPingFrame*(
     for i in 0 .. frmPingSize-1:
       result.s[frmHeaderSize+i] = ackPayload[i]
 
+func newPingFrame*(data: uint32): Frame {.raises: [].} =
+  result = newFrame(frmPingSize)
+  result.setTyp frmtPing
+  result.setSid frmSidMain
+  result.setPayloadLen frmPingSize.FrmPayloadLen
+  result.s.assignAt(frmHeaderSize+4, data)
+
 func addSetting*(
   frm: Frame,
   id: FrmSetting,

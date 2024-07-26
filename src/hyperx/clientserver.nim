@@ -7,6 +7,7 @@ import std/asyncdispatch
 import std/asyncnet
 import std/openssl
 import std/net
+import std/sets
 
 import pkg/hpack
 
@@ -115,30 +116,32 @@ when defined(hyperxTest):
 else:
   type MyAsyncSocket* = AsyncSocket
 
-type
-  ClientContext* = ref object
-    typ: ClientTyp
-    sock*: MyAsyncSocket
-    hostname*: string
-    port: Port
-    isConnected*: bool
-    headersEnc, headersDec: DynHeaders
-    streams: Streams
-    recvMsgs: QueueAsync[Frame]
-    streamOpenedMsgs*: QueueAsync[Stream]
-    currStreamId, maxPeerStrmIdSeen: StreamId
-    peerMaxConcurrentStreams: uint32
-    peerWindowSize: uint32
-    peerWindow: int32  # can be negative
-    peerMaxFrameSize: uint32
-    peerWindowUpdateSig: SignalAsync
-    windowPending, windowProcessed: int
-    windowUpdateSig: SignalAsync
-    error*: ref HyperxError
-    when defined(hyperxStats):
-      frmsSent: int
-      frmsSentTyp: array[10, int]
-      bytesSent: int
+type PingId = uint32
+type ClientContext* = ref object
+  typ: ClientTyp
+  sock*: MyAsyncSocket
+  hostname*: string
+  port: Port
+  isConnected*: bool
+  headersEnc, headersDec: DynHeaders
+  streams: Streams
+  recvMsgs: QueueAsync[Frame]
+  streamOpenedMsgs*: QueueAsync[Stream]
+  currStreamId, maxPeerStrmIdSeen: StreamId
+  peerMaxConcurrentStreams: uint32
+  peerWindowSize: uint32
+  peerWindow: int32  # can be negative
+  peerMaxFrameSize: uint32
+  peerWindowUpdateSig: SignalAsync
+  windowPending, windowProcessed: int
+  windowUpdateSig: SignalAsync
+  currPingId: PingId
+  pings: HashSet[PingId]
+  error*: ref HyperxError
+  when defined(hyperxStats):
+    frmsSent: int
+    frmsSentTyp: array[10, int]
+    bytesSent: int
 
 proc newClient*(
   typ: ClientTyp,
@@ -166,7 +169,9 @@ proc newClient*(
     peerWindowUpdateSig: newSignal(),
     windowPending: 0,
     windowProcessed: 0,
-    windowUpdateSig: newSignal()
+    windowUpdateSig: newSignal(),
+    currPingId: 0.PingId,
+    pings: initHashSet[PingId](0)
   )
 
 proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
@@ -214,6 +219,14 @@ func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} 
   result = client.streams.open(client.currStreamId, client.peerWindowSize.int32)
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
+
+func openPing(client: ClientContext): PingId {.raises: [].} =
+  result = client.currPingId
+  client.pings.incl result
+  inc client.currPingId
+
+func closePing(client: ClientContext, pingId: PingId) {.raises: [].} =
+  client.pings.excl pingId
 
 when defined(hyperxStats):
   func echoStats*(client: ClientContext) =
@@ -864,6 +877,12 @@ proc close(strm: ClientStream) {.raises: [].} =
   strm.bodyRecvSig.close()
   strm.headersRecvSig.close()
 
+func isClosed(strm: ClientStream): bool {.raises: [].} =
+  strm.stream.sid in strm.client.streams
+
+#func isStateClosed(strm: ClientStream): bool {.raises: [].} =
+#  strm.stream.state == strmClosed
+
 func recvEnded*(strm: ClientStream): bool {.raises: [].} =
   strm.stateRecv == csStateEnded and
   strm.headersRecv.len == 0 and
@@ -875,8 +894,7 @@ func sendEnded*(strm: ClientStream): bool {.raises: [].} =
 proc windowEnd(strm: ClientStream) {.raises: [].} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
-  # XXX strm.isClosed
-  doAssert strm.bodyRecvSig.isClosed
+  doAssert strm.isClosed
   doAssert stream.windowPending >= stream.windowProcessed
   client.windowProcessed += stream.windowPending - stream.windowProcessed
   try:
@@ -1200,6 +1218,25 @@ template with*(strm: ClientStream, body: untyped): untyped =
     strm.close()
     strm.windowEnd()
     await failSilently(recvFut)
+
+proc ping*(strm: ClientStream, ackTimeout: int) {.async.} =
+  ## There is no ack for RST, use this to detect the peer got it
+  template client: untyped = strm.client
+  check not strm.isClosed,
+    newStrmError errStreamClosed
+  let pid = client.openPing()
+  try:
+    await client.send newPingFrame(pid)
+    var timeLeft = min(ackTimeout, 1000)
+    while timeLeft > 0 and pid in client.pings:
+      check not strm.isClosed,
+        newStrmError errStreamClosed
+      await sleepAsync min(timeLeft, 1000)
+      timeLeft -= min(timeLeft, 1000)
+    check pid notin client.pings,
+      newStrmPingTimeoutError()
+  finally:
+    client.closePing pid
 
 proc sendRst*(strm: ClientStream, code: ErrorCode): Future[void] =
   doAssert strm.stream.state != strmIdle

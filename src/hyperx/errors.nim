@@ -61,6 +61,7 @@ type
     code*: ErrorCode
   QueueError* = object of HyperxError
   QueueClosedError* = object of QueueError
+  StrmPingTimeoutError* = object of StrmError
 
 func newHyperxConnError*(msg: string): ref HyperxConnError {.raises: [].} =
   result = (ref HyperxConnError)(msg: msg)
@@ -79,6 +80,9 @@ func newStrmError*(errCode: ErrorCode, typ = hxLocalErr): ref StrmError {.raises
 
 func newStrmError*(errCode: uint32, typ = hxLocalErr): ref StrmError {.raises: [].} =
   result = newStrmError(errCode.toErrorCode, typ)
+
+func newStrmPingTimeoutError*(): ref StrmPingTimeoutError {.raises: [].} =
+  result = newStrmError(errInternalError, hxLocalErr)
 
 func newError*(err: ref StrmError): ref StrmError {.raises: [].} =
   result = (ref StrmError)(
