@@ -203,6 +203,7 @@ type
     peerWindowUpdateSig*: SignalAsync
     windowPending*: int
     windowProcessed*: int
+    pingSig*: SignalAsync
     error*: ref StrmError
 
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
@@ -214,13 +215,15 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
     peerWindow: peerWindow,
     peerWindowUpdateSig: newSignal(),
     windowPending: 0,
-    windowProcessed: 0
+    windowProcessed: 0,
+    pingSig: newSignal()
   )
 
 proc close*(stream: Stream) {.raises: [].} =
   stream.state = strmClosed
   stream.msgs.close()
   stream.peerWindowUpdateSig.close()
+  stream.pingSig.close()
 
 type
   StreamsClosedError* = object of HyperxError

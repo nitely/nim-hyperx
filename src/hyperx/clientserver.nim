@@ -644,6 +644,12 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   of frmtPing:
     if frmfAck notin frm.flags:
       await client.write newPingFrame(ackPayload = frm.payload)
+    else:
+      let sid = frm.pingData().StreamId
+      if sid in client.streams:
+        let strm = client.streams.get sid
+        if not strm.pingSig.isClosed:
+          strm.pingSig.trigger()
   of frmtGoAway:
     # XXX close streams lower than Last-Stream-ID
     # XXX don't allow new streams creation
@@ -1210,23 +1216,24 @@ template with*(strm: ClientStream, body: untyped): untyped =
     strm.windowEnd()
     await failSilently(recvFut)
 
-proc sendRst*(strm: ClientStream, code: ErrorCode): Future[void] =
-  doAssert code in {
-    errNoError,
-    errInternalError,
-    errCancel,
-    errEnhanceYourCalm,
-    errInadequateSecurity
-  }
-  result = strm.writeRst(code)
+proc ping(strm: ClientStream) {.async.} =
+  # this is done for rst pings; only one stream ping
+  # will ever be in progress
+  # XXX avoid sending the ping if there is one in progress
+  await strm.client.write newPingFrame(strm.stream.id.uint32)
+  await strm.stream.pingSig.waitFor()
 
-proc cancel*(strm: ClientStream) {.raises: [].} =
-  ## Close the stream internally. Call sendRst before this.
+proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
+  ## This may never return until the stream/conn is closed.
+  ## This can be called multiple times concurrently
   doAssert strm.stream.state != strmIdle
-  doAssert strm.stateSend == csStateEnded
-  if strm.stream.error == nil:
-    strm.stream.error = newStrmError errCancel
-  strm.close()
+  # fail silently because if it fails, it closes
+  # the stream anyway
+  try:
+    await failSilently strm.writeRst(code)
+    await failSilently strm.ping()
+  finally:
+    strm.close()
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =
