@@ -1225,6 +1225,8 @@ proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
     await failSilently strm.writeRst(code)
     await failSilently strm.ping()
   finally:
+    if strm.stream.error == nil:
+      strm.stream.error = newStrmError(errStreamClosed)
     strm.close()
 
 when defined(hyperxTest):

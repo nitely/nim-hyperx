@@ -160,7 +160,7 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     case e
     of seHeadersEndStream,
       seDataEndStream: strmHalfClosedLocal
-    of seRstStream: strmClosed
+    of seRstStream: strmHalfClosedLocal  # strmClosed
     else: strmOpen
   of strmClosed:
     case e
@@ -180,7 +180,7 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     else: strmHalfClosedRemote
   of strmHalfClosedLocal, strmReservedRemote:
     case e
-    of seRstStream: strmClosed
+    of seRstStream: s  # strmClosed
     of seWindowUpdate, sePriority: s
     else: strmInvalid
   of strmInvalid:
