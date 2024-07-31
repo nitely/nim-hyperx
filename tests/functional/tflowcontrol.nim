@@ -98,6 +98,8 @@ proc spawnClient(
     var sig = newSignal()
     while stmsCount < strmsPerClient:
       for req in reqsCtx.s:
+        if not client.isConnected:
+          return
         inFlight[] = inFlight[] + 1
         asyncCheck spawnStream(client, req, checked, sig, inFlight)
         inc stmsCount

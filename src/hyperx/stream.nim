@@ -2,6 +2,7 @@ import std/tables
 
 import ./frame
 import ./queue
+import ./value
 import ./signal
 import ./errors
 
@@ -198,7 +199,8 @@ type
   Stream* = ref object
     id*: StreamId
     state*: StreamState
-    msgs*: QueueAsync[Frame]
+    #msgs*: QueueAsync[Frame]
+    msgs*: ValueAsync[Frame]
     peerWindow*: int32
     peerWindowUpdateSig*: SignalAsync
     windowPending*: int
@@ -211,7 +213,8 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
   Stream(
     id: id,
     state: strmIdle,
-    msgs: newQueue[Frame](1),
+    #msgs: newQueue[Frame](1),
+    msgs: newValueAsync[Frame](),
     peerWindow: peerWindow,
     peerWindowUpdateSig: newSignal(),
     windowPending: 0,
@@ -259,7 +262,7 @@ func open*(
 ): Stream {.raises: [StreamsClosedError].} =
   doAssert sid notin s.t, $sid.int
   if s.isClosed:
-    raise newException(StreamsClosedError, "Streams is closed")
+    raise newException(StreamsClosedError, "Cannot open stream")
   result = newStream(sid, peerWindow)
   s.t[sid] = result
 

@@ -24,12 +24,11 @@ proc newSignal*(): SignalAsync {.raises: [].} =
     isClosed: false
   )
 
-proc waitFor*(sig: SignalAsync) {.async.} =
+proc waitFor*(sig: SignalAsync): Future[void] {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
-  let fut = newFuture[void]()
-  sig.waiters.addFirst fut
-  await fut
+  result = newFuture[void]()
+  sig.waiters.addFirst result
 
 proc wakeupSoon(f: Future[void]) =
   proc wakeup =

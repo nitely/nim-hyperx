@@ -13,6 +13,7 @@ import pkg/hpack
 import ./frame
 import ./stream
 import ./queue
+import ./value
 import ./signal
 import ./errors
 import ./utils
@@ -668,6 +669,8 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     # Process headers even if the stream
     # does not exist
     if frm.sid.StreamId notin client.streams:
+      if frm.typ == frmtData:
+        client.windowPending -= frm.payloadLen.int
       check frm.typ in {frmtRstStream, frmtWindowUpdate},
         newConnError errStreamClosed
       debugInfo "stream not found " & $frm.sid.int
@@ -892,14 +895,16 @@ proc write(strm: ClientStream, frm: Frame): Future[void] =
 proc read(stream: Stream): Future[Frame] {.async.} =
   var frm: Frame
   while true:
-    frm = await stream.msgs.pop()
+    #frm = await stream.msgs.pop()
+    frm = await stream.msgs.get()
+    stream.msgs.getDone()
     doAssert stream.id == frm.sid.StreamId
     doAssert frm.typ in frmStreamAllowed
     # this can raise stream/conn error
     stream.doTransitionRecv frm
     if frm.typ == frmtRstStream:
-      for frm2 in stream.msgs:
-        stream.doTransitionRecv frm2
+      #for frm2 in stream.msgs:
+      #  stream.doTransitionRecv frm2
       stream.error = newStrmError(frm.errorCode, hxRemoteErr)
       stream.close()
       raise newStrmError(frm.errorCode, hxRemoteErr)
@@ -1058,10 +1063,10 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   let bodyL = strm.bodyRecv.len
   data[].add strm.bodyRecv
   strm.bodyRecv.setLen 0
-  if not client.isConnected:
-    # this avoids raising when sending a window update
-    # if the conn is closed. Unsure if it's useful
-    return
+  #if not client.isConnected:
+  #  # this avoids raising when sending a window update
+  #  # if the conn is closed. Unsure if it's useful
+  #  return
   client.windowProcessed += bodyL
   stream.windowProcessed += bodyL
   doAssert stream.windowPending >= stream.windowProcessed

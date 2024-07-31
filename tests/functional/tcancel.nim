@@ -11,7 +11,8 @@ from ../../src/hyperx/clientserver import stgWindowSize
 const strmsPerClient = 1123
 const clientsCount = 25
 const strmsInFlight = 100
-const dataPayloadLen = stgWindowSize.int * 2 + 123
+const dataFrameLen = 1
+#const dataFrameLen = stgWindowSize.int * 2 + 123
 
 proc send(strm: ClientStream) {.async.} =
   await strm.sendHeaders(
@@ -25,12 +26,9 @@ proc send(strm: ClientStream) {.async.} =
     ]),
     finish = false
   )
-  var sentBytes = 0
-  var data = newStringRef newString(16 * 1024 + 123)
-  while sentBytes < dataPayloadLen:
+  var data = newStringRef newString(dataFrameLen)
+  while true:
     await strm.sendBody(data, finish = false)
-    sentBytes += data[].len
-  await strm.sendBody(data, finish = true)
 
 proc recv(strm: ClientStream) {.async.} =
   var data = newStringref()
@@ -84,6 +82,8 @@ proc spawnClient(
     inFlight[] = 0
     var sig = newSignal()
     while stmsCount < strmsPerClient:
+      if not client.isConnected:
+        return
       inFlight[] = inFlight[] + 1
       asyncCheck spawnStream(client, checked, sig, inFlight)
       inc stmsCount
