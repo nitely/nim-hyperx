@@ -192,10 +192,10 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.peerWindowUpdateSig.close()
     client.windowUpdateSig.close()
 
-func stream*(client: ClientContext, sid: StreamId): var Stream {.raises: [].} =
+func stream*(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
   client.streams.get sid
 
-func stream*(client: ClientContext, sid: FrmSid): var Stream {.raises: [].} =
+func stream*(client: ClientContext, sid: FrmSid): Stream {.raises: [].} =
   client.stream sid.StreamId
 
 proc close*(client: ClientContext, sid: StreamId) {.raises: [].} =
@@ -307,6 +307,9 @@ func hpackEncode*(
     raise newException(HyperxError, err.msg)
 
 proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
+  debugInfo "===SENT==="
+  debugInfo $frm
+  debugInfo debugPayload(frm)
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
   check not client.sock.isClosed, newConnClosedError()
@@ -397,43 +400,7 @@ proc handshake(client: ClientContext) {.async.} =
     # XXX err.msg includes a traceback for SslError but it should not
     client.error = newHyperxConnError(err.msg)
     client.close()
-    raise client.error
-
-func doTransitionSend(s: var Stream, frm: Frame) {.raises: [].} =
-  # we cannot raise stream errors here because of
-  # hpack state the frame needs to be sent or close the conn;
-  # could raise stream errors for typ != header
-  doAssert frm.sid.StreamId == s.id
-  doAssert frm.sid != frmSidMain
-  doAssert s.state != strmInvalid
-  if frm.typ == frmtContinuation:
-    return
-  doAssert frm.typ in frmStreamAllowed
-  let nextState = toNextStateSend(s.state, frm.toStreamEvent)
-  doAssert nextState != strmInvalid  #, $frm
-  s.state = nextState
-
-# XXX continuations need a mechanism
-#     similar to a stream i.e: if frm without end is
-#     found consume from streamContinuations
-proc write(client: ClientContext, frm: Frame): Future[void] =
-  # This is done in the next headers after settings ACK put
-  if frm.typ == frmtHeaders and client.headersEnc.hasResized():
-    # XXX avoid copy?
-    var payload = newSeq[byte]()
-    client.headersEnc.encodeLastResize(payload)
-    client.headersEnc.clearLastResize()
-    payload.add frm.payload
-    frm.shrink frm.payload.len
-    frm.add payload
-  if frm.sid != frmSidMain and
-      frm.sid.StreamId in client.streams:
-    # XXX pass stream to write as param
-    client.stream(frm.sid).doTransitionSend frm
-  debugInfo "===SENT==="
-  debugInfo $frm
-  debugInfo debugPayload(frm)
-  result = client.send(frm)
+    raise newHyperxConnError(err.msg)
 
 func doTransitionRecv(s: Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
   doAssert frm.sid.StreamId == s.id
@@ -558,7 +525,7 @@ proc recvTask(client: ClientContext) {.async.} =
     if client.isConnected:
       # XXX close all streams
       # XXX close queues
-      client.error = err
+      client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
       )
@@ -570,7 +537,6 @@ proc recvTask(client: ClientContext) {.async.} =
     debugInfo err.msg
     if client.isConnected:
       client.error = newHyperxConnError(err.msg)
-      raise client.error
     raise newHyperxConnError(err.msg)
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -640,10 +606,10 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         # ignore unknown setting
         debugInfo "unknown setting received"
     if frmfAck notin frm.flags:
-      await client.write newSettingsFrame(ack = true)
+      await client.send newSettingsFrame(ack = true)
   of frmtPing:
     if frmfAck notin frm.flags:
-      await client.write newPingFrame(ackPayload = frm.payload)
+      await client.send newPingFrame(ackPayload = frm.payload)
     else:
       let sid = frm.pingData().StreamId
       if sid in client.streams:
@@ -735,7 +701,7 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     debugInfo err.getStackTrace()
     debugInfo err.msg
     if client.isConnected:
-      client.error = err
+      client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
       )
@@ -744,11 +710,11 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     debugInfo getCurrentException().getStackTrace()
     debugInfo getCurrentException().msg
     doAssert false
-  except HyperxError as err:
+  except HyperxError as err:  # XXX remove
     if client.isConnected:
       debugInfo err.getStackTrace()
       debugInfo err.msg
-      client.error = err
+      client.error = err  # XXX fix
     raise err
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -767,7 +733,7 @@ proc windowUpdateTaskNaked(client: ClientContext) {.async.} =
     client.windowPending -= client.windowProcessed
     let oldWindow = client.windowProcessed
     client.windowProcessed = 0
-    await client.write newWindowUpdateFrame(frmSidMain, oldWindow)
+    await client.send newWindowUpdateFrame(frmSidMain, oldWindow)
 
 proc windowUpdateTask(client: ClientContext) {.async.} =
   try:
@@ -896,6 +862,35 @@ func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].}
   of ctServer: serverHeadersValidation(s)
   of ctClient: clientHeadersValidation(s)
 
+func doTransitionSend(s: Stream, frm: Frame) {.raises: [].} =
+  # we cannot raise stream errors here because of
+  # hpack state the frame needs to be sent or close the conn;
+  # could raise stream errors for typ != header
+  doAssert frm.sid.StreamId == s.id
+  doAssert frm.sid != frmSidMain
+  doAssert s.state != strmInvalid
+  if frm.typ == frmtContinuation:
+    return
+  doAssert frm.typ in frmStreamAllowed
+  let nextState = toNextStateSend(s.state, frm.toStreamEvent)
+  doAssert nextState != strmInvalid  #, $frm
+  s.state = nextState
+
+proc write(strm: ClientStream, frm: Frame): Future[void] =
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  # This is done in the next headers after settings ACK put
+  if frm.typ == frmtHeaders and client.headersEnc.hasResized():
+    # XXX avoid copy?
+    var payload = newSeq[byte]()
+    client.headersEnc.encodeLastResize(payload)
+    client.headersEnc.clearLastResize()
+    payload.add frm.payload
+    frm.shrink frm.payload.len
+    frm.add payload
+  stream.doTransitionSend frm
+  result = client.send frm
+
 proc read(stream: Stream): Future[Frame] {.async.} =
   var frm: Frame
   while true:
@@ -925,12 +920,11 @@ proc read(stream: Stream): Future[Frame] {.async.} =
   return frm
 
 proc writeRst(strm: ClientStream, code: ErrorCode): Future[void] =
-  template client: untyped = strm.client
   template stream: untyped = strm.stream
   check stream.state in strmStateRstSendAllowed,
     newStrmError errStreamClosed
   strm.stateSend = csStateEnded
-  result = client.write newRstStreamFrame(
+  result = strm.write newRstStreamFrame(
     stream.id.FrmSid, code.int
   )
 
@@ -1017,7 +1011,7 @@ proc recvTask(strm: ClientStream) {.async.} =
     debugInfo err.msg
     connErr = true
     if client.isConnected:
-      client.error = err
+      client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
         client.maxPeerStrmIdSeen.int, err.code.int
       )
@@ -1025,7 +1019,7 @@ proc recvTask(strm: ClientStream) {.async.} =
   except StrmError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    stream.error = err
+    stream.error = newStrmError(err.code)
     if err.typ == hxLocalErr:
       await failSilently strm.writeRst(err.code)
     raise err
@@ -1081,7 +1075,7 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
     stream.windowPending -= stream.windowProcessed
     let oldWindow = stream.windowProcessed
     stream.windowProcessed = 0
-    await client.write newWindowUpdateFrame(
+    await strm.write newWindowUpdateFrame(
       stream.id.FrmSid, oldWindow
     )
 
@@ -1109,7 +1103,6 @@ proc sendHeadersImpl*(
 ): Future[void] =
   ## Headers must be HPACK encoded;
   ## headers may be trailers
-  template client: untyped = strm.client
   doAssert strm.stateSend == csStateOpened or
     (strm.stateSend in {csStateHeaders, csStateData} and finish)
   strm.stateSend = csStateHeaders
@@ -1122,7 +1115,7 @@ proc sendHeadersImpl*(
   if finish:
     frm.flags.incl frmfEndStream
     strm.stateSend = csStateEnded
-  result = client.write frm
+  result = strm.write frm
 
 proc sendHeaders*(
   strm: ClientStream,
@@ -1175,7 +1168,7 @@ proc sendBodyNaked(
     client.peerWindow -= frm.payloadLen.int32
     check stream.state in strmStateDataSendAllowed,
       newErrorOrDefault(stream.error, newStrmError errStreamClosed)
-    await client.write frm
+    await strm.write frm
     dataIdxA = dataIdxB
     # allow sending empty data frame
     if dataIdxA == L:
@@ -1220,7 +1213,7 @@ proc ping(strm: ClientStream) {.async.} =
   # this is done for rst pings; only one stream ping
   # will ever be in progress
   # XXX avoid sending the ping if there is one in progress
-  await strm.client.write newPingFrame(strm.stream.id.uint32)
+  await strm.client.send newPingFrame(strm.stream.id.uint32)
   await strm.stream.pingSig.waitFor()
 
 proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =

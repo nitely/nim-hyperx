@@ -240,11 +240,11 @@ func initStreams*(): Streams {.raises: [].} =
 func len*(s: Streams): int {.inline, raises: [].} =
   result = s.t.len
 
-func get*(s: var Streams, sid: StreamId): var Stream {.raises: [].} =
+func get*(s: var Streams, sid: StreamId): Stream {.raises: [].} =
   try:
     result = s.t[sid]
   except KeyError:
-    doAssert false, "sid is not a stream"
+    doAssert false
 
 func del*(s: var Streams, sid: StreamId) {.raises: [].} =
   s.t.del sid
@@ -317,8 +317,8 @@ when isMainModule:
     strmReservedLocal,
     strmReservedRemote,
     strmHalfClosedLocal,
-    strmHalfClosedRemote,
-    strmInvalid
+    strmHalfClosedRemote
+    #strmInvalid
   }
   block:
     for ev in allEvents-streamEvents:
@@ -383,21 +383,41 @@ when isMainModule:
     doAssert toStreamEvent(frmtWindowUpdate.frame) == seWindowUpdate
   block:
     for ev in {seHeaders, seHeadersEndStream}:
-      for state in allStates - {strmInvalid}:
+      for state in allStates:
         let isValid = toNextStateSend(state, ev) != strmInvalid
         doAssert state in strmStateHeaderSendAllowed == isValid, $state & " " & $ev
   block:
     for ev in {seData, seDataEndStream}:
-      for state in allStates - {strmInvalid}:
+      for state in allStates:
         let isValid = toNextStateSend(state, ev) != strmInvalid
         doAssert state in strmStateDataSendAllowed == isValid, $state & " " & $ev
   block:
-    for state in allStates - {strmInvalid}:
+    for state in allStates:
       let isValid = toNextStateSend(state, seRstStream) != strmInvalid
       doAssert state in strmStateRstSendAllowed == isValid, $state
   block:
-    for state in allStates - {strmInvalid}:
+    for state in allStates:
       let isValid = toNextStateSend(state, seWindowUpdate) != strmInvalid
       doAssert state in strmStateWindowSendAllowed == isValid, $state
+  block send_headers_and_headers_end:
+    for state in allStates:
+      let isValid = toNextStateSend(state, seHeaders) != strmInvalid
+      let isValid2 = toNextStateSend(state, seHeadersEndStream) != strmInvalid
+      doAssert isValid == isValid2, $state
+  block send_data_and_data_end:
+    for state in allStates:
+      let isValid = toNextStateSend(state, seData) != strmInvalid
+      let isValid2 = toNextStateSend(state, seDataEndStream) != strmInvalid
+      doAssert isValid == isValid2, $state
+  block recv_headers_and_headers_end:
+    for state in allStates:
+      let isValid = toNextStateRecv(state, seHeaders) != strmInvalid
+      let isValid2 = toNextStateRecv(state, seHeadersEndStream) != strmInvalid
+      doAssert isValid == isValid2, $state
+  block recv_data_and_data_end:
+    for state in allStates:
+      let isValid = toNextStateRecv(state, seData) != strmInvalid
+      let isValid2 = toNextStateRecv(state, seDataEndStream) != strmInvalid
+      doAssert isValid == isValid2, $state
 
   echo "ok"
