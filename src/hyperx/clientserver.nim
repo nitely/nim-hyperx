@@ -1103,6 +1103,7 @@ proc sendHeadersImpl*(
 ): Future[void] =
   ## Headers must be HPACK encoded;
   ## headers may be trailers
+  doAssert strm.stream.state in strmStateHeaderSendAllowed
   doAssert strm.stateSend == csStateOpened or
     (strm.stateSend in {csStateHeaders, csStateData} and finish)
   strm.stateSend = csStateHeaders
