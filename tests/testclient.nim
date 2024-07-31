@@ -11,6 +11,7 @@ import ../src/hyperx/frame
 import ../src/hyperx/errors
 from ../src/hyperx/clientserver import
   stgWindowSize, stgInitialWindowSize
+from ../src/hyperx/stream import StreamState
 
 const
   userAgent = "Nim-HyperX/0.1"
@@ -451,19 +452,22 @@ testAsync "stream NO_ERROR before request completes":
   with tc.client:
     await tc.checkHandshake()
     let strm = tc.client.newClientStream()
-    with strm:
-      await tc.replyNoError(strm.stream.id.FrmSid)
-      let sendFut = strm.sendHeaders(
-        hmPost, "/foo", contentLen = dataOut[].len
-      )
-      let recvFut = strm.recv(dataIn)
-      await sendFut
-      await recvFut  # this should never raise
-      # XXX await for stream close (rst received);
-      #     this seems to work by chance
-      try:
+    try:
+      with strm:
+        await strm.sendHeaders(
+          hmPost, "/foo", contentLen = dataOut[].len
+        )
+        await tc.replyNoError(strm.stream.id.FrmSid)
+        # wait for the rst
+        while strm.stream.state != strmClosed:
+          await sleepAsync(1)
+        try:
+          await strm.recv(dataIn)  # this should never raise
+        except HyperxError:
+          doAssert false
         await strm.sendBody(dataOut, finish = true)
         doAssert false
-      except StrmError as err:
-        doAssert err.code == errNoError
+      doAssert false
+    except StrmError as err:
+      doAssert err.code == errNoError
   doAssert dataIn[] == headers

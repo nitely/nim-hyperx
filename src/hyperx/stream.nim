@@ -61,6 +61,21 @@ const strmStateDataSendAllowed* = {
   strmHalfClosedRemote
 }
 
+const strmStateRstSendAllowed* = {
+  strmOpen,
+  strmReservedLocal,
+  strmHalfClosedRemote,
+  strmHalfClosedLocal,
+  strmReservedRemote
+}
+
+const strmStateWindowSendAllowed* = {
+  strmOpen,
+  strmHalfClosedRemote,
+  strmHalfClosedLocal,
+  strmReservedRemote
+}
+
 func toStreamEvent*(frm: Frame): StreamEvent {.raises: [].} =
   case frm.typ
   of frmtData:
@@ -149,8 +164,7 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     else: strmOpen
   of strmClosed:
     case e
-    of sePriority,
-      seRstStream: strmClosed
+    of sePriority: strmClosed
     else: strmInvalid
   of strmReservedLocal:
     case e
@@ -189,6 +203,7 @@ type
     peerWindowUpdateSig*: SignalAsync
     windowPending*: int
     windowProcessed*: int
+    pingSig*: SignalAsync
     error*: ref StrmError
 
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
@@ -200,13 +215,15 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
     peerWindow: peerWindow,
     peerWindowUpdateSig: newSignal(),
     windowPending: 0,
-    windowProcessed: 0
+    windowProcessed: 0,
+    pingSig: newSignal()
   )
 
 proc close*(stream: Stream) {.raises: [].} =
   stream.state = strmClosed
   stream.msgs.close()
   stream.peerWindowUpdateSig.close()
+  stream.pingSig.close()
 
 type
   StreamsClosedError* = object of HyperxError
@@ -374,5 +391,13 @@ when isMainModule:
       for state in allStates - {strmInvalid}:
         let isValid = toNextStateSend(state, ev) != strmInvalid
         doAssert state in strmStateDataSendAllowed == isValid, $state & " " & $ev
+  block:
+    for state in allStates - {strmInvalid}:
+      let isValid = toNextStateSend(state, seRstStream) != strmInvalid
+      doAssert state in strmStateRstSendAllowed == isValid, $state
+  block:
+    for state in allStates - {strmInvalid}:
+      let isValid = toNextStateSend(state, seWindowUpdate) != strmInvalid
+      doAssert state in strmStateWindowSendAllowed == isValid, $state
 
   echo "ok"

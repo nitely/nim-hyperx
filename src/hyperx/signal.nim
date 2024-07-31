@@ -98,9 +98,13 @@ when isMainModule:
       var fut1 = waitLoop(1)
       var fut2 = waitLoop(2)
       sig.trigger()
-      for _ in 0 .. 10:
+      while puts.len != 2:
+        await sleepAsync(1)
+      while sig.waiters.len != 2:
         await sleepAsync(1)
       sig.close()
+      while sig.waiters.len != 0:
+        await sleepAsync(1)
       try:
         await (fut1 and fut2)
       except SignalClosedError:
@@ -121,12 +125,18 @@ when isMainModule:
       var fut1 = waitLoop(1)
       var fut2 = waitLoop(2)
       sig.trigger()
-      for _ in 0 .. 10:
+      while puts.len != 2:
+        await sleepAsync(1)
+      while sig.waiters.len != 2:
         await sleepAsync(1)
       sig.trigger()
-      for _ in 0 .. 10:
+      while puts.len != 4:
+        await sleepAsync(1)
+      while sig.waiters.len != 2:
         await sleepAsync(1)
       sig.close()
+      while sig.waiters.len != 0:
+        await sleepAsync(1)
       try:
         await (fut1 and fut2)
       except SignalClosedError:

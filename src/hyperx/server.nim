@@ -29,7 +29,6 @@ export
   sendHeaders,
   sendBody,
   sendEnded,
-  sendRst,
   cancel,
   ClientStream,
   newClientStream,

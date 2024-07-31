@@ -273,6 +273,13 @@ func newPingFrame*(
     for i in 0 .. frmPingSize-1:
       result.s[frmHeaderSize+i] = ackPayload[i]
 
+func newPingFrame*(data: uint32): Frame {.raises: [].} =
+  result = newFrame(frmPingSize)
+  result.setTyp frmtPing
+  result.setSid frmSidMain
+  result.setPayloadLen frmPingSize.FrmPayloadLen
+  result.s.assignAt(frmHeaderSize, data)
+
 func addSetting*(
   frm: Frame,
   id: FrmSetting,
@@ -344,6 +351,14 @@ func windowSizeInc*(frm: Frame): uint {.inline, raises: [].} =
 
 func errorCode*(frm: Frame): uint32 {.inline, raises: [].} =
   doAssert frm.typ == frmtRstStream
+  result += frm.s[frmHeaderSize+0].uint32 shl 24
+  result += frm.s[frmHeaderSize+1].uint32 shl 16
+  result += frm.s[frmHeaderSize+2].uint32 shl 8
+  result += frm.s[frmHeaderSize+3].uint32
+
+func pingData*(frm: Frame): uint32 {.inline, raises: [].} =
+  # note we ignore the last 4 bytes
+  doAssert frm.typ == frmtPing
   result += frm.s[frmHeaderSize+0].uint32 shl 24
   result += frm.s[frmHeaderSize+1].uint32 shl 16
   result += frm.s[frmHeaderSize+2].uint32 shl 8

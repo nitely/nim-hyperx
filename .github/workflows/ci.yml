@@ -62,9 +62,9 @@ jobs:
           sleep 10s && \
           curl -JLO \"https://github.com/nitely/nim-hyperx/releases/download/v0.1.20/h2spec\" && \
           chmod +x ./h2spec && \
-          ./h2spec --tls --port 4443 --strict && \
-          ./h2spec --tls --port 4443 --strict && \
-          ./h2spec --tls --port 4443 --strict"
+          nimble h2spec && \
+          nimble h2spec && \
+          nimble h2spec"
     - name: Run h2load
       run: |
         docker pull nimlang/nim:${{ matrix.nim }}
@@ -77,5 +77,5 @@ jobs:
           (nimble serve2 &) && \
           sleep 10s && \
           apt install -y nghttp2-client && \
-          h2load -n100000 -c100 -m10 https://127.0.0.1:4443 | grep \"100000 2xx\" && \
-          h2load -n100000 -c10 -m1000 -t2 https://127.0.0.1:4443"
+          nimble h2load && \
+          nimble h2load2"
