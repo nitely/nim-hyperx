@@ -192,17 +192,11 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.peerWindowUpdateSig.close()
     client.windowUpdateSig.close()
 
-func stream*(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
+func stream(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
   client.streams.get sid
 
-func stream*(client: ClientContext, sid: FrmSid): Stream {.raises: [].} =
+func stream(client: ClientContext, sid: FrmSid): Stream {.raises: [].} =
   client.stream sid.StreamId
-
-proc close*(client: ClientContext, sid: StreamId) {.raises: [].} =
-  # Close stream messages queue and delete stream from
-  # the client.
-  # This does nothing if the stream is already close
-  client.streams.close sid
 
 func openMainStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} =
   doAssert frmSidMain.StreamId notin client.streams
@@ -832,9 +826,13 @@ func newClientStream*(client: ClientContext): ClientStream =
   newClientStream(client, stream)
 
 proc close(strm: ClientStream) {.raises: [].} =
-  strm.client.close(strm.stream.id)
+  strm.client.streams.close(strm.stream.id)
   strm.bodyRecvSig.close()
   strm.headersRecvSig.close()
+  try:
+    strm.client.peerWindowUpdateSig.trigger()
+  except SignalClosedError:
+    discard
 
 func recvEnded*(strm: ClientStream): bool {.raises: [].} =
   strm.stateRecv == csStateEnded and
