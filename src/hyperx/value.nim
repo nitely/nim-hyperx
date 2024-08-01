@@ -42,16 +42,18 @@ proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
   try:
     while vala.val == nil:
       await vala.sigGet.waitFor()
-  except SignalClosedError:
-    raise newValueAsyncClosedError()
-  result = vala.val
-
-proc getDone*[T](vala: ValueAsync[T]) =
-  vala.val = nil
-  try:
+    result = vala.val
+    vala.val = nil
     vala.sigPut.trigger()
   except SignalClosedError:
     raise newValueAsyncClosedError()
+
+#proc getDone*[T](vala: ValueAsync[T]) =
+#  vala.val = nil
+#  try:
+#    vala.sigPut.trigger()
+#  except SignalClosedError:
+#    raise newValueAsyncClosedError()
 
 proc close*[T](vala: ValueAsync[T]) {.raises: [].} =
   if vala.isClosed:

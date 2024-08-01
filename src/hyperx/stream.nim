@@ -1,7 +1,7 @@
 import std/tables
 
 import ./frame
-import ./queue
+#import ./queue
 import ./value
 import ./signal
 import ./errors
@@ -16,6 +16,7 @@ type
     strmReservedRemote
     strmHalfClosedLocal
     strmHalfClosedRemote
+    strmClosedRst
     strmInvalid
   StreamEvent* = enum
     seHeaders
@@ -131,12 +132,12 @@ func toNextStateRecv*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     of seHeadersEndStream, seRstStream: strmClosed
     of sePriority: strmReservedRemote
     else: strmInvalid
-  of strmHalfClosedLocal:
+  of strmHalfClosedLocal, strmClosedRst:
     case e
     of seHeadersEndStream,
       seDataEndStream,
       seRstStream: strmClosed
-    else: strmHalfClosedLocal
+    else: s
   of strmHalfClosedRemote, strmReservedLocal:
     case e
     of seRstStream: strmClosed
@@ -161,11 +162,11 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     case e
     of seHeadersEndStream,
       seDataEndStream: strmHalfClosedLocal
-    of seRstStream: strmHalfClosedLocal  # strmClosed
+    of seRstStream: strmClosedRst
     else: strmOpen
-  of strmClosed:
+  of strmClosed, strmClosedRst:
     case e
-    of sePriority: strmClosed
+    of sePriority: s
     else: strmInvalid
   of strmReservedLocal:
     case e
@@ -179,9 +180,14 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
       seDataEndStream,
       seRstStream: strmClosed
     else: strmHalfClosedRemote
-  of strmHalfClosedLocal, strmReservedRemote:
+  of strmHalfClosedLocal:
     case e
-    of seRstStream: s  # strmClosed
+    of seRstStream: strmClosedRst
+    of seWindowUpdate, sePriority: s
+    else: strmInvalid
+  of strmReservedRemote:
+    case e
+    of seRstStream: strmClosed
     of seWindowUpdate, sePriority: s
     else: strmInvalid
   of strmInvalid:
@@ -320,7 +326,8 @@ when isMainModule:
     strmReservedLocal,
     strmReservedRemote,
     strmHalfClosedLocal,
-    strmHalfClosedRemote
+    strmHalfClosedRemote,
+    strmClosedRst
     #strmInvalid
   }
   block:
@@ -422,5 +429,21 @@ when isMainModule:
       let isValid = toNextStateRecv(state, seData) != strmInvalid
       let isValid2 = toNextStateRecv(state, seDataEndStream) != strmInvalid
       doAssert isValid == isValid2, $state
+  block:
+    for ev in allEvents-{seUnknown,sePriority}:
+      doAssert toNextStateSend(strmClosedRst, ev) == strmInvalid
+    doAssert toNextStateSend(strmClosedRst, sePriority) == strmClosedRst
+  block:
+    for state in {strmOpen,strmHalfClosedLocal}:
+      doAssert toNextStateSend(state, seRstStream) == strmClosedRst
+    for state in allStates-{strmOpen,strmHalfClosedLocal}:
+      doAssert toNextStateSend(state, seRstStream) in {strmInvalid, strmClosed}
+  block:
+    for ev in allEvents-{seUnknown,seRstStream,seHeadersEndStream,seDataEndStream}:
+      doAssert toNextStateRecv(strmClosedRst, ev) == strmClosedRst
+      doAssert toNextStateRecv(strmHalfClosedLocal, ev) == strmHalfClosedLocal
+    for ev in {seRstStream,seHeadersEndStream,seDataEndStream}:
+      doAssert toNextStateRecv(strmClosedRst, ev) == strmClosed
+      doAssert toNextStateRecv(strmHalfClosedLocal, ev) == strmClosed
 
   echo "ok"

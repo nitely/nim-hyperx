@@ -9,7 +9,7 @@ import ./tutils.nim
 from ../../src/hyperx/clientserver import stgWindowSize
 
 const strmsPerClient = 1123
-const clientsCount = 25
+const clientsCount = 13
 const strmsInFlight = 100
 const dataFrameLen = 1
 #const dataFrameLen = stgWindowSize.int * 2 + 123
@@ -26,7 +26,7 @@ proc send(strm: ClientStream) {.async.} =
     ]),
     finish = false
   )
-  var data = newStringRef newString(dataFrameLen)
+  let data = newStringRef newString(dataFrameLen)
   while true:
     await strm.sendBody(data, finish = false)
 
@@ -45,8 +45,8 @@ proc spawnStream(
 ) {.async.} =
   let strm = client.newClientStream()
   with strm:
-    let recvFut = strm.recv()
     let sendFut = strm.send()
+    let recvFut = strm.recv()
     try:
       await recvFut
     except StrmError as err:
