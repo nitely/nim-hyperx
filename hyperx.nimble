@@ -14,6 +14,7 @@ task test, "Test":
   exec "nim c -r src/hyperx/utils.nim"
   exec "nim c -r src/hyperx/queue.nim"
   exec "nim c -r src/hyperx/signal.nim"
+  exec "nim c -r src/hyperx/value.nim"
   exec "nim c -r src/hyperx/stream.nim"
   exec "nim c -r src/hyperx/frame.nim"
   exec "nim c -r -f -d:hyperxTest -d:ssl src/hyperx/testutils.nim"
@@ -59,6 +60,7 @@ task functest, "Func test":
   exec "nim c -r -d:release tests/functional/tconcurrent.nim"
   exec "nim c -r -d:release tests/functional/tconcurrentdata.nim"
   exec "nim c -r -d:release tests/functional/tflowcontrol.nim"
+  exec "nim c -r -d:release tests/functional/tcancel.nim"
 
 task h2spec, "h2spec test":
   exec "./h2spec --tls --port 8783 --strict"

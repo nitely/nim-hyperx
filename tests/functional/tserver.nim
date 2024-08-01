@@ -50,6 +50,7 @@ proc processClientHandler(client: ClientContext) {.async.} =
     debugEcho err.msg
   when defined(hyperxStats):
     echoStats client
+  #GC_fullCollect()
 
 proc serve(server: ServerContext) {.async.} =
   with server:

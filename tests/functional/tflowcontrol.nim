@@ -43,7 +43,6 @@ func newReqsCtx(): ReqsCtx =
   )
 
 proc send(strm: ClientStream, req: Req) {.async.} =
-  # XXX send multiple data frames
   await strm.sendHeaders(req.headers.s, finish = false)
   await strm.sendBody(req.data.s, finish = true)
 
@@ -99,6 +98,8 @@ proc spawnClient(
     var sig = newSignal()
     while stmsCount < strmsPerClient:
       for req in reqsCtx.s:
+        if not client.isConnected:
+          return
         inFlight[] = inFlight[] + 1
         asyncCheck spawnStream(client, req, checked, sig, inFlight)
         inc stmsCount
