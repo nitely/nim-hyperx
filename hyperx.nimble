@@ -60,6 +60,7 @@ task functest, "Func test":
   exec "nim c -r -d:release tests/functional/tconcurrent.nim"
   exec "nim c -r -d:release tests/functional/tconcurrentdata.nim"
   exec "nim c -r -d:release tests/functional/tflowcontrol.nim"
+  exec "nim c -r -d:release tests/functional/tcancel.nim"
 
 task h2spec, "h2spec test":
   exec "./h2spec --tls --port 8783 --strict"
