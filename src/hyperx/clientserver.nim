@@ -1022,7 +1022,7 @@ proc recvTask(strm: ClientStream) {.async.} =
   except StrmError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    stream.error = newStrmError(err.code)
+    stream.error = newError err
     if err.typ == hxLocalErr:
       await failSilently strm.writeRst(err.code)
     raise err
