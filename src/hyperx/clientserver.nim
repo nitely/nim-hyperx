@@ -39,6 +39,7 @@ const
 const
   stgWindowSize* {.intdefine: "hyperxWindowSize".} = 262_144
   stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
+  stgMaxSettingsList* {.intdefine: "hyperxMaxSettingsList".} = 100
 
 type
   ClientTyp* = enum
@@ -560,6 +561,8 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
     client.peerWindow += frm.windowSizeInc.int32
     client.peerWindowUpdateSig.trigger()
   of frmtSettings:
+    check frm.payloadLen.int <= stgMaxSettingsList * frmSettingsSize,
+      newConnError(errProtocolError)
     for (setting, value) in frm.settings:
       # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
       case setting

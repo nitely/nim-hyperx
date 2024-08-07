@@ -10,7 +10,7 @@ const
   frmPaddingSize* = 1
   frmRstStreamSize = 4
   frmSettingsAckSize = 0
-  frmSettingsSize = 6
+  frmSettingsSize* = 6
   frmPingSize = 8
   frmWindowUpdateSize = 4
   frmGoAwaySize = 8
