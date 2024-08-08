@@ -199,11 +199,6 @@ testAsync "consume window size":
   doAssert check1
 
 testAsync "do not exceed settings list":
-  proc sender(tc: TestClientContext) {.async.} =
-    var frmSetting = frame(frmtSettings, frmSidMain)
-    for _ in 0 .. stgMaxSettingsList.int-1:
-      frmSetting.addSetting(0x09.FrmSetting, 1000.uint32)
-    await tc.recv frmSetting.s
   var checked = false
   var server = newServer(
     "foo.bar", Port 443, "./cert", "./key"
@@ -214,18 +209,16 @@ testAsync "do not exceed settings list":
     await tc1.recv(preface)
     with tc1.client:
       await tc1.checkHandshake()
-      await tc1.sender()
-      await tc1.recv(headers)
+      var frmSetting = frame(frmtSettings, frmSidMain)
+      for _ in 0 .. stgMaxSettingsList.int-1:
+        frmSetting.addSetting(0x09.FrmSetting, 1000.uint32)
+      await tc1.recv frmSetting.s
+      await tc1.recv headers
       discard await client1.recvStream()
       checked = true
   doAssert checked
 
 testAsync "exceed settings list":
-  proc sender(tc: TestClientContext) {.async.} =
-    var frmSetting = frame(frmtSettings, frmSidMain)
-    for _ in 0 .. stgMaxSettingsList.int+1:
-      frmSetting.addSetting(0x09.FrmSetting, 1000.uint32)
-    await tc.recv frmSetting.s
   var checked = false
   var server = newServer(
     "foo.bar", Port 443, "./cert", "./key"
@@ -236,8 +229,11 @@ testAsync "exceed settings list":
     await tc1.recv(preface)
     with tc1.client:
       await tc1.checkHandshake()
-      await tc1.sender()
-      await tc1.recv(headers)
+      var frmSetting = frame(frmtSettings, frmSidMain)
+      for _ in 0 .. stgMaxSettingsList.int+1:
+        frmSetting.addSetting(0x09.FrmSetting, 1000.uint32)
+      await tc1.recv frmSetting.s
+      await tc1.recv headers
       try:
         discard await client1.recvStream()
         doAssert false
