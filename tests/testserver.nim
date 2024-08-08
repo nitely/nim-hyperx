@@ -9,7 +9,10 @@ import ../src/hyperx/testutils
 import ../src/hyperx/frame
 import ../src/hyperx/errors
 from ../src/hyperx/clientserver import
-  stgWindowSize, stgInitialWindowSize, stgInitialMaxFrameSize
+  stgWindowSize,
+  stgInitialWindowSize,
+  stgInitialMaxFrameSize,
+  stgMaxSettingsList
 
 func toBytes(s: string): seq[byte] =
   result = newSeq[byte]()
@@ -27,6 +30,11 @@ func newStringRef(s = ""): ref string =
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L".toBytes
+  headers =
+    ":method: GET\r\n" &
+    ":path: /\r\n" &
+    ":scheme: https\r\n" &
+    "foo: foo\r\n"
 
 proc checkHandshake(tc: TestClientContext) {.async.} =
   let frm1 = await tc.sent()
@@ -39,11 +47,6 @@ proc checkHandshake(tc: TestClientContext) {.async.} =
 
 testAsync "simple request":
   var checked = false
-  const headers =
-    ":method: GET\r\n" &
-    ":path: /\r\n" &
-    ":scheme: https\r\n" &
-    "foo: foo\r\n"
   const text = "0123456789"
   var server = newServer(
     "foo.bar", Port 443, "./cert", "./key"
@@ -86,11 +89,6 @@ testAsync "simple request":
 testAsync "exceed window size":
   var check1 = false
   var check2 = false
-  const headers =
-    ":method: GET\r\n" &
-    ":path: /\r\n" &
-    ":scheme: https\r\n" &
-    "foo: foo\r\n"
   var server = newServer(
     "foo.bar", Port 443, "./cert", "./key"
   )
@@ -150,11 +148,6 @@ testAsync "exceed window size":
 
 testAsync "consume window size":
   var check1 = false
-  const headers =
-    ":method: GET\r\n" &
-    ":path: /\r\n" &
-    ":scheme: https\r\n" &
-    "foo: foo\r\n"
   var server = newServer(
     "foo.bar", Port 443, "./cert", "./key"
   )
@@ -205,3 +198,49 @@ testAsync "consume window size":
         check1 = true
   doAssert check1
 
+testAsync "do not exceed settings list":
+  proc sender(tc: TestClientContext) {.async.} =
+    var frmSetting = frame(frmtSettings, frmSidMain)
+    for _ in 0 .. stgMaxSettingsList.int-1:
+      frmSetting.addSetting(0x09.FrmSetting, 1000.uint32)
+    await tc.recv frmSetting.s
+  var checked = false
+  var server = newServer(
+    "foo.bar", Port 443, "./cert", "./key"
+  )
+  with server:
+    let client1 = await server.recvClient()
+    let tc1 = newTestClient(client1)
+    await tc1.recv(preface)
+    with tc1.client:
+      await tc1.checkHandshake()
+      await tc1.sender()
+      await tc1.recv(headers)
+      discard await client1.recvStream()
+      checked = true
+  doAssert checked
+
+testAsync "exceed settings list":
+  proc sender(tc: TestClientContext) {.async.} =
+    var frmSetting = frame(frmtSettings, frmSidMain)
+    for _ in 0 .. stgMaxSettingsList.int+1:
+      frmSetting.addSetting(0x09.FrmSetting, 1000.uint32)
+    await tc.recv frmSetting.s
+  var checked = false
+  var server = newServer(
+    "foo.bar", Port 443, "./cert", "./key"
+  )
+  with server:
+    let client1 = await server.recvClient()
+    let tc1 = newTestClient(client1)
+    await tc1.recv(preface)
+    with tc1.client:
+      await tc1.checkHandshake()
+      await tc1.sender()
+      await tc1.recv(headers)
+      try:
+        discard await client1.recvStream()
+        doAssert false
+      except HyperxConnError:
+        checked = true
+  doAssert checked
