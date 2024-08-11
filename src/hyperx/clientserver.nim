@@ -1,4 +1,4 @@
-## Functionality shared beetwen client and server
+## Functionality shared between client and server
 
 when not defined(ssl):
   {.error: "this lib needs -d:ssl".}

@@ -1,5 +1,4 @@
 ## HTTP/2 client
-## WIP
 
 when not defined(ssl):
   {.error: "this lib needs -d:ssl".}
@@ -49,10 +48,11 @@ proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
   return sslContext
 
 when not defined(hyperxTest):
-  proc newMySocket(): MyAsyncSocket {.raises: [HyperxConnError].} =
+  proc newMySocket(ssl: bool): MyAsyncSocket {.raises: [HyperxConnError].} =
     try:
       result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
-      wrapSocket(defaultSslContext(), result)
+      if ssl:
+        wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
       debugInfo err.getStackTrace()
       debugInfo err.msg
@@ -60,9 +60,10 @@ when not defined(hyperxTest):
 
 proc newClient*(
   hostname: string,
-  port = Port 443
+  port = Port 443,
+  ssl = true
 ): ClientContext {.raises: [HyperxConnError].} =
-  newClient(ctClient, newMySocket(), hostname, port)
+  newClient(ctClient, newMySocket(ssl), hostname, port)
 
 type
   HttpMethod* = enum

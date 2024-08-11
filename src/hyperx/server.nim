@@ -1,5 +1,4 @@
 ## HTTP/2 server
-## WIP
 
 when not defined(ssl):
   {.error: "this lib needs -d:ssl".}
@@ -53,12 +52,14 @@ proc defaultSslContext(
 
 when not defined(hyperxTest):
   proc newMySocket(
+    ssl: bool,
     certFile = "",
     keyFile = ""
   ): MyAsyncSocket {.raises: [HyperxConnError].} =
     try:
       result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
-      wrapSocket(defaultSslContext(certFile, keyFile), result)
+      if ssl:
+        wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
       debugInfo err.getStackTrace()
       debugInfo err.msg
@@ -75,10 +76,12 @@ proc newServer*(
   hostname: string,
   port: Port,
   sslCertFile = "",
-  sslKeyFile = ""
+  sslKeyFile = "",
+  ssl = true
 ): ServerContext =
   ServerContext(
     sock: newMySocket(
+      ssl,
       certFile = sslCertFile,
       keyFile = sslKeyFile
     ),
@@ -118,11 +121,12 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
   try:
     # note OptNoDelay is inherited from server.sock
     let sock = await server.sock.accept()
-    when not defined(hyperxTest):
-      doAssert not sslContext.isNil
-    wrapConnectedSocket(
-      sslContext, sock, handshakeAsServer, server.hostname
-    )
+    if server.sock.isSsl:
+      when not defined(hyperxTest):
+        doAssert not sslContext.isNil
+      wrapConnectedSocket(
+        sslContext, sock, handshakeAsServer, server.hostname
+      )
     result = newClient(ctServer, sock, server.hostname)
   except CatchableError as err:
     debugInfo err.getStackTrace()

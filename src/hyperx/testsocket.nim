@@ -17,8 +17,9 @@ type
     isConnected*: bool
     hostname*: string
     port*: Port
+    isSsl*: bool
 
-proc newMySocket*(certFile = "", keyFile = ""): TestSocket =
+proc newMySocket*(ssl: bool, certFile = "", keyFile = ""): TestSocket =
   TestSocket(
     recvData: newQueue[seq[byte]](1000),
     sentData: newQueue[seq[byte]](1000),
@@ -28,7 +29,8 @@ proc newMySocket*(certFile = "", keyFile = ""): TestSocket =
     sentIdx: 0,
     isConnected: false,
     hostname: "",
-    port: Port 0
+    port: Port 0,
+    isSsl: ssl
   )
 
 proc putRecvData*(s: TestSocket, data: seq[byte]) {.async.} =
@@ -108,7 +110,7 @@ proc listen*(s: TestSocket) =
   s.isConnected = true
 
 proc accept*(s: TestSocket): Future[TestSocket] {.async.} =
-  result = newMySocket()
+  result = newMySocket(s.isSsl)
   result.isConnected = true
 
 proc wrapConnectedSocket*(
