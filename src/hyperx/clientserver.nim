@@ -42,6 +42,21 @@ const
   stgMaxSettingsList* {.intdefine: "hyperxMaxSettingsList".} = 100
 
 type
+  HyperxSockDomain* = enum
+    hyxUnix, hyxInet, hyxInet6
+
+func addrFamily*(domain: HyperxSockDomain): Domain {.raises: [].} =
+  case domain
+  of hyxUnix: AF_UNIX
+  of hyxInet: AF_INET
+  of hyxInet6: AF_INET6
+
+func ipProto*(domain: HyperxSockDomain): Protocol {.raises: [].} =
+  case domain
+  of hyxUnix: IPPROTO_IP
+  of hyxInet, hyxInet6: IPPROTO_TCP
+
+type
   ClientTyp* = enum
     ctServer, ctClient
 
@@ -123,6 +138,7 @@ type
     sock*: MyAsyncSocket
     hostname*: string
     port: Port
+    domain: HyperxSockDomain
     isConnected*: bool
     headersEnc, headersDec: DynHeaders
     streams: Streams
@@ -146,13 +162,15 @@ proc newClient*(
   typ: ClientTyp,
   sock: MyAsyncSocket,
   hostname: string,
-  port = Port 443
+  port = Port 443,
+  domain = hyxInet
 ): ClientContext {.raises: [].} =
   result = ClientContext(
     typ: typ,
     sock: sock,
     hostname: hostname,
     port: port,
+    domain: domain,
     isConnected: false,
     headersEnc: initDynHeaders(stgHeaderTableSize.int),
     headersDec: initDynHeaders(stgHeaderTableSize.int),
@@ -756,7 +774,11 @@ proc windowUpdateTask(client: ClientContext) {.async.} =
 
 proc connect(client: ClientContext) {.async.} =
   try:
-    await client.sock.connect(client.hostname, client.port)
+    case client.domain
+    of hyxInet, hyxInet6:
+      await client.sock.connect(client.hostname, client.port)
+    of hyxUnix:
+      await client.sock.connectUnix(client.hostname)
   except OsError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg

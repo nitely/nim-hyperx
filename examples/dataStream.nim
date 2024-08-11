@@ -60,7 +60,7 @@ when isMainModule:
       await sendFut
 
   proc main() {.async.} =
-    var client = newClient(localHost, localPort)
+    var client = newClient(localHost, localPort, ssl = false, domain = hyxUnix)
     with client:
       await streamChunks(client, "/foo")
 

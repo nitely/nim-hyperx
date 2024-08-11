@@ -7,8 +7,8 @@ import std/strutils
 import std/asyncdispatch
 import ../src/hyperx/server
 
-const localHost* = "127.0.0.1"
-const localPort* = Port 8783
+const localHost* = "/tmp/hyperxasd22.sock"
+const localPort* = Port 0
 const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
@@ -76,7 +76,7 @@ proc serve*(server: ServerContext, propagateErr = true) {.async.} =
 
 proc newServer*(): ServerContext =
   newServer(
-    localHost, localPort, certFile, keyFile
+    localHost, localPort, certFile, keyFile, ssl = false, domain = hyxUnix
   )
 
 when isMainModule:

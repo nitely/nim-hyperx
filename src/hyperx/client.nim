@@ -33,7 +33,8 @@ export
   ClientContext,
   HyperxConnError,
   HyperxStrmError,
-  HyperxError
+  HyperxError,
+  HyperxSockDomain
 
 var sslContext {.threadvar.}: SslContext
 
@@ -48,9 +49,13 @@ proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
   return sslContext
 
 when not defined(hyperxTest):
-  proc newMySocket(ssl: bool): MyAsyncSocket {.raises: [HyperxConnError].} =
+  proc newMySocket(
+    domain: Domain, protocol: Protocol, ssl: bool
+  ): MyAsyncSocket {.raises: [HyperxConnError].} =
+    doAssert domain in {AF_UNIX, AF_INET, AF_INET6}
+    doAssert protocol in {IPPROTO_IP, IPPROTO_TCP}
     try:
-      result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
+      result = newAsyncSocket(domain, SOCK_STREAM, protocol, buffered = true)
       if ssl:
         wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
@@ -61,9 +66,16 @@ when not defined(hyperxTest):
 proc newClient*(
   hostname: string,
   port = Port 443,
-  ssl = true
+  ssl = true,
+  domain = hyxInet
 ): ClientContext {.raises: [HyperxConnError].} =
-  newClient(ctClient, newMySocket(ssl), hostname, port)
+  newClient(
+    ctClient,
+    newMySocket(domain.addrFamily(), domain.ipProto(), ssl),
+    hostname,
+    port,
+    domain
+  )
 
 type
   HttpMethod* = enum

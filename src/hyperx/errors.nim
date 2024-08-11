@@ -49,7 +49,7 @@ func toErrorCode(e: uint32): ErrorCode {.raises: [].} =
 # XXX remove ConnError and StrmError; expose code in Hyperx*
 type
   HyperxErrTyp* = enum
-    hxLocalErr, hxRemoteErr
+    hxLocalErr, hxRemoteErr  # XXX use hyx prefix
   HyperxError* = object of CatchableError
   HyperxConnError* = object of HyperxError
   HyperxStrmError* = object of HyperxError

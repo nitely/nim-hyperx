@@ -17,9 +17,13 @@ type
     isConnected*: bool
     hostname*: string
     port*: Port
+    domain*: Domain
+    protocol*: Protocol
     isSsl*: bool
 
-proc newMySocket*(ssl: bool, certFile = "", keyFile = ""): TestSocket =
+proc newMySocket*(
+  domain: Domain, protocol: Protocol, ssl: bool, certFile = "", keyFile = ""
+): TestSocket =
   TestSocket(
     recvData: newQueue[seq[byte]](1000),
     sentData: newQueue[seq[byte]](1000),
@@ -30,6 +34,8 @@ proc newMySocket*(ssl: bool, certFile = "", keyFile = ""): TestSocket =
     isConnected: false,
     hostname: "",
     port: Port 0,
+    domain: domain,
+    protocol: protocol,
     isSsl: ssl
   )
 
@@ -110,7 +116,7 @@ proc listen*(s: TestSocket) =
   s.isConnected = true
 
 proc accept*(s: TestSocket): Future[TestSocket] {.async.} =
-  result = newMySocket(s.isSsl)
+  result = newMySocket(s.domain, s.isSsl)
   result.isConnected = true
 
 proc wrapConnectedSocket*(
