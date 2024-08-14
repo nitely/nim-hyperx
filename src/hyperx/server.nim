@@ -179,3 +179,39 @@ proc sendHeaders*(
     client.hpackEncode(headers, "content-length", $contentLen)
   let finish = contentLen <= 0
   result = strm.sendHeadersImpl(headers, finish)
+
+type StreamCallback* =
+  proc (stream: ClientStream): Future[void] {.closure, gcsafe.}
+
+proc processStreamHandler(
+  strm: ClientStream,
+  callback: StreamCallback
+) {.async.} =
+  try:
+    with strm:
+      await callback(strm)
+  except HyperxError:
+    debugInfo getCurrentException().getStackTrace()
+    debugInfo getCurrentException().msg
+
+proc processClientHandler(
+  client: ClientContext,
+  callback: StreamCallback
+) {.async.} =
+  try:
+    with client:
+      while client.isConnected:
+        let strm = await client.recvStream()
+        asyncCheck processStreamHandler(strm, callback)
+  except HyperxError:
+    debugInfo getCurrentException().getStackTrace()
+    debugInfo getCurrentException().msg
+
+proc serve*(
+  server: ServerContext,
+  callback: StreamCallback
+) {.async.} =
+  with server:
+    while server.isConnected:
+      let client = await server.recvClient()
+      asyncCheck processClientHandler(client, callback)
