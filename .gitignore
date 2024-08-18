@@ -6,7 +6,9 @@ tests/testclient
 tests/testclientserver
 tests/testserver
 tests/functional/tserial
+tests/functional/tserialinsecure
 tests/functional/tserver
+tests/functional/tserverinsecure
 tests/functional/tconcurrent
 tests/functional/tconcurrentdata
 tests/functional/tflowcontrol

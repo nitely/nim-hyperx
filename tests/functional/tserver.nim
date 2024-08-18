@@ -52,7 +52,7 @@ proc processClientHandler(client: ClientContext) {.async.} =
     echoStats client
   #GC_fullCollect()
 
-proc serve(server: ServerContext) {.async.} =
+proc serve*(server: ServerContext) {.async.} =
   with server:
     while server.isConnected:
       let client = await server.recvClient()
