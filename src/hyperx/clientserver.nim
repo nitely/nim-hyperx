@@ -478,7 +478,6 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     payloadLen -= frmPrioritySize
   # padding can be equal at this point, because we don't count frmPaddingSize
   check payloadLen >= paddingLen, newConnError(errProtocolError)
-  payloadLen -= paddingLen
   check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
   if payloadLen > 0:
     frm.grow payloadLen
@@ -489,13 +488,6 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     check payloadRln == payloadLen, newConnClosedError()
     debugInfo frm.debugPayload
   if paddingLen > 0:
-    let oldFrmLen = frm.len
-    frm.grow paddingLen
-    check not client.sock.isClosed, newConnClosedError()
-    let paddingRln = await client.sock.recvInto(
-      addr frm.s[oldFrmLen], paddingLen
-    )
-    check paddingRln == paddingLen, newConnClosedError()
     frm.shrink paddingLen
   if frmfEndHeaders notin frm.flags and frm.typ in {frmtHeaders, frmtPushPromise}:
     debugInfo "Continuation"
@@ -811,6 +803,7 @@ type
     contentLen, contentLenRecv: int64
     headersRecv, bodyRecv, trailersRecv: string
     headersRecvSig, bodyRecvSig: SignalAsync
+    bodyRecvLen: int
 
 func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   ClientStream(
@@ -822,6 +815,7 @@ func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
     contentLenRecv: 0,
     bodyRecv: "",
     bodyRecvSig: newSignal(),
+    bodyRecvLen: 0,
     headersRecv: "",
     headersRecvSig: newSignal(),
     trailersRecv: "",
@@ -988,7 +982,8 @@ proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
       break
     check frm.typ == frmtData, newStrmError(errProtocolError)
     strm.bodyRecv.add frm.payload
-    strm.contentLenRecv += frm.payloadLen.int
+    strm.bodyRecvLen += frm.payloadLen.int
+    strm.contentLenRecv += frm.payload.len
     if frmfEndStream in frm.flags:
       # XXX dont do for no content status 1xx/204/304 and HEAD response
       #     they could send empty data to close the stream so this is called
@@ -1063,9 +1058,10 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   template stream: untyped = strm.stream
   if strm.stateRecv != csStateEnded and strm.bodyRecv.len == 0:
     await strm.bodyRecvSig.waitFor()
-  let bodyL = strm.bodyRecv.len
+  let bodyL = strm.bodyRecvLen
   data[].add strm.bodyRecv
   strm.bodyRecv.setLen 0
+  strm.bodyRecvLen = 0
   #if not client.isConnected:
   #  # this avoids raising when sending a window update
   #  # if the conn is closed. Unsure if it's useful

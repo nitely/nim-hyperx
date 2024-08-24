@@ -153,6 +153,8 @@ func shrink*(frm: Frame, size: int) {.inline, raises: [].} =
   frm.s.setLen frm.s.len-size
 
 func payloadLen*(frm: Frame): FrmPayloadLen {.inline, raises: [].} =
+  ## This can include padding and prio len,
+  ## and be greater than frm.payload.len
   # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
   result += frm.s[0].uint32 shl 16
   result += frm.s[1].uint32 shl 8
