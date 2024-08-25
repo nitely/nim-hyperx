@@ -434,7 +434,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
       continue
     # XXX the spec does not limit total headers size,
     #     but there needs to be a limit unless we stream
-    let totalPayloadLen = frm2.payloadLen.int + frm.payload.len
+    let totalPayloadLen = frm2.payloadLen.int + frm.payloadLen.int
     check totalPayloadLen <= stgInitialMaxFrameSize.int, newConnError(errProtocolError)
     let oldFrmLen = frm.len
     frm.grow frm2.payloadLen.int
@@ -443,7 +443,7 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
       addr frm.s[oldFrmLen], frm2.payloadLen.int
     )
     check payloadRln == frm2.payloadLen.int, newConnClosedError()
-  frm.setPayloadLen frm.payload.len.FrmPayloadLen
+  frm.setPayloadLen frm.payloadSize.FrmPayloadLen
   frm.flags.incl frmfEndHeaders
 
 proc read(client: ClientContext, frm: Frame) {.async.} =
@@ -458,13 +458,10 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   debugInfo $frm
   let payloadLen = frm.payloadLen.int
   check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errFrameSizeError)
-  #if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
   if frm.isPadded:
     check payloadLen >= frmPaddingSize, newConnError(errProtocolError)
-  #if frmfPriority in frm.flags and frm.typ == frmtHeaders:
   if frm.hasPrio:
     check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
-  #if frmfPadded in frm.flags and frmfPriority in frm.flags and frm.typ == frmtHeaders:
   if frm.isPadded and frm.hasPrio:
     check payloadLen >= frmPaddingSize+frmPrioritySize, newConnError(errProtocolError)
   check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
@@ -477,9 +474,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     check payloadRln == payloadLen, newConnClosedError()
     debugInfo frm.debugPayload
   if frm.isPadded:
-    # use payload.len to avoid taking optional fields into account
-    check frm.paddingLen <= frm.payload.len, newConnError(errProtocolError)
-    frm.shrink frm.paddingLen
+    check frm.paddingLen > frm.payloadSize, newConnError(errProtocolError)
   if frm.hasPrio:
     check frm.streamDependency != frm.sid, newConnError(errProtocolError)
   if frmfEndHeaders notin frm.flags and frm.typ in {frmtHeaders, frmtPushPromise}:

@@ -138,8 +138,8 @@ func clear*(frm: Frame) {.inline, raises: [].} =
 func len*(frm: Frame): int {.inline, raises: [].} =
   frm.s.len
 
-template payload*(frm: Frame): untyped =
-  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
+#template payload*(frm: Frame): untyped =
+#  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
 func payloadSize*(frm: Frame): int {.raises: [].} =
   frm.len-frmHeaderSize
@@ -153,8 +153,8 @@ func shrink*(frm: Frame, size: int) {.inline, raises: [].} =
   frm.s.setLen frm.s.len-size
 
 func payloadLen*(frm: Frame): FrmPayloadLen {.inline, raises: [].} =
-  ## This can include padding and prio len,
-  ## and be greater than frm.payload.len
+  ## This can include padding and prio len.
+  ## It should be equal to payloadSize
   # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
   result += frm.s[0].uint32 shl 16
   result += frm.s[1].uint32 shl 8
@@ -200,7 +200,33 @@ func setSid*(frm: Frame, sid: FrmSid) {.inline, raises: [].} =
 
 func add*(frm: Frame, payload: openArray[byte]) {.inline, raises: [].} =
   frm.s.add payload
-  frm.setPayloadLen frm.payload.len.FrmPayloadLen
+  frm.setPayloadLen frm.payloadSize.FrmPayloadLen
+
+func isPadded*(frm: Frame): bool {.raises: [].} =
+  frmfPadded in frm.flags and frm.typ in frmPaddedTypes
+
+func hasPrio*(frm: Frame): bool {.raises: [].} =
+  frmfPriority in frm.flags and frm.typ == frmtHeaders
+
+func optFieldsSize(frm: Frame): int {.raises: [].} =
+  result = 0
+  if frm.isPadded:
+    result += frmPaddingSize
+  if frm.hasPrio:
+    result += frmPrioritySize
+
+func paddingLen(frm: Frame): int {.raises: [].} =
+  result = 0
+  if frm.isPadded:
+    result = frm.s[frmHeaderSize].int
+
+template data*(frm: Frame): untyped =
+  #assert frm.typ == frmtData
+  toOpenArray(frm.s, frmHeaderSize+frm.optFieldsSize, frm.s.len-1-frm.paddingLen)
+
+template fieldBlock*(frm: Frame): untyped =
+  #assert frm.typ in {frmtHeaders, frmtPushPromise, frmtContinuation}
+  toOpenArray(frm.s, frmHeaderSize+frm.optFieldsSize, frm.s.len-1-frm.paddingLen)
 
 func isValidSize*(frm: Frame, size: int): bool {.inline, raises: [].} =
   result = case frm.typ
@@ -291,14 +317,14 @@ func addSetting*(
   doAssert frmfAck notin frm.flags2
   let i = frm.len
   frm.grow frmSettingsSize
-  frm.setPayloadLen frm.payload.len.FrmPayloadLen
+  frm.setPayloadLen frm.payloadSize.FrmPayloadLen
   frm.s[i] = 0.byte
   frm.s[i+1] = id.byte
   frm.s.assignAt(i+2, value)
 
 iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline, raises: [].} =
   # https://httpwg.org/specs/rfc9113.html#SettingFormat
-  #doAssert frm.payload.len mod frmSettingsSize == 0
+  #doAssert frm.payloadSize mod frmSettingsSize == 0
   var i = frmHeaderSize
   var id = 0'u16
   # need to return last value for each ID
@@ -442,15 +468,15 @@ func debugPayload*(frm: Frame): string {.raises: [].} =
         value += x.int
       result.add fmt("\nPing {$value}")
     of frmtData:
-      if frm.payload.len > 0:
+      if frm.data.len > 0:
         result.add "\n"
         var x = 0
-        for byt in frm.payload:
+        for byt in frm.data:
           result.add byt.char
           inc x
           if x == 10:
             break
-        if frm.payload.len > 10:
+        if frm.data.len > 10:
           result.add "[truncated]"
     else:
       result.add "\nUnimplemented debug"
