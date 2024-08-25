@@ -458,8 +458,8 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
   check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errFrameSizeError)
-  var paddingLen = 0
-  if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
+  var paddingLen = 0'u8
+  if frm.isPadded:
     debugInfo "Padding"
     check payloadLen >= frmPaddingSize, newConnError(errProtocolError)
     check not client.sock.isClosed, newConnClosedError()
@@ -467,17 +467,17 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     check paddingRln == frmPaddingSize, newConnClosedError()
     payloadLen -= frmPaddingSize
   # prio is deprecated so do nothing with it
-  if frmfPriority in frm.flags and frm.typ == frmtHeaders:
+  if frm.hasPrio:
     debugInfo "Priority"
     check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
-    var prio = [byte 0, 0, 0, 0, 0]
+    var prio = [0'u8, 0, 0, 0, 0]
     check not client.sock.isClosed, newConnClosedError()
     let prioRln = await client.sock.recvInto(addr prio, prio.len)
     check prioRln == frmPrioritySize, newConnClosedError()
     check prioDependency(prio) != frm.sid, newConnError(errProtocolError)
     payloadLen -= frmPrioritySize
   # padding can be equal at this point, because we don't count frmPaddingSize
-  check payloadLen >= paddingLen, newConnError(errProtocolError)
+  check payloadLen >= paddingLen.int, newConnError(errProtocolError)
   check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
   if payloadLen > 0:
     frm.grow payloadLen
@@ -488,7 +488,7 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     check payloadRln == payloadLen, newConnClosedError()
     debugInfo frm.debugPayload
   if paddingLen > 0:
-    frm.shrink paddingLen
+    frm.shrink paddingLen.int
   if frmfEndHeaders notin frm.flags and frm.typ in {frmtHeaders, frmtPushPromise}:
     debugInfo "Continuation"
     await client.readUntilEnd(frm)
@@ -879,6 +879,9 @@ proc write(strm: ClientStream, frm: Frame): Future[void] =
   template stream: untyped = strm.stream
   # This is done in the next headers after settings ACK put
   if frm.typ == frmtHeaders and client.headersEnc.hasResized():
+    # XXX handle padding and prio
+    doAssert not frm.isPadded
+    doAssert not frm.hasPrio
     # XXX avoid copy?
     var payload = newSeq[byte]()
     client.headersEnc.encodeLastResize(payload)
@@ -1113,7 +1116,7 @@ proc sendHeadersImpl*(
   frm.add headers[]
   frm.setTyp frmtHeaders
   frm.setSid strm.stream.id.FrmSid
-  frm.setPayloadLen frm.payloadSize.FrmPayloadLen
+  frm.setPayloadLen frm.payload.len.FrmPayloadLen
   frm.flags.incl frmfEndHeaders
   if finish:
     frm.flags.incl frmfEndStream

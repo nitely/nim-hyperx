@@ -141,9 +141,6 @@ func len*(frm: Frame): int {.inline, raises: [].} =
 template payload*(frm: Frame): untyped =
   toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
-func payloadSize*(frm: Frame): int {.raises: [].} =
-  frm.len-frmHeaderSize
-
 func grow*(frm: Frame, size: int) {.inline, raises: [].} =
   frm.s.setLen frm.s.len+size
 
@@ -219,6 +216,12 @@ func isValidSize*(frm: Frame, size: int): bool {.inline, raises: [].} =
     size == frmWindowUpdateSize
   else:
     true
+
+func isPadded*(frm: Frame): bool {.raises: [].} =
+  frmfPadded in frm.flags and frm.typ in frmPaddedTypes
+
+func hasPrio*(frm: Frame): bool {.raises: [].} =
+  frmfPriority in frm.flags and frm.typ == frmtHeaders
 
 template assignAt(s: var seq[byte], i: int, x: uint32): untyped =
   s[i+0] = ((x shr 24) and 8.ones).byte
