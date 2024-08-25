@@ -456,28 +456,17 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   let headerRln = await client.sock.recvInto(frm.rawBytesPtr, frm.len)
   check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
-  var payloadLen = frm.payloadLen.int
+  let payloadLen = frm.payloadLen.int
   check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errFrameSizeError)
-  var paddingLen = 0
-  if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
-    debugInfo "Padding"
+  #if frmfPadded in frm.flags and frm.typ in frmPaddedTypes:
+  if frm.isPadded:
     check payloadLen >= frmPaddingSize, newConnError(errProtocolError)
-    check not client.sock.isClosed, newConnClosedError()
-    let paddingRln = await client.sock.recvInto(addr paddingLen, frmPaddingSize)
-    check paddingRln == frmPaddingSize, newConnClosedError()
-    payloadLen -= frmPaddingSize
-  # prio is deprecated so do nothing with it
-  if frmfPriority in frm.flags and frm.typ == frmtHeaders:
-    debugInfo "Priority"
+  #if frmfPriority in frm.flags and frm.typ == frmtHeaders:
+  if frm.hasPrio:
     check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
-    var prio = [byte 0, 0, 0, 0, 0]
-    check not client.sock.isClosed, newConnClosedError()
-    let prioRln = await client.sock.recvInto(addr prio, prio.len)
-    check prioRln == frmPrioritySize, newConnClosedError()
-    check prioDependency(prio) != frm.sid, newConnError(errProtocolError)
-    payloadLen -= frmPrioritySize
-  # padding can be equal at this point, because we don't count frmPaddingSize
-  check payloadLen >= paddingLen, newConnError(errProtocolError)
+  #if frmfPadded in frm.flags and frmfPriority in frm.flags and frm.typ == frmtHeaders:
+  if frm.isPadded and frm.hasPrio:
+    check payloadLen >= frmPaddingSize+frmPrioritySize, newConnError(errProtocolError)
   check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
   if payloadLen > 0:
     frm.grow payloadLen
@@ -487,8 +476,12 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     )
     check payloadRln == payloadLen, newConnClosedError()
     debugInfo frm.debugPayload
-  if paddingLen > 0:
-    frm.shrink paddingLen
+  if frm.isPadded:
+    # use payload.len to avoid taking optional fields into account
+    check frm.paddingLen <= frm.payload.len, newConnError(errProtocolError)
+    frm.shrink frm.paddingLen
+  if frm.hasPrio:
+    check frm.streamDependency != frm.sid, newConnError(errProtocolError)
   if frmfEndHeaders notin frm.flags and frm.typ in {frmtHeaders, frmtPushPromise}:
     debugInfo "Continuation"
     await client.readUntilEnd(frm)
