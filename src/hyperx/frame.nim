@@ -35,17 +35,17 @@ const
 const
   frmPaddedTypes* = {frmtHeaders, frmtPushPromise, frmtData}
 
-func isUnknown*(typ: FrmTyp): bool {.inline.} =
+func isUnknown*(typ: FrmTyp): bool =
   typ.uint8 notin 0x00'u8 .. 0x09'u8
 
 type
   FrmFlags* = distinct uint8
   FrmFlag* = distinct uint8
 
-func contains*(flags: FrmFlags, f: FrmFlag): bool {.inline, raises: [].} =
+func contains*(flags: FrmFlags, f: FrmFlag): bool {.raises: [].} =
   result = (flags.uint8 and f.uint8) > 0
 
-func incl*(flags: var FrmFlags, f: FrmFlag) {.inline, raises: [].} =
+func incl*(flags: var FrmFlags, f: FrmFlag) {.raises: [].} =
   flags = (flags.uint8 xor f.uint8).FrmFlags
 
 const
@@ -98,13 +98,13 @@ type
 
 proc `==`*(a, b: FrmSid): bool {.borrow.}
 
-func `+=`*(a: var FrmSid, b: uint) {.inline, raises: [].} =
+func `+=`*(a: var FrmSid, b: uint) {.raises: [].} =
   a = (a.uint + b).FrmSid
 
-proc clearBit(v: var FrmSid, bit: int) {.inline, raises: [].} =
+proc clearBit(v: var FrmSid, bit: int) {.raises: [].} =
   v = FrmSid(v.uint and not (1'u32 shl bit))
 
-proc clearBit(v: var uint, bit: int) {.inline, raises: [].} =
+proc clearBit(v: var uint, bit: int) {.raises: [].} =
   v = v and not (1'u32 shl bit)
 
 const
@@ -121,35 +121,35 @@ func newFrame*(payloadLen = 0): Frame {.raises: [].} =
 func newEmptyFrame*(): Frame {.raises: [].} =
   Frame(s: newSeq[byte]())
 
-func isEmpty*(frm: Frame): bool =
+func isEmpty*(frm: Frame): bool {.raises: [].} =
   frm.s.len == 0
 
-func rawBytesPtr*(frm: Frame): ptr byte =
+func rawBytesPtr*(frm: Frame): ptr byte {.raises: [].} =
   addr frm.s[0]
 
-func rawPayloadBytesPtr*(frm: Frame): ptr byte =
+func rawPayloadBytesPtr*(frm: Frame): ptr byte {.raises: [].} =
   addr frm.s[frmHeaderSize]
 
-func clear*(frm: Frame) {.inline, raises: [].} =
+func clear*(frm: Frame) {.raises: [].} =
   frm.s.setLen frmHeaderSize
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0
 
-func len*(frm: Frame): int {.inline, raises: [].} =
+func len*(frm: Frame): int {.raises: [].} =
   frm.s.len
 
 template payload*(frm: Frame): untyped =
   toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
-func grow*(frm: Frame, size: int) {.inline, raises: [].} =
+func grow*(frm: Frame, size: int) {.raises: [].} =
   frm.s.setLen frm.s.len+size
 
-func shrink*(frm: Frame, size: int) {.inline, raises: [].} =
+func shrink*(frm: Frame, size: int) {.raises: [].} =
   doAssert frm.s.len >= size
   doAssert frm.s.len-size >= frmHeaderSize
   frm.s.setLen frm.s.len-size
 
-func payloadLen*(frm: Frame): FrmPayloadLen {.inline, raises: [].} =
+func payloadLen*(frm: Frame): FrmPayloadLen {.raises: [].} =
   ## This can include padding and prio len,
   ## and be greater than frm.payload.len
   # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
@@ -158,48 +158,48 @@ func payloadLen*(frm: Frame): FrmPayloadLen {.inline, raises: [].} =
   result += frm.s[2].uint32
   doAssert result <= 24.ones.uint
 
-func typ*(frm: Frame): FrmTyp {.inline, raises: [].} =
+func typ*(frm: Frame): FrmTyp {.raises: [].} =
   result = frm.s[3].FrmTyp
 
 # XXX mflags
-func flags*(frm: Frame): var FrmFlags {.inline, raises: [].} =
+func flags*(frm: Frame): var FrmFlags {.raises: [].} =
   result = frm.s[4].FrmFlags
 
 # XXX flags
-func flags2(frm: Frame): FrmFlags {.inline, raises: [].} =
+func flags2(frm: Frame): FrmFlags {.raises: [].} =
   result = frm.s[4].FrmFlags
 
-func sid*(frm: Frame): FrmSid {.inline, raises: [].} =
+func sid*(frm: Frame): FrmSid {.raises: [].} =
   result += frm.s[5].uint shl 24
   result += frm.s[6].uint shl 16
   result += frm.s[7].uint shl 8
   result += frm.s[8].uint
   result.clearBit 31  # clear reserved byte
 
-func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.inline, raises: [].} =
+func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.raises: [].} =
   doAssert n <= 24.ones.uint
   frm.s[0] = ((n.uint shr 16) and 8.ones).byte
   frm.s[1] = ((n.uint shr 8) and 8.ones).byte
   frm.s[2] = (n.uint and 8.ones).byte
 
-func setTyp*(frm: Frame, t: FrmTyp) {.inline, raises: [].} =
+func setTyp*(frm: Frame, t: FrmTyp) {.raises: [].} =
   frm.s[3] = t.uint8
 
-func setFlags*(frm: Frame, f: FrmFlags) {.inline, raises: [].} =
+func setFlags*(frm: Frame, f: FrmFlags) {.raises: [].} =
   frm.s[4] = f.uint8
 
-func setSid*(frm: Frame, sid: FrmSid) {.inline, raises: [].} =
+func setSid*(frm: Frame, sid: FrmSid) {.raises: [].} =
   ## Set the stream ID
   frm.s[5] = ((sid.uint shr 24) and 8.ones).byte
   frm.s[6] = ((sid.uint shr 16) and 8.ones).byte
   frm.s[7] = ((sid.uint shr 8) and 8.ones).byte
   frm.s[8] = (sid.uint and 8.ones).byte
 
-func add*(frm: Frame, payload: openArray[byte]) {.inline, raises: [].} =
+func add*(frm: Frame, payload: openArray[byte]) {.raises: [].} =
   frm.s.add payload
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
 
-func isValidSize*(frm: Frame, size: int): bool {.inline, raises: [].} =
+func isValidSize*(frm: Frame, size: int): bool {.raises: [].} =
   result = case frm.typ
   of frmtRstStream:
     size == frmRstStreamSize
@@ -231,7 +231,7 @@ template assignAt(s: var seq[byte], i: int, x: uint32): untyped =
 
 func newGoAwayFrame*(
   lastSid, errorCode: int
-): Frame {.inline, raises: [].} =
+): Frame {.raises: [].} =
   result = newFrame(frmGoAwaySize)
   result.setTyp frmtGoAway
   result.setPayloadLen frmGoAwaySize.FrmPayloadLen
@@ -241,7 +241,7 @@ func newGoAwayFrame*(
 func newRstStreamFrame*(
   sid: FrmSid,
   errorCode: int
-): Frame {.inline, raises: [].} =
+): Frame {.raises: [].} =
   result = newFrame(frmRstStreamSize)
   result.setTyp frmtRstStream
   result.setSid sid
@@ -251,14 +251,14 @@ func newRstStreamFrame*(
 func newWindowUpdateFrame*(
   sid: FrmSid,
   increment: int
-): Frame {.inline, raises: [].} =
+): Frame {.raises: [].} =
   result = newFrame(frmWindowUpdateSize)
   result.setTyp frmtWindowUpdate
   result.setSid sid
   result.setPayloadLen frmWindowUpdateSize.FrmPayloadLen
   result.s.assignAt(frmHeaderSize, increment.uint32)
 
-func newSettingsFrame*(ack = false): Frame {.inline, raises: [].} =
+func newSettingsFrame*(ack = false): Frame {.raises: [].} =
   result = newFrame()
   result.setTyp frmtSettings
   result.setSid frmSidMain
@@ -267,7 +267,7 @@ func newSettingsFrame*(ack = false): Frame {.inline, raises: [].} =
 
 func newPingFrame*(
   ackPayload: openArray[byte] = []
-): Frame {.inline, raises: [].} =
+): Frame {.raises: [].} =
   doAssert ackPayload.len == 0 or ackPayload.len == frmPingSize
   result = newFrame(frmPingSize)
   result.setTyp frmtPing
@@ -289,7 +289,7 @@ func addSetting*(
   frm: Frame,
   id: FrmSetting,
   value: uint32
-) {.inline, raises: [].} =
+) {.raises: [].} =
   doAssert frm.typ == frmtSettings
   doAssert frmfAck notin frm.flags2
   let i = frm.len
@@ -331,14 +331,14 @@ iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline, raises: [].} =
     # else skip
     i += frmSettingsSize
 
-func prioDependency*(prio: openArray[byte]): FrmSid {.inline, raises: [].} =
+func prioDependency*(prio: openArray[byte]): FrmSid {.raises: [].} =
   result += prio[0].uint shl 24
   result += prio[1].uint shl 16
   result += prio[2].uint shl 8
   result += prio[3].uint
   result.clearBit 31  # clear reserved byte
 
-func strmDependency*(frm: Frame): FrmSid {.inline, raises: [].} =
+func strmDependency*(frm: Frame): FrmSid {.raises: [].} =
   doAssert frm.typ == frmtPriority
   result += frm.s[frmHeaderSize+0].uint shl 24
   result += frm.s[frmHeaderSize+1].uint shl 16
@@ -346,7 +346,7 @@ func strmDependency*(frm: Frame): FrmSid {.inline, raises: [].} =
   result += frm.s[frmHeaderSize+3].uint
   result.clearBit 31  # clear reserved byte
 
-func windowSizeInc*(frm: Frame): uint {.inline, raises: [].} =
+func windowSizeInc*(frm: Frame): uint {.raises: [].} =
   doAssert frm.typ == frmtWindowUpdate
   result += frm.s[frmHeaderSize+0].uint shl 24
   result += frm.s[frmHeaderSize+1].uint shl 16
@@ -354,14 +354,14 @@ func windowSizeInc*(frm: Frame): uint {.inline, raises: [].} =
   result += frm.s[frmHeaderSize+3].uint
   result.clearBit 31  # clear reserved byte
 
-func errorCode*(frm: Frame): uint32 {.inline, raises: [].} =
+func errorCode*(frm: Frame): uint32 {.raises: [].} =
   doAssert frm.typ == frmtRstStream
   result += frm.s[frmHeaderSize+0].uint32 shl 24
   result += frm.s[frmHeaderSize+1].uint32 shl 16
   result += frm.s[frmHeaderSize+2].uint32 shl 8
   result += frm.s[frmHeaderSize+3].uint32
 
-func pingData*(frm: Frame): uint32 {.inline, raises: [].} =
+func pingData*(frm: Frame): uint32 {.raises: [].} =
   # note we ignore the last 4 bytes
   doAssert frm.typ == frmtPing
   result += frm.s[frmHeaderSize+0].uint32 shl 24
@@ -370,10 +370,10 @@ func pingData*(frm: Frame): uint32 {.inline, raises: [].} =
   result += frm.s[frmHeaderSize+3].uint32
 
 # XXX add padding field and padding as payload
-#func setPadding*(frm: Frame, n: FrmPadding) {.inline.} =
+#func setPadding*(frm: Frame, n: FrmPadding) =
 #  doAssert frm.typ in {frmtData, frmtHeaders, frmtPushPromise}
 
-#func add*(frm: Frame, payload: openArray[byte]) {.inline.} =
+#func add*(frm: Frame, payload: openArray[byte]) =
 #  frm.s.add payload
 #  frm.setPayloadLen FrmPayloadLen(frm.rawLen-frmHeaderSize)
 

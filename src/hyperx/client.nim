@@ -69,7 +69,7 @@ type
   HttpMethod* = enum
     hmPost, hmGet, hmPut, hmHead, hmOptions, hmDelete, hmPatch
 
-func `$`(hm: HttpMethod): string =
+func `$`(hm: HttpMethod): string {.raises: [].} =
   case hm
   of hmPost: "POST"
   of hmGet: "GET"

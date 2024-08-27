@@ -52,7 +52,7 @@ proc sslContextAlpnSelect(
   inProto: cstring;
   inlen: cuint;
   arg: pointer
-): cint {.cdecl.} =
+): cint {.cdecl, raises: [].} =
   const h2Alpn = "\x02h2"  # len + proto_name
   const h2AlpnL = h2Alpn.len
   var i = 0

@@ -41,7 +41,7 @@ iterator items*[T](q: QueueAsync[T]): T {.inline.} =
 func used[T](q: QueueAsync[T]): int {.raises: [].} =
   q.s.len
 
-proc wakeupPop[T](q: QueueAsync[T]) =
+proc wakeupPop[T](q: QueueAsync[T]) {.raises: [].} =
   if q.popWaiter.finished:
     return
   proc wakeup =
@@ -68,7 +68,7 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   q.s.addFirst v
   q.wakeupPop()
 
-proc wakeupPut[T](q: QueueAsync[T]) =
+proc wakeupPut[T](q: QueueAsync[T]) {.raises: [].} =
   if q.putWaiter.finished:
     return
   proc wakeup =

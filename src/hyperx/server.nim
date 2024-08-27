@@ -78,7 +78,7 @@ proc newServer*(
   sslCertFile = "",
   sslKeyFile = "",
   ssl = true
-): ServerContext =
+): ServerContext {.raises: [HyperxConnError].} =
   ServerContext(
     sock: newMySocket(
       ssl,
@@ -107,12 +107,18 @@ proc close*(server: ServerContext) {.raises: [HyperxConnError].} =
     debugInfo err.msg
     raise newException(Defect, err.msg)
 
-proc listen(server: ServerContext) =
-  server.sock.setSockOpt(OptReuseAddr, true)
-  server.sock.setSockOpt(OptReusePort, true)
-  server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
-  server.sock.bindAddr server.port
-  server.sock.listen()
+proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
+  try:
+    server.sock.setSockOpt(OptReuseAddr, true)
+    server.sock.setSockOpt(OptReusePort, true)
+    server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
+    server.sock.bindAddr server.port
+    server.sock.listen()
+  except OSError, ValueError:
+    let err = getCurrentException()
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    raise newHyperxConnError(err.msg)
 
 # XXX dont allow receive push promise
 

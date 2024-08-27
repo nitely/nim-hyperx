@@ -74,7 +74,7 @@ func find(s: openArray[byte], c: byte, i: int): int {.raises: [].} =
       return i
     inc i
 
-func `==`(a: openArray[byte], b: string): bool {.inline.} =
+func `==`(a: openArray[byte], b: string): bool {.raises: [].} =
   if a.len != b.len:
     return false
   var i = 0
@@ -84,7 +84,7 @@ func `==`(a: openArray[byte], b: string): bool {.inline.} =
     inc i
   return true
 
-func contains(s: openArray[string], item: openArray[byte]): bool =
+func contains(s: openArray[string], item: openArray[byte]): bool {.raises: [].} =
   result = false
   for x in s:
     if item == x:
@@ -93,8 +93,7 @@ func contains(s: openArray[string], item: openArray[byte]): bool =
 # XXX move headers stuff to its own module
 #     or back to clientserver, it's not used
 #     anywhere else
-
-iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline.} =
+iterator headersIt(s: openArray[byte]): (Slice[int], Slice[int]) {.inline, raises: [].} =
   # this assumes field validity was done
   let L = s.len
   var na = 0
