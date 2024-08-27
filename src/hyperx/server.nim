@@ -34,7 +34,9 @@ export
   ClientContext,
   HyperxConnError,
   HyperxStrmError,
-  HyperxError
+  HyperxError,
+  #HyperxErrTyp,
+  HyperxSockDomain
 
 var sslContext {.threadvar.}: SslContext
 
@@ -52,12 +54,16 @@ proc defaultSslContext(
 
 when not defined(hyperxTest):
   proc newMySocket(
+    domain: Domain,
+    protocol: Protocol,
     ssl: bool,
     certFile = "",
     keyFile = ""
   ): MyAsyncSocket {.raises: [HyperxConnError].} =
+    doAssert domain in {AF_UNIX, AF_INET, AF_INET6}
+    doAssert protocol in {IPPROTO_IP, IPPROTO_TCP}
     try:
-      result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
+      result = newAsyncSocket(domain, SOCK_STREAM, protocol, buffered = true)
       if ssl:
         wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
@@ -70,6 +76,7 @@ type
     sock: MyAsyncSocket
     hostname: string
     port: Port
+    domain: HyperxSockDomain
     isConnected: bool
 
 proc newServer*(
@@ -77,16 +84,20 @@ proc newServer*(
   port: Port,
   sslCertFile = "",
   sslKeyFile = "",
-  ssl = true
+  ssl = true,
+  domain = hyxInet
 ): ServerContext =
   ServerContext(
     sock: newMySocket(
+      domain.addrFamily(),
+      domain.ipProto(),
       ssl,
       certFile = sslCertFile,
       keyFile = sslKeyFile
     ),
     hostname: hostname,
     port: port,
+    domain: domain,
     isConnected: false
   )
 
@@ -107,12 +118,24 @@ proc close*(server: ServerContext) {.raises: [HyperxConnError].} =
     debugInfo err.msg
     raise newException(Defect, err.msg)
 
-proc listen(server: ServerContext) =
-  server.sock.setSockOpt(OptReuseAddr, true)
-  server.sock.setSockOpt(OptReusePort, true)
-  server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
-  server.sock.bindAddr server.port
-  server.sock.listen()
+proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
+  try:
+    case server.domain
+    of hyxInet, hyxInet6:
+      server.sock.setSockOpt(OptReuseAddr, true)
+      server.sock.setSockOpt(OptReusePort, true)
+      server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
+      server.sock.bindAddr server.port
+    of hyxUnix:
+      # XXX tryRemoveFile to avoid OSError
+      server.sock.bindUnix server.hostname
+    server.sock.listen()
+  except OSError, ValueError:
+    let err = getCurrentException()
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    # XXX probably not a conn error
+    raise newHyperxConnError(err.msg)
 
 # XXX dont allow receive push promise
 
@@ -127,7 +150,9 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
       wrapConnectedSocket(
         sslContext, sock, handshakeAsServer, server.hostname
       )
-    result = newClient(ctServer, sock, server.hostname)
+    result = newClient(
+      ctServer, sock, server.hostname, server.port, server.domain
+    )
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
