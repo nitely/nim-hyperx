@@ -1,13 +1,13 @@
 # Package
 
-version = "0.1.30"
+version = "0.1.31"
 author = "Esteban Castro Borsani (@nitely)"
 description = "Pure Nim Http2 client and server"
 license = "MIT"
 srcDir = "src"
 skipDirs = @["tests", "examples"]
 
-requires "nim >= 2.0.0"
+requires "nim >= 2.0.8"
 requires "hpack >= 0.4.0"
 
 task test, "Test":
