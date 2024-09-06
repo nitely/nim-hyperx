@@ -70,13 +70,19 @@ nim c -r -d:hyperxDebug client.nim
 
 ## Notes
 
+### Why?
+
+Http/2 supports high concurrency over a single connection through stream multiplexing.
+
+Http/1 can only compete by enabling [pipelining](https://en.wikipedia.org/wiki/HTTP_pipelining), which is what most http/1 benchmarks do. But web-browsers do not enable it, and you may not want to enable it for good reasons. It produces [head of line blocking](https://en.wikipedia.org/wiki/Head-of-line_blocking) at the application level.
+
 ### Serving http/1 and http/3 traffic
 
-You may use a reverse proxy such a [Caddy](https://github.com/caddyserver/caddy) or a cloud offering such as AWS ALB for this. There are many ways to enumerate them all, but basically look for a service that can receive http/1, 2, 3 traffic and forward it as http/2.
+You may use a reverse proxy such a [Caddy](https://github.com/caddyserver/caddy) or a cloud offering such as AWS ALB for this. Look for a service that can receive http/1, 2, 3 traffic and forward it as http/2.
 
 ### Data streaming
 
-Both server and client support data streaming. See the examples.
+Both server and client support data streaming. The [data stream example](https://github.com/nitely/nim-hyperx/blob/master/examples/dataStream.nim) shows how to transfer 1GB of total data with minimal memory usage. Increasing the data size won't increase the memory usage.
 
 ### Backpressure
 
@@ -96,7 +102,7 @@ If you need to support web-browsers it gets tricky for some use cases, as you ne
 
 ### Benchmarks
 
-The CI runs h2load on it, but it only starts a single server instance. Proper bench-marking would start a server per CPU, and run a few combinations of load. To save you the trip, the CI results show around 30K requests/s.
+The CI runs h2load on it, but it only starts a single server instance. Proper benchmarking would start a server per CPU, and run a few combinations of load. To save you the trip, the CI results show around 30K requests/s.
 
 ### Related libs
 
