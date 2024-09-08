@@ -1,6 +1,6 @@
 # Package
 
-version = "0.1.31"
+version = "0.1.32"
 author = "Esteban Castro Borsani (@nitely)"
 description = "Pure Nim Http2 client and server"
 license = "MIT"
