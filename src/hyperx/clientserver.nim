@@ -1103,7 +1103,7 @@ func recvTrailers*(strm: ClientStream): string =
 
 proc sendHeadersImpl*(
   strm: ClientStream,
-  headers: ref seq[byte],  # XXX ref string
+  headers: seq[byte],
   finish: bool
 ): Future[void] =
   ## Headers must be HPACK encoded;
@@ -1113,7 +1113,7 @@ proc sendHeadersImpl*(
     (strm.stateSend in {csStateHeaders, csStateData} and finish)
   strm.stateSend = csStateHeaders
   var frm = newFrame()
-  frm.add headers[]
+  frm.add headers
   frm.setTyp frmtHeaders
   frm.setSid strm.stream.id.FrmSid
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
@@ -1125,17 +1125,16 @@ proc sendHeadersImpl*(
 
 proc sendHeaders*(
   strm: ClientStream,
-  headers: ref seq[(string, string)],
+  headers: seq[(string, string)],
   finish: bool
 ): Future[void] =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   check stream.state in strmStateHeaderSendAllowed,
     newErrorOrDefault(stream.error, newStrmError errStreamClosed)
-  var henc = new(seq[byte])
-  henc[] = newSeq[byte]()
-  for (n, v) in headers[]:
-    client.hpackEncode(henc[], n, v)
+  var henc = newSeq[byte]()
+  for (n, v) in headers:
+    client.hpackEncode(henc, n, v)
   result = strm.sendHeadersImpl(henc, finish)
 
 proc sendBodyNaked(

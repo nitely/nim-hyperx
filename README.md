@@ -78,7 +78,7 @@ Http/1 can only compete by enabling [pipelining](https://en.wikipedia.org/wiki/H
 
 ### Serving http/1 and http/3 traffic
 
-You may use a reverse proxy such a [Caddy](https://github.com/caddyserver/caddy) or a cloud offering such as AWS ALB for this. Look for a service that can receive http/1, 2, 3 traffic and forward it as http/2.
+You may use a reverse proxy such as [Caddy](https://github.com/caddyserver/caddy) or a cloud offering such as AWS ALB for this. Look for a service that can receive http/1, 2, 3 traffic and forward it as http/2 to hyperx.
 
 ### Data streaming
 

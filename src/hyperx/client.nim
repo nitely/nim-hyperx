@@ -97,19 +97,18 @@ proc sendHeaders*(
   template stream: untyped = strm.stream
   check stream.state in strmStateHeaderSendAllowed,
     newErrorOrDefault(stream.error, newStrmError errStreamClosed)
-  var headers = new(seq[byte])
-  headers[] = newSeq[byte]()
-  client.hpackEncode(headers[], ":method", $httpMethod)
-  client.hpackEncode(headers[], ":scheme", "https")
-  client.hpackEncode(headers[], ":path", path)
-  client.hpackEncode(headers[], ":authority", client.hostname)
-  client.hpackEncode(headers[], "user-agent", userAgent)
+  var headers = newSeq[byte]()
+  client.hpackEncode(headers, ":method", $httpMethod)
+  client.hpackEncode(headers, ":scheme", "https")
+  client.hpackEncode(headers, ":path", path)
+  client.hpackEncode(headers, ":authority", client.hostname)
+  client.hpackEncode(headers, "user-agent", userAgent)
   if httpMethod in {hmGet, hmHead}:
     doAssert contentLen == 0
-    client.hpackEncode(headers[], "accept", accept)
+    client.hpackEncode(headers, "accept", accept)
   if httpMethod in {hmPost, hmPut, hmPatch}:
-    client.hpackEncode(headers[], "content-type", contentType)
-    client.hpackEncode(headers[], "content-length", $contentLen)
+    client.hpackEncode(headers, "content-type", contentType)
+    client.hpackEncode(headers, "content-length", $contentLen)
   let finish = contentLen == 0
   result = strm.sendHeadersImpl(headers, finish)
 

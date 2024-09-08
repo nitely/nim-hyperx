@@ -171,12 +171,11 @@ proc sendHeaders*(
   template stream: untyped = strm.stream
   check stream.state in strmStateHeaderSendAllowed,
     newErrorOrDefault(stream.error, newStrmError errStreamClosed)
-  var headers = new(seq[byte])
-  headers[] = newSeq[byte]()
-  client.hpackEncode(headers[], ":status", $status)
+  var headers = newSeq[byte]()
+  client.hpackEncode(headers, ":status", $status)
   if contentType.len > 0:
-    client.hpackEncode(headers[], "content-type", contentType)
+    client.hpackEncode(headers, "content-type", contentType)
   if contentLen > -1:
-    client.hpackEncode(headers[], "content-length", $contentLen)
+    client.hpackEncode(headers, "content-length", $contentLen)
   let finish = contentLen <= 0
   result = strm.sendHeadersImpl(headers, finish)

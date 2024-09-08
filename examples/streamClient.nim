@@ -5,10 +5,6 @@ import std/asyncdispatch
 import ../src/hyperx/client
 from ./localServer import localHost, localPort
 
-func newStringRef(s = ""): ref string =
-  new result
-  result[] = s
-
 when isMainModule:
   var completed = newSeq[string]()
 
@@ -22,7 +18,7 @@ when isMainModule:
       hmPost, path,
       contentLen = contentLen
     )
-    var data = newStringRef()
+    var data = new string
     var i = 0
     for chunk in chunks:
       data[].setLen 0
@@ -45,7 +41,7 @@ when isMainModule:
     let strm = client.newClientStream()
     with strm:
       # send and recv concurrently
-      var data = newStringRef()
+      var data = new string
       let recvFut = strm.recv(data)
       let sendFut = strm.send(path, chunks)
       await recvFut

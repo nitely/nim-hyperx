@@ -12,22 +12,13 @@ const localPort* = Port 8783
 const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
-func newStringRef(s = ""): ref string =
-  new result
-  result[] = s
-
-func newSeqRef[T](s: seq[T] = @[]): ref seq[T] =
-  new result
-  result[] = s
-
 proc processStream(strm: ClientStream) {.async.} =
   ## Full-duplex echo stream
   with strm:
-    let data = newStringRef()
+    let data = new string
     await strm.recvHeaders(data)
     await strm.sendHeaders(
-      newSeqRef(@[(":status", "200")]),
-      finish = false
+      @[(":status", "200")], finish = false
     )
     if strm.recvEnded:
       data[] = "Hello world!"

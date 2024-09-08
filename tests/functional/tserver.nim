@@ -12,15 +12,14 @@ const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
 proc processStream(strm: ClientStream) {.async.} =
   with strm:
-    let data = newStringRef()
+    let data = new string
     await strm.recvHeaders(data)
     if "x-flow-control-check" in data[]:
       # let recv buff for a bit
       #debugEcho "sleeping"
       await sleepAsync(10_000)
     await strm.sendHeaders(
-      newSeqRef(@[(":status", "200")]),
-      finish = false
+      @[(":status", "200")], finish = false
     )
     await strm.sendBody(data, finish = strm.recvEnded)
     while not strm.recvEnded:

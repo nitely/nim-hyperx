@@ -46,7 +46,7 @@ proc spawnStream(
   with strm:
     let data = newStringref()
     let recvFut = strm.recv(data)
-    let sendFut = strm.sendHeaders(headers.s, finish = true)
+    let sendFut = strm.sendHeaders(headers.s[], finish = true)
     await recvFut
     await sendFut
     doAssert data[] == headers.raw[]

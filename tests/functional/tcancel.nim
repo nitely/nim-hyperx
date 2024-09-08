@@ -16,14 +16,14 @@ const dataFrameLen = 1
 
 proc send(strm: ClientStream) {.async.} =
   await strm.sendHeaders(
-    newSeqRef(@[
+    @[
       (":method", "POST"),
       (":scheme", "https"),
       (":path", "/file/"),
       (":authority", "foo.bar"),
       ("user-agent", "HyperX/0.1"),
       ("content-type", "text/plain")
-    ]),
+    ],
     finish = false
   )
   let data = newStringRef newString(dataFrameLen)

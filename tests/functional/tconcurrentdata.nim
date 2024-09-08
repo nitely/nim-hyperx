@@ -43,7 +43,7 @@ func newReqsCtx(): ReqsCtx =
 
 proc send(strm: ClientStream, req: Req) {.async.} =
   # XXX send multiple data frames
-  await strm.sendHeaders(req.headers.s, finish = false)
+  await strm.sendHeaders(req.headers.s[], finish = false)
   await strm.sendBody(req.data.s, finish = true)
 
 proc recv(strm: ClientStream, req: Req) {.async.} =

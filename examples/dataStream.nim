@@ -16,10 +16,6 @@ const frmSize = 16 * 1024
 doAssert dataSize mod frmSize == 0
 const chunks = dataSize div frmSize
 
-func newStringRef(s = ""): ref string =
-  new result
-  result[] = s
-
 when isMainModule:
   var dataSentSize = 0
   var dataRecvSize = 0
@@ -31,7 +27,7 @@ when isMainModule:
       hmPost, path,
       contentLen = dataSize
     )
-    var data = newStringref()
+    var data = new string
     for _ in 0 .. frmSize-1:
       data[].add 'a'
     for i in 0 .. chunks-1:
@@ -41,7 +37,7 @@ when isMainModule:
   proc recv(
     strm: ClientStream
   ) {.async.} =
-    var data = newStringRef()
+    var data = new string
     await strm.recvHeaders(data)
     doAssert ":status:" in data[]
     while not strm.recvEnded:

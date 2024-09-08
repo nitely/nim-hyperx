@@ -60,10 +60,6 @@ func newStringRef*(s = ""): ref string =
   new result
   result[] = s
 
-func newSeqRef*[T](s: seq[T] = @[]): ref seq[T] =
-  new result
-  result[] = s
-
 func rawHeaders*(headers: seq[Header]): string =
   doAssert headers.len > 0
   result = ""
