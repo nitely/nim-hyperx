@@ -1,11 +1,8 @@
 # HyperX
 
-Pure Nim Http2 client/server implementation. Tested with
-[h2spec](https://github.com/summerwind/h2spec), and
-[h2load](https://nghttp2.org/documentation/h2load-howto.html).
+Pure Nim Http2 client/server implementation. Tested with [h2spec](https://github.com/summerwind/h2spec), and [h2load](https://nghttp2.org/documentation/h2load-howto.html).
 
-Beware this library is in heavy development,
-and the API is not stable.
+Beware this library is in heavy development, and the API is not stable.
 
 > [!NOTE]
 > This library supports HTTP/2 only. Not HTTP/1, nor HTTP/3.
@@ -55,14 +52,11 @@ echo "ok"
 
 See [examples/localServer.nim](https://github.com/nitely/nim-hyperx/blob/master/examples/localServer.nim)
 
-Beware HTTP/2 requires TLS, so if you want to test the server locally you'll
-need a local cert. I used [mkcert](https://github.com/FiloSottile/mkcert)
-to generate mine. Idk if there is an easier way to try this.
+Beware HTTP/2 requires TLS, so if you want to test the server locally you'll need a local cert. I used [mkcert](https://github.com/FiloSottile/mkcert) to generate mine. Idk if there is an easier way to try this.
 
 ## Debugging
 
-This will print received frames, and some other
-debugging messages
+This will print received frames, and some other debugging messages
 
 ```
 nim c -r -d:hyperxDebug client.nim
@@ -96,9 +90,7 @@ There is built-in backpressure based on bounded queues for the rest of non-data 
 
 Http/2 allows full-duplex data communication over a single stream. If you plan to only ever use this client and server, you won't need websockets.
 
-Web-browsers only support half-duplex streaming [for whatever reason](https://github.com/whatwg/fetch/issues/1254), though.
-
-If you need to support web-browsers it gets tricky for some use cases, as you need to do two fetches, one to stream the request, one to stream the response, and something like an ID in the URL so the server can associate both streams.
+On web-browsers, only [chrome](https://caniuse.com/mdn-api_request_request_request_body_readablestream) has support for streaming, and it's only [half-duplex](https://github.com/whatwg/fetch/issues/1254). So, you need two streams, one for sending, and one for receiving.
 
 ### Benchmarks
 
