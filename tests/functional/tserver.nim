@@ -11,62 +11,33 @@ const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
 proc processStream(strm: ClientStream) {.async.} =
-  with strm:
-    let data = new string
-    await strm.recvHeaders(data)
-    if "x-flow-control-check" in data[]:
-      # let recv buff for a bit
-      #debugEcho "sleeping"
-      await sleepAsync(10_000)
-    await strm.sendHeaders(
-      @[(":status", "200")], finish = false
-    )
+  let data = new string
+  await strm.recvHeaders(data)
+  if "x-flow-control-check" in data[]:
+    # let recv buff for a bit
+    #debugEcho "sleeping"
+    await sleepAsync(10_000)
+  await strm.sendHeaders(
+    @[(":status", "200")], finish = false
+  )
+  await strm.sendBody(data, finish = strm.recvEnded)
+  while not strm.recvEnded:
+    data[].setLen 0
+    await strm.recvBody(data)
     await strm.sendBody(data, finish = strm.recvEnded)
-    while not strm.recvEnded:
-      data[].setLen 0
-      await strm.recvBody(data)
-      await strm.sendBody(data, finish = strm.recvEnded)
-  #GC_fullCollect()
-
-proc processStreamHandler(strm: ClientStream) {.async.} =
-  try:
-    await processStream(strm)
-  except HyperxStrmError as err:
-    debugEcho err.msg
-  except HyperxConnError as err:
-    debugEcho err.msg
-
-proc processClient(client: ClientContext) {.async.} =
-  with client:
-    while client.isConnected:
-      let strm = await client.recvStream()
-      asyncCheck processStreamHandler(strm)
-
-proc processClientHandler(client: ClientContext) {.async.} =
-  try:
-    await processClient(client)
-  except HyperxConnError as err:
-    debugEcho err.msg
-  when defined(hyperxStats):
-    echoStats client
   #GC_fullCollect()
 
 proc serve*(server: ServerContext) {.async.} =
-  with server:
-    while server.isConnected:
-      let client = await server.recvClient()
-      asyncCheck processClientHandler(client)
+  await server.serve(processStream)
 
-proc newServer(): ServerContext =
-  newServer(
+proc main() {.async.} =
+  echo "Serving forever"
+  var server = newServer(
     localHost, localPort, certFile, keyFile
   )
+  await server.serve()
 
 when isMainModule:
-  proc main() {.async.} =
-    echo "Serving forever"
-    var server = newServer()
-    await server.serve()
   waitFor main()
   doAssert not hasPendingOperations()
   echo "ok"

@@ -206,6 +206,8 @@ proc processClientHandler(
   except HyperxError:
     debugInfo getCurrentException().getStackTrace()
     debugInfo getCurrentException().msg
+  when defined(hyperxStats):
+    echoStats client
 
 proc serve*(
   server: ServerContext,
