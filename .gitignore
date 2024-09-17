@@ -30,4 +30,5 @@ examples/multipleGets
 examples/streamClient
 examples/localServer
 examples/dataStream
+examples/tlsServer
 out
