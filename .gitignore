@@ -13,6 +13,7 @@ tests/functional/tconcurrent
 tests/functional/tconcurrentdata
 tests/functional/tflowcontrol
 tests/functional/tcancel
+tests/functional/tcancelremote
 src/hyperx/client
 src/hyperx/server
 src/hyperx/clientserver

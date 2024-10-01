@@ -6,6 +6,7 @@ from std/strutils import contains
 import std/asyncdispatch
 import ../../src/hyperx/server
 import ./tutils
+from ../../src/hyperx/errors import errCancel
 
 const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
@@ -20,6 +21,12 @@ proc processStream(strm: ClientStream) {.async.} =
   await strm.sendHeaders(
     @[(":status", "200")], finish = false
   )
+  if "x-cancel-remote" in data[]:
+    # do not return here, let it raise when sendBody is called
+    await strm.sendHeaders(
+      @[("x-trailer", "bye")], finish = true
+    )
+    await strm.cancel(errCancel)
   await strm.sendBody(data, finish = strm.recvEnded)
   while not strm.recvEnded:
     data[].setLen 0
