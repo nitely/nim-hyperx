@@ -11,8 +11,8 @@ from ../../src/hyperx/clientserver import stgWindowSize
 const strmsPerClient = 1123
 const clientsCount = 13
 const strmsInFlight = 100
-#const dataFrameLen = 1
-const dataFrameLen = stgWindowSize.int * 2 + 123
+const dataFrameLen = 1
+#const dataFrameLen = stgWindowSize.int * 2 + 123
 
 proc send(strm: ClientStream) {.async.} =
   await strm.sendHeaders(
@@ -95,8 +95,6 @@ proc spawnClient(
         await sig.waitFor()
     while inFlight[] > 0:
       await sig.waitFor()
-    # XXX make server wait for all streams to end before exit conn
-    await sleepAsync(5_000)
 
 proc main() {.async.} =
   let checked = new(int)
