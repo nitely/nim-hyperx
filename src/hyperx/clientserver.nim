@@ -1218,8 +1218,9 @@ proc ping(strm: ClientStream) {.async.} =
   # this is done for rst pings; only one stream ping
   # will ever be in progress
   # XXX avoid sending the ping if there is one in progress
+  let sig = strm.stream.pingSig.waitFor()
   await strm.client.send newPingFrame(strm.stream.id.uint32)
-  await strm.stream.pingSig.waitFor()
+  await sig
 
 proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
   ## This may never return until the stream/conn is closed.
