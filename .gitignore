@@ -32,4 +32,5 @@ examples/streamClient
 examples/localServer
 examples/dataStream
 examples/tlsServer
+config.nims
 out
