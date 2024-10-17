@@ -29,7 +29,7 @@ proc send(strm: ClientStream) {.async.} =
     finish = false
   )
   let data = newStringRef newString(dataFrameLen)
-  while true:
+  while true:  # until server cancel
     await strm.sendBody(data, finish = false)
 
 proc recv(strm: ClientStream) {.async.} =
@@ -37,7 +37,7 @@ proc recv(strm: ClientStream) {.async.} =
   await strm.recvHeaders(data)
   doAssert data[] == ":status: 200\r\n"
   data[].setLen 0
-  while not strm.recvEnded:
+  while true:  # until server cancel
     await strm.recvBody(data)
     doAssert data[].len == 0
 
