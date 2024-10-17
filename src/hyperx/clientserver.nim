@@ -1059,7 +1059,7 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
 proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
-  if strm.stateRecv != csStateEnded and strm.bodyRecv.len == 0:
+  if strm.bodyRecv.len == 0:
     await strm.bodyRecvSig.waitFor()
   let bodyL = strm.bodyRecvLen
   data[].add strm.bodyRecv
