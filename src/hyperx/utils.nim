@@ -2,6 +2,10 @@
 
 import ./errors
 
+template `?=`*(exp1, exp2: untyped): untyped =
+  if exp1 == nil:
+    exp1 = exp2
+
 template debugInfo*(s: untyped): untyped =
   when defined(hyperxDebug):
     # hide "s" expresion side effcets

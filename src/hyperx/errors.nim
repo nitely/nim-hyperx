@@ -90,7 +90,3 @@ func newErrorOrDefault*(err, default: ref StrmError): ref StrmError {.raises: []
     return newError(err)
   else:
     return default
-
-template `?=`*(err: var ref StrmError, default: ref StrmError): untyped =
-  if err == nil:
-    err = default
