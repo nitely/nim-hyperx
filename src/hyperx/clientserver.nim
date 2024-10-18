@@ -1225,7 +1225,7 @@ proc ping(strm: ClientStream) {.async.} =
 proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
   ## This may never return until the stream/conn is closed.
   ## This can be called multiple times concurrently
-  if strm.stream.state == strmIdle:
+  if strm.stream.state notin strmStateRstSendAllowed+{strmClosedRst}:
     strm.stream.error ?= newStrmError(errStreamClosed)
     strm.close()
     return
