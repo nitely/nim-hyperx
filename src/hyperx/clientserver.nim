@@ -1225,15 +1225,17 @@ proc ping(strm: ClientStream) {.async.} =
 proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
   ## This may never return until the stream/conn is closed.
   ## This can be called multiple times concurrently
-  doAssert strm.stream.state != strmIdle
+  if strm.stream.state == strmIdle:
+    strm.stream.error ?= newStrmError(errStreamClosed)
+    strm.close()
+    return
   # fail silently because if it fails, it closes
   # the stream anyway
   try:
     await failSilently strm.writeRst(code)
     await failSilently strm.ping()
   finally:
-    if strm.stream.error == nil:
-      strm.stream.error = newStrmError(errStreamClosed)
+    strm.stream.error ?= newStrmError(errStreamClosed)
     strm.close()
 
 when defined(hyperxTest):
