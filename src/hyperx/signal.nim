@@ -24,6 +24,9 @@ proc newSignal*(): SignalAsync {.raises: [].} =
     isClosed: false
   )
 
+proc len*(sig: SignalAsync): int {.raises: [].} =
+  sig.waiters.len
+
 proc waitFor*(sig: SignalAsync): Future[void] {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()

@@ -755,6 +755,8 @@ proc connect(client: ClientContext) {.async.} =
     raise newHyperxConnError(err.msg)
 
 proc failSilently(f: Future[void]) {.async.} =
+  ## Be careful when wrapping non {.async.} procs,
+  ## as they may raise before the wrap
   if f == nil:
     return
   try:
@@ -922,12 +924,13 @@ proc read(stream: Stream): Future[Frame] {.async.} =
       break
   return frm
 
-proc writeRst(strm: ClientStream, code: ErrorCode): Future[void] =
+# this needs to be {.async.} to fail-silently
+proc writeRst(strm: ClientStream, code: ErrorCode) {.async.} =
   template stream: untyped = strm.stream
   check stream.state in strmStateRstSendAllowed,
     newStrmError errStreamClosed
   strm.stateSend = csStateEnded
-  result = strm.write newRstStreamFrame(
+  await strm.write newRstStreamFrame(
     stream.id.FrmSid, code.int
   )
 
@@ -1217,10 +1220,12 @@ template with*(strm: ClientStream, body: untyped): untyped =
 proc ping(strm: ClientStream) {.async.} =
   # this is done for rst pings; only one stream ping
   # will ever be in progress
-  # XXX avoid sending the ping if there is one in progress
-  let sig = strm.stream.pingSig.waitFor()
-  await strm.client.send newPingFrame(strm.stream.id.uint32)
-  await sig
+  if strm.stream.pingSig.len > 0:
+    await strm.stream.pingSig.waitFor()
+  else:
+    let sig = strm.stream.pingSig.waitFor()
+    await strm.client.send newPingFrame(strm.stream.id.uint32)
+    await sig
 
 proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
   ## This may never return until the stream/conn is closed.
