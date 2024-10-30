@@ -2,8 +2,6 @@
 
 Pure Nim Http2 client/server implementation. Tested with [h2spec](https://github.com/summerwind/h2spec), and [h2load](https://nghttp2.org/documentation/h2load-howto.html).
 
-Beware this library is in heavy development, and the API is not stable.
-
 > [!NOTE]
 > This library supports HTTP/2 only. Not HTTP/1, nor HTTP/3.
 
