@@ -897,7 +897,6 @@ proc write(strm: ClientStream, frm: Frame): Future[void] =
 proc read(stream: Stream): Future[Frame] {.async.} =
   var frm: Frame
   while true:
-    #frm = await stream.msgs.pop()
     frm = await stream.msgs.get()
     #stream.msgs.getDone()
     doAssert stream.id == frm.sid.StreamId
@@ -905,8 +904,6 @@ proc read(stream: Stream): Future[Frame] {.async.} =
     # this can raise stream/conn error
     stream.doTransitionRecv frm
     if frm.typ == frmtRstStream:
-      #for frm2 in stream.msgs:
-      #  stream.doTransitionRecv frm2
       stream.error = newStrmError(frm.errorCode, hxRemoteErr)
       stream.close()
       raise newStrmError(frm.errorCode, hxRemoteErr)
