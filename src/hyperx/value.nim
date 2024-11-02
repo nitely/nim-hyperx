@@ -102,6 +102,8 @@ when isMainModule:
       await q.put newIntRef(4)
       doAssert q.val == nil
       await gets1
+    waitFor test()
+    doAssert not hasPendingOperations()
   block:
     proc test() {.async.} =
       var q = newValueAsync[ref int]()
