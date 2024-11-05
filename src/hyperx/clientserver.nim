@@ -92,14 +92,17 @@ proc defaultSslContext*(
     raise newException(Defect, err.msg)
   doAssert result != nil, "failure to initialize the SSL context"
   # https://httpwg.org/specs/rfc9113.html#tls12features
-  discard SSL_CTX_set_options(
-    result.context,
-    SSL_OP_ALL or SSL_OP_NO_SSLv2 or SSL_OP_NO_SSLv3 or
+  const ctxOps = SSL_OP_ALL or
+    SSL_OP_NO_SSLv2 or
+    SSL_OP_NO_SSLv3 or
     SSL_OP_NO_RENEGOTIATION or
     SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION
-  )
+  let ctxOpsSet = SSL_CTX_set_options(result.context, ctxOps)
+  doAssert (ctxOpsSet and ctxOps) == ctxOps, "Ssl set options error"
   case clientTyp
   of ctServer:
+    # discard should not be needed;
+    # it returns void, but nim definition is wrong
     discard SSL_CTX_set_alpn_select_cb(
       result.context, sslContextAlpnSelect, nil
     )
@@ -108,9 +111,10 @@ proc defaultSslContext*(
     untrackExceptions:
       openSslVersion = getOpenSSLVersion()
     doAssert openSslVersion >= 0x10002000
-    discard SSL_CTX_set_alpn_protos(
+    let ctxAlpnSet = SSL_CTX_set_alpn_protos(
       result.context, "\x02h2", 3
     )
+    doAssert ctxAlpnSet == 0, "Ssl set alpn protos error"
 
 when defined(hyperxTest):
   type MyAsyncSocket* = TestSocket
