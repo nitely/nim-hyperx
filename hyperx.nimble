@@ -1,6 +1,6 @@
 # Package
 
-version = "0.1.35"
+version = "0.1.36"
 author = "Esteban Castro Borsani (@nitely)"
 description = "Pure Nim Http2 client and server"
 license = "MIT"
@@ -8,7 +8,7 @@ srcDir = "src"
 skipDirs = @["tests", "examples"]
 
 requires "nim >= 2.0.8"
-requires "hpack >= 0.4.0"
+requires "hpack >= 0.4.1"
 
 task test, "Test":
   exec "nim c -r src/hyperx/utils.nim"
