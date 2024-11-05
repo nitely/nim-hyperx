@@ -94,6 +94,10 @@ On web-browsers, only [chrome](https://caniuse.com/mdn-api_request_request_reque
 
 The CI runs h2load on it, but it only starts a single server instance. Proper benchmarking would start a server per CPU, and run a few combinations of load. To save you the trip, the CI results show around 30K requests/s.
 
+### ORC
+
+Nim's stdlib async creates cycles, and the ORC cycle collector does not run often enough. If you want to use orc, you'll need to call `GC_runOrc()` at some point, for example on client close or stream close. Related [nim issue](https://github.com/nim-lang/Nim/issues/21631). `--mm:refc` does not have this issue.
+
 ### Related libs
 
 - [nim-grpc](https://github.com/nitely/nim-grpc)
