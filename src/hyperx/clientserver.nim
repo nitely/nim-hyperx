@@ -279,7 +279,6 @@ func hpackDecode(
         toOpenArray(payload, i, L-1),
         client.headersDec, ss, nn, vv, dhSize
       )
-      # XXX resizing the decoder should not be allowed
       if dhSize > -1:
         check canResize, newConnError(errCompressionError)
         check dhSize <= stgHeaderTableSize.int, newConnError(errCompressionError)
