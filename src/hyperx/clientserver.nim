@@ -271,6 +271,7 @@ func hpackDecode(
   var i = 0
   var i2 = -1
   let L = payload.len
+  var canResize = true
   try:
     while i < L:
       doAssert i > i2; i2 = i
@@ -278,8 +279,16 @@ func hpackDecode(
         toOpenArray(payload, i, L-1),
         client.headersDec, ss, nn, vv, dhSize
       )
-      check dhSize == -1, newConnError(errCompressionError)
-      validateHeader(ss, nn, vv)
+      # XXX resizing the decoder should not be allowed
+      if dhSize > -1:
+        check canResize, newConnError(errCompressionError)
+        check dhSize <= stgHeaderTableSize.int, newConnError(errCompressionError)
+        client.headersDec.setSize dhSize
+      else:
+        # note this validate headers and trailers
+        validateHeader(ss, nn, vv)
+        # can resize multiple times before a header, but not after
+        canResize = false
     doAssert i == L
   except HpackError:
     debugInfo getCurrentException().msg
