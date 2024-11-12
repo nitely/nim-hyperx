@@ -1240,7 +1240,8 @@ proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
   # the stream anyway
   try:
     await failSilently strm.writeRst(code)
-    await failSilently strm.ping()
+    if strm.stream.state == strmClosedRst:
+      await failSilently strm.ping()
   finally:
     strm.stream.error ?= newStrmError(errStreamClosed)
     strm.close()
