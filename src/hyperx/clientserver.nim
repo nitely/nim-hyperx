@@ -1212,8 +1212,10 @@ template with*(strm: ClientStream, body: untyped): untyped =
     recvFut = recvTask(strm)
     block:
       body
-    doAssert strm.stateRecv == csStateEnded
-    doAssert strm.stateSend == csStateEnded
+    doAssert strm.stream.state in {strmClosed, strmClosedRst}
+    when defined(hyperxSanityCheck):
+      doAssert strm.stateRecv == csStateEnded
+      doAssert strm.stateSend == csStateEnded
   finally:
     strm.close()
     strm.windowEnd()
