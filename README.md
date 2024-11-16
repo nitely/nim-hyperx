@@ -102,6 +102,7 @@ Also try:
 - localServer.nim: it will respond "hello world" or any data it receives. You may want to tweak it to not send any data.
 - start a server instance per CPU and use `taskset` to set the process CPU affinity.
 - make sure the bench tool is hitting all server instances, not just one.
+- using [yasync](https://github.com/yglukhov/yasync) shows higher throughput and lower latency see [issue #5](https://github.com/nitely/nim-hyperx/issues/5#issuecomment-2480527542).
 
 ### ORC
 
