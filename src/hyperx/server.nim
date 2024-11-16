@@ -3,10 +3,12 @@
 when not defined(ssl):
   {.error: "this lib needs -d:ssl".}
 
-import std/asyncdispatch
 import std/asyncnet
 import std/exitprocs
 import std/net
+
+import pkg/yasync
+import pkg/yasync/compat
 
 import ./clientserver
 import ./stream
@@ -123,10 +125,10 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
 # XXX dont allow receive push promise
 
 # XXX limit number of active clients
-proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
+proc recvClient*(server: ServerContext): ClientContext {.async.} =
   try:
     # note OptNoDelay is inherited from server.sock
-    let sock = await server.sock.accept()
+    let sock = awaitc server.sock.accept()
     if server.sock.isSsl:
       when not defined(hyperxTest):
         doAssert not sslContext.isNil
@@ -148,7 +150,7 @@ template with*(server: ServerContext, body: untyped): untyped =
   finally:
     server.close()
 
-proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
+proc recvStream*(client: ClientContext): ClientStream {.async.} =
   try:
     let strm = await client.streamOpenedMsgs.pop()
     result = newClientStream(client, strm)
@@ -186,7 +188,7 @@ type StreamCallback* =
 proc processStreamHandler(
   strm: ClientStream,
   callback: StreamCallback
-) {.async.} =
+) {.asyncClosureExperimental.} =
   try:
     with strm:
       await callback(strm)
@@ -197,12 +199,12 @@ proc processStreamHandler(
 proc processClientHandler(
   client: ClientContext,
   callback: StreamCallback
-) {.async.} =
+) {.asyncClosureExperimental.} =
   try:
     with client:
       while client.isConnected:
         let strm = await client.recvStream()
-        asyncCheck processStreamHandler(strm, callback)
+        discard processStreamHandler(strm, callback)
   except HyperxError:
     debugInfo getCurrentException().getStackTrace()
     debugInfo getCurrentException().msg
@@ -212,8 +214,8 @@ proc processClientHandler(
 proc serve*(
   server: ServerContext,
   callback: StreamCallback
-) {.async.} =
+) {.asyncClosureExperimental.} =
   with server:
     while server.isConnected:
       let client = await server.recvClient()
-      asyncCheck processClientHandler(client, callback)
+      #discard processClientHandler(client, callback)

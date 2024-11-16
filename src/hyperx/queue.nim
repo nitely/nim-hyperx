@@ -1,5 +1,7 @@
-import std/asyncdispatch
+from std/asyncdispatch import callSoon
 import std/deques
+import pkg/yasync
+import pkg/yasync/compat
 import ./utils
 import ./errors
 
@@ -13,7 +15,7 @@ type
   QueueAsync*[T] = ref object
     s: Deque[T]
     size: int
-    putWaiter, popWaiter: FutureVar[void]
+    putWaiter, popWaiter: Future[void]
     wakingPut, wakingPop: bool
     isClosed: bool
 
@@ -24,8 +26,8 @@ proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
     result = QueueAsync[T](
       s: initDeque[T](size),
       size: size,
-      putWaiter: newFutureVar[void](),
-      popWaiter: newFutureVar[void](),
+      putWaiter: newFuture(void),
+      popWaiter: newFuture(void),
       wakingPut: false,
       wakingPop: false,
       isClosed: false
@@ -59,8 +61,8 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
     raise newQueueClosedError()
   if q.used == q.size:
     doAssert q.putWaiter.finished
-    q.putWaiter.clean()
-    await Future[void](q.putWaiter)
+    q.putWaiter = newFuture(void)
+    await q.putWaiter
     if q.isClosed:
       raise newQueueClosedError()
   doAssert q.putWaiter.finished
@@ -80,14 +82,14 @@ proc wakeupPut[T](q: QueueAsync[T]) {.raises: [].} =
     untrackExceptions:
       callSoon wakeup
 
-proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
+proc pop*[T](q: QueueAsync[T]): T {.async.} =
   doAssert q.used >= 0
   if q.isClosed:
     raise newQueueClosedError()
   if q.used == 0:
     doAssert q.popWaiter.finished
-    q.popWaiter.clean()
-    await Future[void](q.popWaiter)
+    q.popWaiter = newFuture(void)
+    await q.popWaiter
     if q.isClosed:
       raise newQueueClosedError()
   doAssert q.popWaiter.finished
@@ -104,9 +106,9 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   q.isClosed = true
   proc failWaiters =
     if not q.putWaiter.finished:
-      Future[void](q.putWaiter).fail newQueueClosedError()
+      q.putWaiter.fail newQueueClosedError()
     if not q.popWaiter.finished:
-      Future[void](q.popWaiter).fail newQueueClosedError()
+      q.popWaiter.fail newQueueClosedError()
   untrackExceptions:
     callSoon failWaiters
 

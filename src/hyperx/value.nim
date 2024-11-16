@@ -1,4 +1,5 @@
-import std/asyncdispatch
+import pkg/yasync
+import pkg/yasync/compat
 
 import ./signal
 import ./errors
@@ -35,7 +36,7 @@ proc put*[T](vala: ValueAsync[T], val: T) {.async.} =
   except SignalClosedError:
     raise newValueAsyncClosedError()
 
-proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
+proc get*[T](vala: ValueAsync[T]): T {.async.} =
   if vala.isClosed:
     raise newValueAsyncClosedError()
   try:

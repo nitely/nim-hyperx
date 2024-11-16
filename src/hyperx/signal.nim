@@ -1,5 +1,7 @@
-import std/asyncdispatch
+from std/asyncdispatch import callSoon
 import std/deques
+
+import pkg/yasync
 
 import ./utils
 import ./errors
@@ -30,7 +32,7 @@ proc len*(sig: SignalAsync): int {.raises: [].} =
 proc waitFor*(sig: SignalAsync): Future[void] {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
-  result = newFuture[void]()
+  result = newFuture(void)
   sig.waiters.addFirst result
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
