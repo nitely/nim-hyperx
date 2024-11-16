@@ -43,16 +43,25 @@ template untrackExceptions*(body: untyped): untyped =
       raise newException(Defect, err.msg)
 
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
+  if ss.len == 0: return
   let L = s.len
   s.setLen(L+ss.len)
-  for i in 0 .. ss.len-1:
-    s[L+i] = ss[i].byte
+  when nimvm:
+    for i in 0 .. ss.len-1:
+      s[L+i] = ss[i].byte
+  else:
+    moveMem(addr s[L], unsafeAddr ss[0], ss.len)
 
 func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
+  if ss.len == 0: return
   let L = s.len
   s.setLen(L+ss.len)
-  for i in 0 .. ss.len-1:
-    s[L+i] = ss[i].char
+  when nimvm:
+    for i in 0 .. ss.len-1:
+      s[L+i] = ss[i].char
+  else:
+    prepareMutation(s)
+    moveMem(addr s[L], unsafeAddr ss[0], ss.len)
 
 func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
   if s.len == 0:
