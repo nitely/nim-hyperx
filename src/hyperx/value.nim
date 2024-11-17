@@ -34,21 +34,22 @@ proc wakeupSoon(f: Future[void]) {.raises: [].} =
     callSoon wakeup
 
 proc put*[T](vala: ValueAsync[T], val: T) {.async.} =
-  if vala.isClosed:
-    raise newValueAsyncClosedError()
+  check not vala.isClosed, newValueAsyncClosedError()
   while vala.val != nil:
+    check not vala.isClosed, newValueAsyncClosedError()
     vala.putWaiter.clean()
     await vala.putWaiter.fut
   vala.val = val
   wakeupSoon vala.getWaiter.fut
   while vala.val != nil:
+    check not vala.isClosed, newValueAsyncClosedError()
     vala.putWaiter.clean()
     await vala.putWaiter.fut
 
 proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
-  if vala.isClosed:
-    raise newValueAsyncClosedError()
+  check not vala.isClosed, newValueAsyncClosedError()
   while vala.val == nil:
+    check not vala.isClosed, newValueAsyncClosedError()
     vala.getWaiter.clean()
     await vala.getWaiter.fut
   result = vala.val
