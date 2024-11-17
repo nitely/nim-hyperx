@@ -1,7 +1,9 @@
 import std/asyncdispatch
 
-import ./signal
+import ./utils
 import ./errors
+
+template fut[T](f: FutureVar[T]): Future[T] = Future[T](f)
 
 type
   ValueAsyncClosedError* = QueueClosedError
@@ -11,54 +13,60 @@ func newValueAsyncClosedError(): ref ValueAsyncClosedError {.raises: [].} =
 
 type
   ValueAsync*[T] = ref object
-    sig: SignalAsync
+    putWaiter, getWaiter: FutureVar[void]
     val: T
     isClosed: bool
 
-func newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
+proc newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
   ValueAsync[T](
-    sig: newSignal(),
+    putWaiter: newFutureVar[void](),
+    getWaiter: newFutureVar[void](),
     val: nil,
     isClosed: false
   )
 
+proc wakeupSoon(f: Future[void]) {.raises: [].} =
+  proc wakeup =
+    if not f.finished:
+      f.complete()
+  untrackExceptions:
+    callSoon wakeup
+
 proc put*[T](vala: ValueAsync[T], val: T) {.async.} =
   if vala.isClosed:
     raise newValueAsyncClosedError()
-  try:
-    while vala.val != nil:
-      await vala.sig.waitFor()
-    vala.val = val
-    vala.sig.trigger()
-    while vala.val != nil:
-      await vala.sig.waitFor()
-  except SignalClosedError:
-    raise newValueAsyncClosedError()
+  while vala.val != nil:
+    vala.putWaiter.clean()
+    await vala.putWaiter.fut
+  vala.val = val
+  wakeupSoon vala.getWaiter.fut
+  while vala.val != nil:
+    vala.putWaiter.clean()
+    await vala.putWaiter.fut
 
 proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
   if vala.isClosed:
     raise newValueAsyncClosedError()
-  try:
-    while vala.val == nil:
-      await vala.sig.waitFor()
-    result = vala.val
-    vala.val = nil
-    vala.sig.trigger()
-  except SignalClosedError:
-    raise newValueAsyncClosedError()
+  while vala.val == nil:
+    vala.getWaiter.clean()
+    await vala.getWaiter.fut
+  result = vala.val
+  vala.val = nil
+  wakeupSoon vala.putWaiter.fut
 
-#proc getDone*[T](vala: ValueAsync[T]) =
-#  vala.val = nil
-#  try:
-#    vala.sig.trigger()
-#  except SignalClosedError:
-#    raise newValueAsyncClosedError()
+proc failSoon(f: Future[void]) {.raises: [].} =
+  proc wakeup =
+    if not f.finished:
+      f.fail newValueAsyncClosedError()
+  untrackExceptions:
+    callSoon wakeup
 
 proc close*[T](vala: ValueAsync[T]) {.raises: [].} =
   if vala.isClosed:
     return
   vala.isClosed = true
-  vala.sig.close()
+  failSoon vala.putWaiter.fut
+  failSoon vala.getWaiter.fut
 
 when isMainModule:
   func newIntRef(n: int): ref int =
