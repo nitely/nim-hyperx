@@ -17,13 +17,14 @@ type
     val: T
     isClosed: bool
 
-proc newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
-  ValueAsync[T](
-    putWaiter: newFutureVar[void](),
-    getWaiter: newFutureVar[void](),
-    val: nil,
-    isClosed: false
-  )
+func newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
+  {.cast(noSideEffect).}:
+    ValueAsync[T](
+      putWaiter: newFutureVar[void](),
+      getWaiter: newFutureVar[void](),
+      val: nil,
+      isClosed: false
+    )
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
   proc wakeup =
