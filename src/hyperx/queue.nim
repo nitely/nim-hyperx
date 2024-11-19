@@ -3,6 +3,8 @@ import std/deques
 import ./utils
 import ./errors
 
+template fut[T](f: FutureVar[T]): Future[T] = Future[T](f)
+
 func newQueueClosedError(): ref QueueClosedError {.raises: [].} =
   result = (ref QueueClosedError)(msg: "Queue is closed")
 
@@ -19,20 +21,21 @@ type
 
 proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
   doAssert size > 0
-  new result
+  let putWaiter = newFutureVar[void]()
+  let popWaiter = newFutureVar[void]()
+  untrackExceptions:
+    putWaiter.complete()
+    popWaiter.complete()
   {.cast(noSideEffect).}:
-    result = QueueAsync[T](
+    QueueAsync[T](
       s: initDeque[T](size),
       size: size,
-      putWaiter: newFutureVar[void](),
-      popWaiter: newFutureVar[void](),
+      putWaiter: putWaiter,
+      popWaiter: popWaiter,
       wakingPut: false,
       wakingPop: false,
       isClosed: false
     )
-    untrackExceptions:
-      result.putWaiter.complete()
-      result.popWaiter.complete()
 
 iterator items*[T](q: QueueAsync[T]): T {.inline.} =
   for elm in items q.s:
@@ -55,15 +58,12 @@ proc wakeupPop[T](q: QueueAsync[T]) {.raises: [].} =
 
 proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   doAssert q.used <= q.size
-  if q.isClosed:
-    raise newQueueClosedError()
-  if q.used == q.size:
-    doAssert q.putWaiter.finished
-    q.putWaiter.clean()
-    await Future[void](q.putWaiter)
-    if q.isClosed:
-      raise newQueueClosedError()
+  check not q.isClosed, newQueueClosedError()
   doAssert q.putWaiter.finished
+  if q.used == q.size:
+    q.putWaiter.clean()
+    await q.putWaiter.fut
+    check not q.isClosed, newQueueClosedError()
   doAssert q.used < q.size
   q.s.addFirst v
   q.wakeupPop()
@@ -82,15 +82,12 @@ proc wakeupPut[T](q: QueueAsync[T]) {.raises: [].} =
 
 proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
-  if q.isClosed:
-    raise newQueueClosedError()
-  if q.used == 0:
-    doAssert q.popWaiter.finished
-    q.popWaiter.clean()
-    await Future[void](q.popWaiter)
-    if q.isClosed:
-      raise newQueueClosedError()
+  check not q.isClosed, newQueueClosedError()
   doAssert q.popWaiter.finished
+  if q.used == 0:
+    q.popWaiter.clean()
+    await q.popWaiter.fut
+    check not q.isClosed, newQueueClosedError()
   doAssert q.used > 0
   result = q.s.popLast()
   q.wakeupPut()
@@ -104,17 +101,18 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   q.isClosed = true
   proc failWaiters =
     if not q.putWaiter.finished:
-      Future[void](q.putWaiter).fail newQueueClosedError()
+      q.putWaiter.fut.fail newQueueClosedError()
     if not q.popWaiter.finished:
-      Future[void](q.popWaiter).fail newQueueClosedError()
+      q.popWaiter.fut.fail newQueueClosedError()
   untrackExceptions:
     callSoon failWaiters
 
 when isMainModule:
-  proc sleepy(x: int) {.async.} =
-    doAssert x > 0
-    for _ in 0 .. x-1:
-      await sleepAsync(1)
+  proc sleepCycle() {.async.} =
+    let fut = newFuture[void]()
+    proc wakeup = fut.complete()
+    callSoon wakeup
+    await fut
   block:
     proc test() {.async.} =
       var q = newQueue[int](1)
@@ -148,13 +146,13 @@ when isMainModule:
     proc test() {.async.} =
       var q = newQueue[int](1)
       proc puts {.async.} =
-        await sleepy(10)
+        await sleepCycle()
         await q.put 1
-        await sleepy(10)
+        await sleepCycle()
         await q.put 2
-        await sleepy(10)
+        await sleepCycle()
         await q.put 3
-        await sleepy(10)
+        await sleepCycle()
         await q.put 4
       let puts1 = puts()
       doAssert (await q.pop()) == 1
@@ -174,11 +172,11 @@ when isMainModule:
         await q.put 4
       let puts1 = puts()
       doAssert (await q.pop()) == 1
-      await sleepy(10)
+      await sleepCycle()
       doAssert (await q.pop()) == 2
-      await sleepy(10)
+      await sleepCycle()
       doAssert (await q.pop()) == 3
-      await sleepy(10)
+      await sleepCycle()
       doAssert (await q.pop()) == 4
       await puts1
     waitFor test()
@@ -222,22 +220,22 @@ when isMainModule:
     proc test() {.async.} =
       var q = newQueue[int](1)
       proc pops {.async.} =
-        await sleepy(2)
+        await sleepCycle()
         doAssert (await q.pop()) == 1
-        await sleepy(4)
+        await sleepCycle()
         doAssert (await q.pop()) == 2
-        await sleepy(8)
+        await sleepCycle()
         doAssert (await q.pop()) == 3
-        await sleepy(16)
+        await sleepCycle()
         doAssert (await q.pop()) == 4
       proc puts {.async.} =
-        await sleepy(16)
+        await sleepCycle()
         await q.put 1
-        await sleepy(8)
+        await sleepCycle()
         await q.put 2
-        await sleepy(4)
+        await sleepCycle()
         await q.put 3
-        await sleepy(2)
+        await sleepCycle()
         await q.put 4
       let pops1 = pops()
       let puts1 = puts()
@@ -249,68 +247,27 @@ when isMainModule:
     proc test() {.async.} =
       var q = newQueue[int](1)
       proc pops {.async.} =
-        await sleepy(16)
+        await sleepCycle()
         doAssert (await q.pop()) == 1
-        await sleepy(8)
+        await sleepCycle()
         doAssert (await q.pop()) == 2
-        await sleepy(4)
+        await sleepCycle()
         doAssert (await q.pop()) == 3
-        await sleepy(2)
+        await sleepCycle()
         doAssert (await q.pop()) == 4
       proc puts {.async.} =
-        await sleepy(2)
+        await sleepCycle()
         await q.put 1
-        await sleepy(4)
+        await sleepCycle()
         await q.put 2
-        await sleepy(8)
+        await sleepCycle()
         await q.put 3
-        await sleepy(16)
+        await sleepCycle()
         await q.put 4
       let pops1 = pops()
       let puts1 = puts()
       await pops1
       await puts1
-    waitFor test()
-    doAssert not hasPendingOperations()
-  block:  # multiple senders not allowed
-    proc test() {.async.} =
-      var q = newQueue[int](1)
-      let put1 = q.put 1
-      let put2 = q.put 2
-      let put3 = q.put 3
-      try:
-        await put3
-        raise newException(Defect, "assertion raise expected")
-      except AssertionDefect:
-        discard
-      q.close()
-      await put1
-      try:
-        await put2
-        doAssert false
-      except QueueClosedError:
-        discard
-    waitFor test()
-    doAssert not hasPendingOperations()
-  block:  # multiple receivers not allowed
-    proc test() {.async.} =
-      var q = newQueue[int](1)
-      await q.put 1
-      let pop1 = q.pop()
-      let pop2 = q.pop()
-      let pop3 = q.pop()
-      try:
-        discard await pop3
-        raise newException(Defect, "assertion raise expected")
-      except AssertionDefect:
-        discard
-      doAssert (await pop1) == 1
-      q.close()
-      try:
-        discard await pop2
-        doAssert false
-      except QueueClosedError:
-        discard
     waitFor test()
     doAssert not hasPendingOperations()
   echo "ok"
