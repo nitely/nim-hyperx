@@ -19,14 +19,14 @@ type
     wakingPut, wakingPop: bool
     isClosed: bool
 
-proc newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
+func newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
   doAssert size > 0
-  let putWaiter = newFutureVar[void]()
-  let popWaiter = newFutureVar[void]()
-  untrackExceptions:
-    putWaiter.complete()
-    popWaiter.complete()
   {.cast(noSideEffect).}:
+    let putWaiter = newFutureVar[void]()
+    let popWaiter = newFutureVar[void]()
+    untrackExceptions:
+      putWaiter.complete()
+      popWaiter.complete()
     QueueAsync[T](
       s: initDeque[T](size),
       size: size,

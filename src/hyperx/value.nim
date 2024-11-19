@@ -19,14 +19,21 @@ type
 
 func newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
   {.cast(noSideEffect).}:
+    let putWaiter = newFutureVar[void]()
+    let getWaiter = newFutureVar[void]()
+    untrackExceptions:
+      putWaiter.complete()
+      getWaiter.complete()
     ValueAsync[T](
-      putWaiter: newFutureVar[void](),
-      getWaiter: newFutureVar[void](),
+      putWaiter: putWaiter,
+      getWaiter: getWaiter,
       val: nil,
       isClosed: false
     )
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
+  if f.finished:
+    return
   proc wakeup =
     if not f.finished:
       f.complete()
@@ -39,21 +46,26 @@ proc put*[T](vala: ValueAsync[T], val: T) {.async.} =
   doAssert vala.val == nil
   vala.val = val
   wakeupSoon vala.getWaiter.fut
+  doAssert vala.putWaiter.finished
   vala.putWaiter.clean()
   await vala.putWaiter.fut
   doAssert vala.val == nil
 
 proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
   check not vala.isClosed, newValueAsyncClosedError()
-  while vala.val == nil:
+  doAssert vala.getWaiter.finished
+  if vala.val == nil:
     check not vala.isClosed, newValueAsyncClosedError()
     vala.getWaiter.clean()
     await vala.getWaiter.fut
+  doAssert vala.val != nil
   result = vala.val
   vala.val = nil
   wakeupSoon vala.putWaiter.fut
 
 proc failSoon(f: Future[void]) {.raises: [].} =
+  if f.finished:
+    return
   proc wakeup =
     if not f.finished:
       f.fail newValueAsyncClosedError()
