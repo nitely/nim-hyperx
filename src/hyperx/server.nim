@@ -13,6 +13,7 @@ import ./stream
 import ./queue
 import ./errors
 import ./utils
+import ./signal
 
 when defined(hyperxTest):
   import ./testsocket
@@ -185,7 +186,9 @@ type StreamCallback* =
 
 proc processStreamHandler(
   strm: ClientStream,
-  callback: StreamCallback
+  callback: StreamCallback,
+  inFlight: ref int,
+  inFlightSig: SignalAsync
 ) {.async.} =
   try:
     with strm:
@@ -193,6 +196,28 @@ proc processStreamHandler(
   except HyperxError:
     debugInfo getCurrentException().getStackTrace()
     debugInfo getCurrentException().msg
+  finally:
+    inFlight[] -= 1
+    inFlightSig.trigger()
+
+proc processClientHandlerNaked(
+  client: ClientContext,
+  callback: StreamCallback
+) {.async.} =
+  let inFlight = new int
+  inFlight[] = 0
+  let inFlightSig = newSignal()
+  try:
+    while client.isConnected:
+      let strm = await client.recvStream()
+      inFlight[] += 1
+      asyncCheck processStreamHandler(
+        strm, callback, inFlight, inFlightSig
+      )
+  finally:
+    doAssert not client.isConnected
+    while inFlight[] > 0:
+      await inFlightSig.waitFor()
 
 proc processClientHandler(
   client: ClientContext,
@@ -200,9 +225,7 @@ proc processClientHandler(
 ) {.async.} =
   try:
     with client:
-      while client.isConnected:
-        let strm = await client.recvStream()
-        asyncCheck processStreamHandler(strm, callback)
+      await processClientHandlerNaked(client, callback)
   except HyperxError:
     debugInfo getCurrentException().getStackTrace()
     debugInfo getCurrentException().msg
