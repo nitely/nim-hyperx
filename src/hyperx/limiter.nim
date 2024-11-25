@@ -98,6 +98,10 @@ proc spawn*(lt: LimiterAsync, f: Future[void]) {.async.} =
   if lt.isFull:
     await lt.wait()
 
+proc join*(lt: LimiterAsync) {.async.} =
+  while not lt.isEmpty:
+    await lt.wait()
+
 when isMainModule:
   proc sleepCycle: Future[void] =
     let fut = newFuture[void]()

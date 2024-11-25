@@ -76,8 +76,7 @@ proc spawnClient(
       inc stmsCount
       if stmsCount >= strmsPerClient:
         break
-    while not lt.isEmpty:
-      await lt.wait()
+    await lt.join()
     # XXX make server wait for all streams to end before exit conn
     await sleepAsync(5_000)
 

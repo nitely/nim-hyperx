@@ -74,8 +74,7 @@ proc spawnClient(
       inc stmsCount
       if stmsCount >= strmsPerClient:
         break
-    while not lt.isEmpty:
-      await lt.wait()
+    await lt.join()
 
 proc main() {.async.} =
   let checked = new(int)
