@@ -3,7 +3,7 @@
 
 import std/asyncdispatch
 import ../../src/hyperx/client
-import ../../src/hyperx/signal
+import ../../src/hyperx/limiter
 import ../../src/hyperx/errors
 import ./tutils.nim
 from ../../src/hyperx/clientserver import stgWindowSize
@@ -62,39 +62,22 @@ proc spawnStream(
     inc checked[]
     return
 
-proc spawnStream(
-  client: ClientContext,
-  checked: ref int,
-  sig: SignalAsync,
-  inFlight: ref int
-) {.async.} =
-  try:
-    await spawnStream(client, checked)
-  finally:
-    inFlight[] -= 1
-    sig.trigger()
-
 proc spawnClient(
   checked: ref int
 ) {.async.} =
   var client = newClient(localHost, localPort)
   with client:
     var stmsCount = 0
-    var inFlight = new(int)
-    inFlight[] = 0
-    var sig = newSignal()
+    let lt = newLimiter(strmsInFlight)
     while stmsCount < strmsPerClient:
       if not client.isConnected:
         return
-      inFlight[] = inFlight[] + 1
-      asyncCheck spawnStream(client, checked, sig, inFlight)
+      await lt.spawn spawnStream(client, checked)
       inc stmsCount
       if stmsCount >= strmsPerClient:
         break
-      if inFlight[] == strmsInFlight:
-        await sig.waitFor()
-    while inFlight[] > 0:
-      await sig.waitFor()
+    while not lt.isEmpty:
+      await lt.wait()
     # XXX make server wait for all streams to end before exit conn
     await sleepAsync(5_000)
 
