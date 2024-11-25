@@ -55,7 +55,6 @@ proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
   check not vala.isClosed, newValueAsyncClosedError()
   doAssert vala.getWaiter.finished
   if vala.val == nil:
-    check not vala.isClosed, newValueAsyncClosedError()
     vala.getWaiter.clean()
     await vala.getWaiter.fut
   doAssert vala.val != nil
