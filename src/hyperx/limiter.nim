@@ -92,7 +92,7 @@ proc limiterWrap(lt: LimiterAsync, f: Future[void]) {.async.} =
   finally:
     dec lt
 
-proc withLimit*(lt: LimiterAsync, f: Future[void]) {.async.} =
+proc spawn*(lt: LimiterAsync, f: Future[void]) {.async.} =
   inc lt
   asyncCheck limiterWrap(lt, f)
   if lt.isFull:

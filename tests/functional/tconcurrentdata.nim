@@ -85,7 +85,7 @@ proc spawnClient(
       for req in reqsCtx.s:
         if not client.isConnected:
           return
-        await lt.withLimit spawnStream(client, req, checked)
+        await lt.spawn spawnStream(client, req, checked)
         inc stmsCount
         if stmsCount >= strmsPerClient:
           break
