@@ -21,6 +21,7 @@ src/hyperx/clientserver
 src/hyperx/queue
 src/hyperx/lock
 src/hyperx/signal
+src/hyperx/limiter
 src/hyperx/value
 src/hyperx/untestable
 src/hyperx/frame

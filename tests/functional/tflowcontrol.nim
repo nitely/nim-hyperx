@@ -4,7 +4,7 @@
 import std/random
 import std/asyncdispatch
 import ../../src/hyperx/client
-import ../../src/hyperx/signal
+import ../../src/hyperx/limiter
 import ./tutils.nim
 from ../../src/hyperx/clientserver import stgWindowSize
 
@@ -68,19 +68,6 @@ proc spawnStream(
     await sendFut
     inc checked[]
 
-proc spawnStream(
-  client: ClientContext,
-  req: Req,
-  checked: ref int,
-  sig: SignalAsync,
-  inFlight: ref int
-) {.async.} =
-  try:
-    await spawnStream(client, req, checked)
-  finally:
-    inFlight[] -= 1
-    sig.trigger()
-
 const strmsPerClient = 110
 const clientsCount = 11
 const strmsInFlight = 100
@@ -93,22 +80,17 @@ proc spawnClient(
   var client = newClient(localHost, localPort)
   with client:
     var stmsCount = 0
-    var inFlight = new(int)
-    inFlight[] = 0
-    var sig = newSignal()
+    let lt = newLimiter(strmsInFlight)
     while stmsCount < strmsPerClient:
       for req in reqsCtx.s:
         if not client.isConnected:
           return
-        inFlight[] = inFlight[] + 1
-        asyncCheck spawnStream(client, req, checked, sig, inFlight)
+        await lt.spawn spawnStream(client, req, checked)
         inc stmsCount
         if stmsCount >= strmsPerClient:
           break
-        if inFlight[] == strmsInFlight:
-          await sig.waitFor()
-    while inFlight[] > 0:
-      await sig.waitFor()
+    while not lt.isEmpty:
+      await lt.wait()
 
 proc main() {.async.} =
   var data = newSeq[string]()

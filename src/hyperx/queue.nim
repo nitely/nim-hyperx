@@ -108,11 +108,11 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
     callSoon failWaiters
 
 when isMainModule:
-  proc sleepCycle() {.async.} =
+  proc sleepCycle: Future[void] =
     let fut = newFuture[void]()
     proc wakeup = fut.complete()
     callSoon wakeup
-    await fut
+    return fut
   block:
     proc test() {.async.} =
       var q = newQueue[int](1)
