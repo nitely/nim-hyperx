@@ -68,17 +68,6 @@ proc spawnStream(
     await sendFut
     inc checked[]
 
-proc spawnStream(
-  client: ClientContext,
-  req: Req,
-  checked: ref int,
-  lt: LimiterAsync
-) {.async.} =
-  try:
-    await spawnStream(client, req, checked)
-  finally:
-    dec lt
-
 const strmsPerClient = 11000
 const clientsCount = 11
 const strmsInFlight = 100
@@ -96,13 +85,10 @@ proc spawnClient(
       for req in reqsCtx.s:
         if not client.isConnected:
           return
-        inc lt
-        asyncCheck spawnStream(client, req, checked, lt)
+        await lt.withLimit spawnStream(client, req, checked)
         inc stmsCount
         if stmsCount >= strmsPerClient:
           break
-        if lt.isFull:
-          await lt.wait()
     while not lt.isEmpty:
       await lt.wait()
 

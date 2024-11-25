@@ -86,6 +86,18 @@ proc close*(lt: LimiterAsync) {.raises: [].} =
   lt.isClosed = true
   failSoon lt
 
+proc limiterWrap(lt: LimiterAsync, f: Future[void]) {.async.} =
+  try:
+    await f
+  finally:
+    dec lt
+
+proc withLimit*(lt: LimiterAsync, f: Future[void]) {.async.} =
+  inc lt
+  asyncCheck limiterWrap(lt, f)
+  if lt.isFull:
+    await lt.wait()
+
 when isMainModule:
   proc sleepCycle: Future[void] =
     let fut = newFuture[void]()
