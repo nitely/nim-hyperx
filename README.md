@@ -88,11 +88,11 @@ There is built-in backpressure based on bounded queues for the rest of non-data 
 
 Http/2 allows full-duplex data communication over a single stream. If you plan to only ever use this client and server, you won't need websockets.
 
-On web-browsers, only [chrome](https://caniuse.com/mdn-api_request_request_request_body_readablestream) has support for streaming, and it's only [half-duplex](https://github.com/whatwg/fetch/issues/1254). So, you need two streams, one for sending, and one for receiving.
+However, web-browsers do not support full-duplex streaming. So http/2 cannot be used in place of websockets there.
 
 ### Benchmarks
 
-The CI runs h2load on it, but it only starts a single server instance. Proper benchmarking would start a server per CPU, and run a few combinations of load. To save you the trip, the CI results show around 30K requests/s.
+The CI runs h2load on it, but it only starts a single server instance. Proper benchmarking would start a server per CPU, and run a few combinations of load. See [issue #5](https://github.com/nitely/nim-hyperx/issues/5#issuecomment-2480527542).
 
 Also try:
 
@@ -102,7 +102,7 @@ Also try:
 - localServer.nim: it will respond "hello world" or any data it receives. You may want to tweak it to not send any data.
 - start a server instance per CPU and use `taskset` to set the process CPU affinity.
 - make sure the bench tool is hitting all server instances, not just one.
-- using [yasync](https://github.com/yglukhov/yasync) shows higher throughput and lower latency see [issue #5](https://github.com/nitely/nim-hyperx/issues/5#issuecomment-2480527542).
+- using [yasync](https://github.com/yglukhov/yasync) shows higher throughput and lower latency.
 
 ### ORC
 
