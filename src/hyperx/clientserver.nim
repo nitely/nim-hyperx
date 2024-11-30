@@ -72,6 +72,7 @@ proc defaultSslContext*(
   # protSSLv23 will disable all protocols
   # lower than the min protocol defined
   # in openssl.config, usually +TLSv1.2
+  result = nil
   try:
     result = newContext(
       protSSLv23,
@@ -771,7 +772,7 @@ proc failSilently(f: Future[void]) {.async.} =
 
 template with*(client: ClientContext, body: untyped): untyped =
   doAssert not client.isConnected
-  var recvFut, dispFut, winupFut: Future[void]
+  var recvFut, dispFut, winupFut: Future[void] = nil
   try:
     client.isConnected = true
     if client.typ == ctClient:
@@ -1207,7 +1208,7 @@ template with*(strm: ClientStream, body: untyped): untyped =
   doAssert strm.stateSend == csStateInitial
   strm.stateRecv = csStateOpened
   strm.stateSend = csStateOpened
-  var recvFut: Future[void]
+  var recvFut: Future[void] = nil
   try:
     recvFut = recvTask(strm)
     block:

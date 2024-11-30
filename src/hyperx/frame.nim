@@ -153,6 +153,7 @@ func payloadLen*(frm: Frame): FrmPayloadLen {.raises: [].} =
   ## This can include padding and prio len,
   ## and be greater than frm.payload.len
   # XXX: validate this is equal to frm.s.len-frmHeaderSize on read
+  result = FrmPayloadLen(0)
   result += frm.s[0].uint32 shl 16
   result += frm.s[1].uint32 shl 8
   result += frm.s[2].uint32
@@ -170,6 +171,7 @@ func flags2(frm: Frame): FrmFlags {.raises: [].} =
   result = frm.s[4].FrmFlags
 
 func sid*(frm: Frame): FrmSid {.raises: [].} =
+  result = FrmSid(0)
   result += frm.s[5].uint shl 24
   result += frm.s[6].uint shl 16
   result += frm.s[7].uint shl 8
@@ -305,7 +307,7 @@ iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline, raises: [].} =
   var i = frmHeaderSize
   var id = 0'u16
   # need to return last value for each ID
-  var skip: array[7, int32]
+  var skip = default(array[7, int32])
   while i < frm.len:
     id = 0'u16
     id += frm.s[i].uint16 shl 8
@@ -332,6 +334,7 @@ iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline, raises: [].} =
     i += frmSettingsSize
 
 func prioDependency*(prio: openArray[byte]): FrmSid {.raises: [].} =
+  result = FrmSid(0)
   result += prio[0].uint shl 24
   result += prio[1].uint shl 16
   result += prio[2].uint shl 8
@@ -340,6 +343,7 @@ func prioDependency*(prio: openArray[byte]): FrmSid {.raises: [].} =
 
 func strmDependency*(frm: Frame): FrmSid {.raises: [].} =
   doAssert frm.typ == frmtPriority
+  result = FrmSid(0)
   result += frm.s[frmHeaderSize+0].uint shl 24
   result += frm.s[frmHeaderSize+1].uint shl 16
   result += frm.s[frmHeaderSize+2].uint shl 8
@@ -348,6 +352,7 @@ func strmDependency*(frm: Frame): FrmSid {.raises: [].} =
 
 func windowSizeInc*(frm: Frame): uint {.raises: [].} =
   doAssert frm.typ == frmtWindowUpdate
+  result = 0
   result += frm.s[frmHeaderSize+0].uint shl 24
   result += frm.s[frmHeaderSize+1].uint shl 16
   result += frm.s[frmHeaderSize+2].uint shl 8
@@ -356,6 +361,7 @@ func windowSizeInc*(frm: Frame): uint {.raises: [].} =
 
 func errorCode*(frm: Frame): uint32 {.raises: [].} =
   doAssert frm.typ == frmtRstStream
+  result = 0
   result += frm.s[frmHeaderSize+0].uint32 shl 24
   result += frm.s[frmHeaderSize+1].uint32 shl 16
   result += frm.s[frmHeaderSize+2].uint32 shl 8
@@ -364,6 +370,7 @@ func errorCode*(frm: Frame): uint32 {.raises: [].} =
 func pingData*(frm: Frame): uint32 {.raises: [].} =
   # note we ignore the last 4 bytes
   doAssert frm.typ == frmtPing
+  result = 0
   result += frm.s[frmHeaderSize+0].uint32 shl 24
   result += frm.s[frmHeaderSize+1].uint32 shl 16
   result += frm.s[frmHeaderSize+2].uint32 shl 8
@@ -381,6 +388,7 @@ func pingData*(frm: Frame): uint32 {.raises: [].} =
 #  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
 
 func `$`*(frm: Frame): string {.raises: [].} =
+  result = ""
   untrackExceptions:
     result = fmt"""
       ===Frame===
@@ -392,6 +400,7 @@ func `$`*(frm: Frame): string {.raises: [].} =
       ===========""".unindent
 
 func debugPayload*(frm: Frame): string {.raises: [].} =
+  result = ""
   untrackExceptions:
     var i = frmHeaderSize
     result.add "===Payload==="

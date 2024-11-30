@@ -1,7 +1,6 @@
 import std/tables
 
 import ./frame
-#import ./queue
 import ./value
 import ./signal
 import ./errors
@@ -172,7 +171,6 @@ type
   Stream* = ref object
     id*: StreamId
     state*: StreamState
-    #msgs*: QueueAsync[Frame]
     msgs*: ValueAsync[Frame]
     peerWindow*: int32
     peerWindowUpdateSig*: SignalAsync
@@ -186,7 +184,6 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
   Stream(
     id: id,
     state: strmIdle,
-    #msgs: newQueue[Frame](1),
     msgs: newValueAsync[Frame](),
     peerWindow: peerWindow,
     peerWindowUpdateSig: newSignal(),
@@ -217,6 +214,7 @@ func len*(s: Streams): int {.raises: [].} =
   result = s.t.len
 
 func get*(s: var Streams, sid: StreamId): Stream {.raises: [].} =
+  result = default(Stream)
   try:
     result = s.t[sid]
   except KeyError:

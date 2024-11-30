@@ -56,8 +56,10 @@ when not defined(hyperxTest):
     certFile = "",
     keyFile = ""
   ): MyAsyncSocket {.raises: [HyperxConnError].} =
+    result = nil
     try:
       result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
+      doAssert result != nil
       if ssl:
         wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
