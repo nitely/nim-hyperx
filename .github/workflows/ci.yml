@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        nim: [2.2.0]
+        nim: [2.0.8, 2.2.0]
     steps:
     - uses: actions/checkout@v2
     - name: Run Tests
@@ -20,10 +20,71 @@ jobs:
         docker pull nimlang/nim:${{ matrix.nim }}
         docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
         /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
-          wget https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-linux-x64-1.20.1.tgz && \
-          tar -xvzf onnxruntime-linux-x64-1.20.1.tgz && \
-          cp onnxruntime-linux-x64-1.20.1/lib/libonnxruntime.so* /usr/local/lib/ && \
-          ldconfig && \
-          ldconfig -p | grep libonnxruntime && \
+          apt update && \
+          apt install -y make && \ 
+          make install_mkcert && \
           nimble install -y && \
           nimble test"
+    - name: Run Functional Tests
+      run: |
+        docker pull nimlang/nim:${{ matrix.nim }}
+        docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
+        /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
+          apt update && \
+          apt install -y make && \ 
+          make install_mkcert && \
+          nimble install -y && \
+          (nimble funcserve &) && \
+          sleep 10s && \
+          nimble functest"
+    - name: Run Functional Insecure Tests
+      run: |
+        docker pull nimlang/nim:${{ matrix.nim }}
+        docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
+        /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
+          nimble install -y && \
+          (nimble funcserveinsec &) && \
+          sleep 10s && \
+          nimble functestinsec"
+    - name: Run Examples
+      run: |
+        docker pull nimlang/nim:${{ matrix.nim }}
+        docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
+        /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
+          apt update && \
+          apt install -y make && \ 
+          make install_mkcert && \
+          nimble install -y && \
+          (nimble serve2 &) && \
+          sleep 10s && \
+          nimble testexamples"
+    - name: Run h2spec
+      run: |
+        docker pull nimlang/nim:${{ matrix.nim }}
+        docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
+        /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
+          apt update && \
+          apt install -y make && \ 
+          make install_mkcert && \
+          nimble install -y && \
+          (nimble serve2 &) && \
+          sleep 10s && \
+          curl -JLO \"https://github.com/nitely/nim-hyperx/releases/download/v0.1.20/h2spec\" && \
+          chmod +x ./h2spec && \
+          nimble h2spec && \
+          nimble h2spec && \
+          nimble h2spec"
+    - name: Run h2load
+      run: |
+        docker pull nimlang/nim:${{ matrix.nim }}
+        docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
+        /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
+          apt update && \
+          apt install -y make && \ 
+          make install_mkcert && \
+          nimble install -y && \
+          (nimble serve2 &) && \
+          sleep 10s && \
+          apt install -y nghttp2-client && \
+          nimble h2load && \
+          nimble h2load2"
