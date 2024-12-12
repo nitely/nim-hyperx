@@ -618,7 +618,7 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
           strm.pingSig.trigger()
   of frmtGoAway:
     client.isGracefulShutdown = true
-    client.error ?= newConnError(frm.errorCode())
+    client.error ?= newConnError frm.errorCode().toErrorCode
     let sid = frm.lastStreamId()
     for strm in values client.streams:
       if strm.id.uint32 > sid:
