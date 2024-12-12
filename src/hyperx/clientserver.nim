@@ -129,7 +129,7 @@ type
     hostname*: string
     port: Port
     isConnected*: bool,
-    isGracefulShutdown: bool
+    isGracefulShutdown: bool,
     headersEnc, headersDec: DynHeaders
     streams: Streams
     recvMsgs: QueueAsync[Frame]
