@@ -4,6 +4,7 @@ import ./frame
 import ./value
 import ./signal
 import ./errors
+import ./utils
 
 # Section 5.1
 type

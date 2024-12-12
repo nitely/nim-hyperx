@@ -654,14 +654,15 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         await client.send newGoAwayFrame(
           client.maxPeerStrmIdSeen.int, errNoError
         )
+        continue
       client.maxPeerStrmIdSeen = frm.sid.StreamId
       # we do not store idle streams, so no need to close them
       let strm = client.streams.open(frm.sid.StreamId, client.peerWindowSize.int32)
       await client.streamOpenedMsgs.put strm
-    if client.typ == ctClient and
-        frm.sid.StreamId > client.maxPeerStrmIdSeen and
-        frm.sid.int mod 2 == 0:
-      client.maxPeerStrmIdSeen = frm.sid.StreamId
+    #if client.typ == ctClient and
+    #    frm.sid.StreamId > client.maxPeerStrmIdSeen and
+    #    frm.sid.int mod 2 == 0:
+    #  client.maxPeerStrmIdSeen = frm.sid.StreamId
     if frm.typ == frmtHeaders:
       headers.setLen 0
       client.hpackDecode(headers, frm.payload)
