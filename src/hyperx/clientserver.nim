@@ -617,10 +617,12 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         if not strm.pingSig.isClosed:
           strm.pingSig.trigger()
   of frmtGoAway:
-    # XXX close streams lower than Last-Stream-ID
-    # XXX don't allow new streams creation
-    # the connection is still ok for streams lower than Last-Stream-ID
     client.isGracefulShutdown = true
+    client.error ?= newConnError(frm.errorCode())
+    let sid = frm.lastStreamId()
+    for strm in values client.streams:
+      if strm.id.uint32 > sid:
+        client.streams.close(strm.id)
   else:
     doAssert frm.typ notin connFrmAllowed
     raise newConnError(errProtocolError)
