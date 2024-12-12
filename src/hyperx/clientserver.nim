@@ -128,8 +128,8 @@ type
     sock*: MyAsyncSocket
     hostname*: string
     port: Port
-    isConnected*: bool,
-    isGracefulShutdown: bool,
+    isConnected*: bool
+    isGracefulShutdown: bool
     headersEnc, headersDec: DynHeaders
     streams: Streams
     recvMsgs: QueueAsync[Frame]
