@@ -128,7 +128,8 @@ type
     sock*: MyAsyncSocket
     hostname*: string
     port: Port
-    isConnected*: bool
+    isConnected*: bool,
+    isGracefulShutdown: bool
     headersEnc, headersDec: DynHeaders
     streams: Streams
     recvMsgs: QueueAsync[Frame]
@@ -159,6 +160,7 @@ proc newClient*(
     hostname: hostname,
     port: port,
     isConnected: false,
+    isGracefulShutdown: false,
     headersEnc: initDynHeaders(stgHeaderTableSize.int),
     headersDec: initDynHeaders(stgHeaderTableSize.int),
     streams: initStreams(),
@@ -209,9 +211,11 @@ func openMainStream(client: ClientContext): Stream {.raises: [StreamsClosedError
   doAssert frmSidMain.StreamId notin client.streams
   result = client.streams.open(frmSidMain.StreamId, client.peerWindowSize.int32)
 
-func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} =
+func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError, GracefulShutdownError].} =
   # XXX some error if max sid is reached
   # XXX error if maxStreams is reached
+  doAssert client.typ == ctClient
+  check not client.isGracefulShutdown, newGracefulShutdownError()
   result = client.streams.open(client.currStreamId, client.peerWindowSize.int32)
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
@@ -616,7 +620,7 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
     # XXX close streams lower than Last-Stream-ID
     # XXX don't allow new streams creation
     # the connection is still ok for streams lower than Last-Stream-ID
-    discard
+    client.isGracefulShutdown = true
   else:
     doAssert frm.typ notin connFrmAllowed
     raise newConnError(errProtocolError)
@@ -646,6 +650,10 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         frm.sid.int mod 2 != 0:
       check client.streams.len <= stgServerMaxConcurrentStreams,
         newConnError(errProtocolError)
+      if client.isGracefulShutdown:
+        await client.send newGoAwayFrame(
+          client.maxPeerStrmIdSeen.int, errNoError
+        )
       client.maxPeerStrmIdSeen = frm.sid.StreamId
       # we do not store idle streams, so no need to close them
       let strm = client.streams.open(frm.sid.StreamId, client.peerWindowSize.int32)
