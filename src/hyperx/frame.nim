@@ -387,10 +387,10 @@ func pingData*(frm: Frame): uint32 {.raises: [].} =
 func lastStreamId*(frm: Frame): uint32 =
   doAssert frm.typ == frmtGoAway
   result = 0'u32
-  result += frm.s[i+0].uint32 shl 24
-  result += frm.s[i+1].uint32 shl 16
-  result += frm.s[i+2].uint32 shl 8
-  result += frm.s[i+3].uint32
+  result += frm.s[frmHeaderSize+0].uint32 shl 24
+  result += frm.s[frmHeaderSize+1].uint32 shl 16
+  result += frm.s[frmHeaderSize+2].uint32 shl 8
+  result += frm.s[frmHeaderSize+3].uint32
 
 func `$`*(frm: Frame): string {.raises: [].} =
   result = ""
