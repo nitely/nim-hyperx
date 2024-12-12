@@ -71,6 +71,12 @@ func newConnClosedError*: ref ConnClosedError {.raises: [].} =
 func newConnError*(errCode: ErrorCode): ref ConnError {.raises: [].} =
   result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
 
+func newConnError*(errCode: uint32): ref ConnError {.raises: [].} =
+  result = (ref ConnError)(
+    code: errCode.toErrorCode,
+    msg: "Connection Error: " & $errCode.toErrorCode
+  )
+
 func newStrmError*(errCode: ErrorCode, typ = hxLocalErr): ref StrmError {.raises: [].} =
   let msg = case typ
     of hxLocalErr: "Stream Error: " & $errCode
