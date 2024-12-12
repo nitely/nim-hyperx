@@ -654,7 +654,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         newConnError(errProtocolError)
       if client.isGracefulShutdown:
         await client.send newGoAwayFrame(
-          client.maxPeerStrmIdSeen.int, errNoError
+          client.maxPeerStrmIdSeen.int, errNoError.int
         )
         continue
       client.maxPeerStrmIdSeen = frm.sid.StreamId
