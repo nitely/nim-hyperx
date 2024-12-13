@@ -206,6 +206,10 @@ func stream(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
 func stream(client: ClientContext, sid: FrmSid): Stream {.raises: [].} =
   client.stream sid.StreamId
 
+func openMainStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} =
+  doAssert frmSidMain.StreamId notin client.streams
+  result = client.streams.open(frmSidMain.StreamId, client.peerWindowSize.int32)
+
 func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError, GracefulShutdownError].} =
   # XXX some error if max sid is reached
   # XXX error if maxStreams is reached
@@ -382,6 +386,8 @@ const serverHandshakeBlob = handshakeBlob(ctServer)
 proc handshakeNaked(client: ClientContext) {.async.} =
   doAssert client.isConnected
   debugInfo "handshake"
+  let strm = client.openMainStream()
+  doAssert strm.id == frmSidMain.StreamId
   check not client.sock.isClosed, newConnClosedError()
   case client.typ
   of ctClient: await client.sock.send(clientHandshakeBlob)
@@ -1232,15 +1238,18 @@ template with*(strm: ClientStream, body: untyped): untyped =
     strm.windowEnd()
     await failSilently(recvFut)
 
-proc ping(strm: ClientStream) {.async.} =
-  # this is done for rst pings; only one stream ping
+proc ping(client: ClientContext, strm: Stream) {.async.} =
+  # this is done for rst and go-away pings; only one stream ping
   # will ever be in progress
-  if strm.stream.pingSig.len > 0:
-    await strm.stream.pingSig.waitFor()
+  if strm.pingSig.len > 0:
+    await strm.pingSig.waitFor()
   else:
-    let sig = strm.stream.pingSig.waitFor()
-    await strm.client.send newPingFrame(strm.stream.id.uint32)
+    let sig = strm.pingSig.waitFor()
+    await client.send newPingFrame(strm.id.uint32)
     await sig
+
+proc ping(strm: ClientStream) {.async.} =
+  await strm.client.ping(strm.stream)
 
 proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
   ## This may never return until the stream/conn is closed.
@@ -1257,13 +1266,11 @@ proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
     strm.close()
 
 proc gracefulClose*(client: ClientContext) {.async.} =
-  if client.isGracefulShutdown:
-    return
   client.isGracefulShutdown = true
   await client.send newGoAwayFrame(
     client.maxPeerStreamIdSeen.int, errNoError.int
   )
-  #await client.ping()
+  await client.ping client.streams.get(StreamId 0)
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =
