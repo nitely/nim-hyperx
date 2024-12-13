@@ -1266,11 +1266,19 @@ proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
     strm.close()
 
 proc gracefulClose*(client: ClientContext) {.async.} =
+  # returning early is ok
+  if client.isGracefulShutdown:
+    return
+  # fail silently because it's best effort,
+  # setting isGracefulShutdown is the only important thing
+  await failSilently client.send newGoAwayFrame(
+    int32.high, errNoError.int
+  )
+  await failSilently client.ping client.streams.get(StreamId 0)
   client.isGracefulShutdown = true
-  await client.send newGoAwayFrame(
+  await failSilently client.send newGoAwayFrame(
     client.maxPeerStreamIdSeen.int, errNoError.int
   )
-  await client.ping client.streams.get(StreamId 0)
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =
