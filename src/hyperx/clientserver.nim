@@ -219,6 +219,7 @@ func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError, Gr
   result = client.streams.open(client.currStreamId, client.peerWindowSize.int32)
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
+  client.maxPeerStrmIdSeen = frm.sid.StreamId  # XXX rename to maxStrmIdSeen
 
 when defined(hyperxStats):
   func echoStats*(client: ClientContext) =
@@ -647,9 +648,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       await consumeMainStream(client, frm)
       continue
     check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
+    check frm.sid.int mod 2 != 0, newConnError(errProtocolError)
     if client.typ == ctServer and
-        frm.sid.StreamId > client.maxPeerStrmIdSeen and
-        frm.sid.int mod 2 != 0:
+        frm.sid.StreamId > client.maxPeerStrmIdSeen:
       check client.streams.len <= stgServerMaxConcurrentStreams,
         newConnError(errProtocolError)
       if client.isGracefulShutdown:
@@ -661,10 +662,6 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         # we do not store idle streams, so no need to close them
         let strm = client.streams.open(frm.sid.StreamId, client.peerWindowSize.int32)
         await client.streamOpenedMsgs.put strm
-    if client.typ == ctClient and
-        frm.sid.StreamId > client.maxPeerStrmIdSeen and
-        frm.sid.int mod 2 == 0:
-      client.maxPeerStrmIdSeen = frm.sid.StreamId
     if frm.typ == frmtHeaders:
       headers.setLen 0
       client.hpackDecode(headers, frm.payload)
