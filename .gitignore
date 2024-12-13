@@ -15,6 +15,7 @@ tests/functional/tflowcontrol
 tests/functional/tcancel
 tests/functional/tcancelremote
 tests/functional/tmisc
+tests/functional/tgracefulclose
 src/hyperx/client
 src/hyperx/server
 src/hyperx/clientserver

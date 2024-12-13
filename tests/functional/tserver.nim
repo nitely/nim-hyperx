@@ -27,11 +27,17 @@ proc processStream(strm: ClientStream) {.async.} =
       @[("x-trailer", "bye")], finish = true
     )
     await strm.cancel(errCancel)
-  await strm.sendBody(data, finish = strm.recvEnded)
+  if "x-graceful-close-remote" in data[]:
+    await strm.client.gracefulClose()
+  if "x-no-echo-headers" notin data[]:
+    await strm.sendBody(data, finish = strm.recvEnded)
   while not strm.recvEnded:
     data[].setLen 0
     await strm.recvBody(data)
     await strm.sendBody(data, finish = strm.recvEnded)
+  if not strm.sendEnded:
+    data[].setLen 0
+    await strm.sendBody(data, finish = true)
   #GC_fullCollect()
 
 proc serve*(server: ServerContext) {.async.} =

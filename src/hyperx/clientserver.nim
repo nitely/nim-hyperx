@@ -425,10 +425,6 @@ func doTransitionRecv(s: Stream, frm: Frame) {.raises: [ConnError, StrmError].} 
       raise newConnError(errStreamClosed)
     raise newConnError(errProtocolError)
   s.state = nextState
-  #if oldState == strmIdle:
-  #  # XXX do this elsewhere not here
-  #  # XXX close streams < s.id in idle state
-  #  discard
 
 proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
   ## Read continuation frames until ``END_HEADERS`` flag is set
@@ -623,10 +619,13 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   of frmtGoAway:
     client.isGracefulShutdown = true
     client.error ?= newConnError frm.errorCode()
-    let sid = frm.lastStreamId()
-    for strm in values client.streams:
-      if strm.id.uint32 > sid:
-        client.streams.close(strm.id)
+    # streams are never created by ctServer,
+    # so there are no streams to close
+    if client.typ == ctClient:
+      let sid = frm.lastStreamId()
+      for strm in values client.streams:
+        if strm.id.uint32 > sid:
+          client.streams.close(strm.id)
   else:
     doAssert frm.typ notin connFrmAllowed
     raise newConnError(errProtocolError)
@@ -687,9 +686,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       if client.typ == ctServer and
           frm.sid.StreamId > client.currStreamId:
         doAssert client.isGracefulShutdown
-        continue
-      check frm.typ in {frmtRstStream, frmtWindowUpdate},
-        newConnError errStreamClosed
+      else:
+        check frm.typ in {frmtRstStream, frmtWindowUpdate},
+          newConnError errStreamClosed
       debugInfo "stream not found " & $frm.sid.int
       continue
     var stream = client.streams.get frm.sid.StreamId
@@ -1279,6 +1278,9 @@ proc gracefulClose*(client: ClientContext) {.async.} =
   await failSilently client.send newGoAwayFrame(
     client.maxPeerStreamIdSeen.int, errNoError.int
   )
+
+proc isGracefulClose*(client: ClientContext): bool {.raises: [].} =
+  result = client.isGracefulShutdown
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =

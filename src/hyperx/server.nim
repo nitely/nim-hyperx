@@ -34,7 +34,9 @@ export
   ClientContext,
   HyperxConnError,
   HyperxStrmError,
-  HyperxError
+  HyperxError,
+  gracefulClose,
+  isGracefulClose
 
 var sslContext {.threadvar.}: SslContext
 
