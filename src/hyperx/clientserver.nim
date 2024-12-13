@@ -220,6 +220,11 @@ func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError, Gr
   result = client.streams.open(StreamId sid, client.peerWindowSize.int32)
   client.currStreamId = StreamId sid
 
+func maxPeerStreamIdSeen(client: ClientContext): StreamId {.raises: [].} =
+  case client.typ
+  of ctClient: StreamId 0
+  of ctServer: client.currStreamId
+
 when defined(hyperxStats):
   func echoStats*(client: ClientContext) =
     debugEcho(
@@ -525,7 +530,7 @@ proc recvTask(client: ClientContext) {.async.} =
       # XXX close queues
       client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
-        client.currStreamId.int, err.code.int
+        client.maxPeerStreamIdSeen.int, err.code.int
       )
       #client.close()
     raise err
@@ -654,7 +659,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         newConnError(errProtocolError)
       if client.isGracefulShutdown:
         await client.send newGoAwayFrame(
-          client.currStreamId.int, errNoError.int
+          client.maxPeerStreamIdSeen.int, errNoError.int
         )
       else:
         client.currStreamId = frm.sid.StreamId
@@ -713,7 +718,7 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     if client.isConnected:
       client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
-        client.currStreamId.int, err.code.int
+        client.maxPeerStreamIdSeen.int, err.code.int
       )
     raise err
   except StrmError:
@@ -1035,7 +1040,7 @@ proc recvTask(strm: ClientStream) {.async.} =
     if client.isConnected:
       client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
-        client.currStreamId.int, err.code.int
+        client.maxPeerStreamIdSeen.int, err.code.int
       )
     raise err
   except StrmError as err:
