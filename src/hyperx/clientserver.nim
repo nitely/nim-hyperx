@@ -217,9 +217,9 @@ func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError, Gr
   doAssert client.typ == ctClient
   check not client.isGracefulShutdown, newGracefulShutdownError()
   result = client.streams.open(client.currStreamId, client.peerWindowSize.int32)
+  client.maxPeerStrmIdSeen = client.currStreamId  # XXX just use currStreamId-2
   # client uses odd numbers, and server even numbers
   client.currStreamId += 2.StreamId
-  client.maxPeerStrmIdSeen = frm.sid.StreamId  # XXX rename to maxStrmIdSeen
 
 when defined(hyperxStats):
   func echoStats*(client: ClientContext) =
