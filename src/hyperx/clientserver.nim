@@ -206,10 +206,6 @@ func stream(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
 func stream(client: ClientContext, sid: FrmSid): Stream {.raises: [].} =
   client.stream sid.StreamId
 
-func openMainStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} =
-  doAssert frmSidMain.StreamId notin client.streams
-  result = client.streams.open(frmSidMain.StreamId, client.peerWindowSize.int32)
-
 func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError, GracefulShutdownError].} =
   # XXX some error if max sid is reached
   # XXX error if maxStreams is reached
@@ -386,9 +382,6 @@ const serverHandshakeBlob = handshakeBlob(ctServer)
 proc handshakeNaked(client: ClientContext) {.async.} =
   doAssert client.isConnected
   debugInfo "handshake"
-  # we need to do this before sending any other frame
-  let strm = client.openMainStream()
-  doAssert strm.id == frmSidMain.StreamId
   check not client.sock.isClosed, newConnClosedError()
   case client.typ
   of ctClient: await client.sock.send(clientHandshakeBlob)
@@ -1262,6 +1255,15 @@ proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
   finally:
     strm.stream.error ?= newStrmError(errStreamClosed)
     strm.close()
+
+proc gracefulClose*(client: ClientContext) {.async.} =
+  if client.isGracefulShutdown:
+    return
+  client.isGracefulShutdown = true
+  await client.send newGoAwayFrame(
+    client.maxPeerStreamIdSeen.int, errNoError.int
+  )
+  #await client.ping()
 
 when defined(hyperxTest):
   proc putRecvTestData*(client: ClientContext, data: seq[byte]) {.async.} =
