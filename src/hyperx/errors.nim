@@ -56,20 +56,26 @@ type
   ConnClosedError* = object of HyperxConnError
   ConnError* = object of HyperxConnError
     code*: ErrorCode
+  GracefulShutdownError* = ConnError
   StrmError* = object of HyperxStrmError
     typ*: HyperxErrTyp
     code*: ErrorCode
-  QueueError* = object of HyperxError
-  QueueClosedError* = object of QueueError
+  QueueClosedError* = object of HyperxError
 
 func newHyperxConnError*(msg: string): ref HyperxConnError {.raises: [].} =
   result = (ref HyperxConnError)(msg: msg)
 
-func newConnClosedError*(): ref ConnClosedError {.raises: [].} =
+func newConnClosedError*: ref ConnClosedError {.raises: [].} =
   result = (ref ConnClosedError)(msg: "Connection Closed")
 
 func newConnError*(errCode: ErrorCode): ref ConnError {.raises: [].} =
   result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
+
+func newConnError*(errCode: uint32): ref ConnError {.raises: [].} =
+  result = (ref ConnError)(
+    code: errCode.toErrorCode,
+    msg: "Connection Error: " & $errCode.toErrorCode
+  )
 
 func newStrmError*(errCode: ErrorCode, typ = hxLocalErr): ref StrmError {.raises: [].} =
   let msg = case typ
@@ -90,3 +96,8 @@ func newErrorOrDefault*(err, default: ref StrmError): ref StrmError {.raises: []
     return newError(err)
   else:
     return default
+
+func newGracefulShutdownError*(): ref GracefulShutdownError {.raises: [].} =
+  result = (ref GracefulShutdownError)(
+    code: errNoError, msg: "Connection Error: " & $errNoError
+  )

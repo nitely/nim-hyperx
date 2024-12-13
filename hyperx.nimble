@@ -64,6 +64,7 @@ task functest, "Func test":
   exec "nim c -r -d:release tests/functional/tcancel.nim"
   exec "nim c -r -d:release tests/functional/tcancelremote.nim"
   exec "nim c -r -d:release tests/functional/tmisc.nim"
+  exec "nim c -r -d:release tests/functional/tgracefulclose.nim"
 
 task funcserveinsec, "Func Serve Insecure":
   exec "nim c -r -d:release tests/functional/tserverinsecure.nim"

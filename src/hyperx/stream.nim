@@ -4,6 +4,7 @@ import ./frame
 import ./value
 import ./signal
 import ./errors
+import ./utils
 
 # Section 5.1
 type
@@ -198,8 +199,12 @@ proc close*(stream: Stream) {.raises: [].} =
   stream.peerWindowUpdateSig.close()
   stream.pingSig.close()
 
+type StreamsClosedError* = object of QueueClosedError
+
+func newStreamsClosedError*(msg: string): ref StreamsClosedError {.raises: [].} =
+  result = (ref StreamsClosedError)(msg: msg)
+
 type
-  StreamsClosedError* = object of HyperxError
   Streams* = object
     t: Table[StreamId, Stream]
     isClosed: bool
@@ -232,8 +237,7 @@ func open*(
   peerWindow: int32
 ): Stream {.raises: [StreamsClosedError].} =
   doAssert sid notin s.t, $sid.int
-  if s.isClosed:
-    raise newException(StreamsClosedError, "Cannot open stream")
+  check not s.isClosed, newStreamsClosedError("Cannot open stream")
   result = newStream(sid, peerWindow)
   s.t[sid] = result
 

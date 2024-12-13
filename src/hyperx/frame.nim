@@ -360,12 +360,20 @@ func windowSizeInc*(frm: Frame): uint {.raises: [].} =
   result.clearBit 31  # clear reserved byte
 
 func errorCode*(frm: Frame): uint32 {.raises: [].} =
-  doAssert frm.typ == frmtRstStream
-  result = 0
-  result += frm.s[frmHeaderSize+0].uint32 shl 24
-  result += frm.s[frmHeaderSize+1].uint32 shl 16
-  result += frm.s[frmHeaderSize+2].uint32 shl 8
-  result += frm.s[frmHeaderSize+3].uint32
+  result = 0'u32
+  case frm.typ
+  of frmtRstStream:
+    result += frm.s[frmHeaderSize+0].uint32 shl 24
+    result += frm.s[frmHeaderSize+1].uint32 shl 16
+    result += frm.s[frmHeaderSize+2].uint32 shl 8
+    result += frm.s[frmHeaderSize+3].uint32
+  of frmtGoAway:
+    result += frm.s[frmHeaderSize+4].uint32 shl 24
+    result += frm.s[frmHeaderSize+5].uint32 shl 16
+    result += frm.s[frmHeaderSize+6].uint32 shl 8
+    result += frm.s[frmHeaderSize+7].uint32
+  else:
+    doAssert false
 
 func pingData*(frm: Frame): uint32 {.raises: [].} =
   # note we ignore the last 4 bytes
@@ -376,16 +384,13 @@ func pingData*(frm: Frame): uint32 {.raises: [].} =
   result += frm.s[frmHeaderSize+2].uint32 shl 8
   result += frm.s[frmHeaderSize+3].uint32
 
-# XXX add padding field and padding as payload
-#func setPadding*(frm: Frame, n: FrmPadding) =
-#  doAssert frm.typ in {frmtData, frmtHeaders, frmtPushPromise}
-
-#func add*(frm: Frame, payload: openArray[byte]) =
-#  frm.s.add payload
-#  frm.setPayloadLen FrmPayloadLen(frm.rawLen-frmHeaderSize)
-
-#template payload*(frm: Frame): untyped =
-#  toOpenArray(frm.s, frmHeaderSize, frm.s.len-1)
+func lastStreamId*(frm: Frame): uint32 =
+  doAssert frm.typ == frmtGoAway
+  result = 0'u32
+  result += frm.s[frmHeaderSize+0].uint32 shl 24
+  result += frm.s[frmHeaderSize+1].uint32 shl 16
+  result += frm.s[frmHeaderSize+2].uint32 shl 8
+  result += frm.s[frmHeaderSize+3].uint32
 
 func `$`*(frm: Frame): string {.raises: [].} =
   result = ""
