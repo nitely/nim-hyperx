@@ -74,7 +74,7 @@ testAsync "cancel concurrently":
 testAsync "cancel task":
   var checked = 0
   var client = newClient(localHost, localPort)
-  var cancelFut: Future[void]
+  var cancelFut = default(Future[void])
   with client:
     let strm = client.newClientStream()
     try:
@@ -93,3 +93,55 @@ testAsync "cancel task":
       doAssert err.msg == "foo"
   await cancelFut
   doAssert checked == 1
+
+testAsync "graceful close":
+  var checked = 0
+  var client = newClient(localHost, localPort)
+  with client:
+    let strm = client.newClientStream()
+    with strm:
+      var headers = defaultHeaders
+      headers.add ("x-no-echo-headers", "true")
+      headers.add ("x-graceful-close-remote", "true")
+      await strm.sendHeaders(headers, finish = false)
+      var data = new string
+      await strm.recvHeaders(data)
+      doAssert data[] == ":status: 200\r\n"
+      data[] = "foobar"
+      await strm.sendBody(data, finish = true)
+      data[] = ""
+      await strm.recvBody(data)
+      doAssert data[] == "foobar"
+      inc checked
+    try:
+      discard client.newClientStream()
+    except GracefulShutdownError:
+      inc checked
+  doAssert checked == 2
+
+testAsync "send after graceful close":
+  var checked = 0
+  var client = newClient(localHost, localPort)
+  with client:
+    # This is not correct usage
+    let strm = client.newClientStream()
+    let strm2 = client.newClientStream()
+    with strm:
+      var headers = defaultHeaders
+      headers.add ("x-graceful-close-remote", "true")
+      await strm.sendHeaders(headers, finish = true)
+      var data = new string
+      await strm.recvHeaders(data)
+      doAssert data[] == ":status: 200\r\n"
+      await strm.recvBody(data)
+      inc checked
+    # XXX doAssert strm2.isClosed
+    try:
+      with strm2:
+        await strm2.sendHeaders(defaultHeaders, finish = true)
+        var data = new string
+        await strm2.recvHeaders(data)
+        doAssert false
+    except HyperxError:
+      inc checked
+  doAssert checked == 2

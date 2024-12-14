@@ -625,7 +625,7 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
       let sid = frm.lastStreamId()
       for strm in values client.streams:
         if strm.id.uint32 > sid:
-          client.streams.close(strm.id)
+          strm.close()
   else:
     doAssert frm.typ notin connFrmAllowed
     raise newConnError(errProtocolError)
