@@ -652,18 +652,14 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
     check frm.sid.int mod 2 != 0, newConnError(errProtocolError)
     if client.typ == ctServer and
-        frm.sid.StreamId > client.currStreamId:
+        frm.sid.StreamId > client.currStreamId and
+        not client.isGracefulShutdown:
       check client.streams.len <= stgServerMaxConcurrentStreams,
         newConnError(errProtocolError)
-      if client.isGracefulShutdown:
-        await client.send newGoAwayFrame(
-          client.maxPeerStreamIdSeen.int, errNoError.int
-        )
-      else:
-        client.currStreamId = frm.sid.StreamId
-        # we do not store idle streams, so no need to close them
-        let strm = client.streams.open(frm.sid.StreamId, client.peerWindowSize.int32)
-        await client.streamOpenedMsgs.put strm
+      client.currStreamId = frm.sid.StreamId
+      # we do not store idle streams, so no need to close them
+      let strm = client.streams.open(frm.sid.StreamId, client.peerWindowSize.int32)
+      await client.streamOpenedMsgs.put strm
     if frm.typ == frmtHeaders:
       headers.setLen 0
       client.hpackDecode(headers, frm.payload)
@@ -686,6 +682,9 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       if client.typ == ctServer and
           frm.sid.StreamId > client.currStreamId:
         doAssert client.isGracefulShutdown
+        await client.send newGoAwayFrame(
+          client.maxPeerStreamIdSeen.int, errNoError.int
+        )
       else:
         check frm.typ in {frmtRstStream, frmtWindowUpdate},
           newConnError errStreamClosed
