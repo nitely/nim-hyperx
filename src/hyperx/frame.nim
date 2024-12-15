@@ -4,6 +4,22 @@ import ./utils
 
 template ones(n: untyped): uint = (1.uint shl n) - 1
 
+template assignAt(s: var seq[byte], i: int, x: uint32): untyped =
+  s[i+0] = ((x shr 24) and 8.ones).byte
+  s[i+1] = ((x shr 16) and 8.ones).byte
+  s[i+2] = ((x shr 8) and 8.ones).byte
+  s[i+3] = (x and 8.ones).byte
+
+template u32At(s: openArray[byte], i: int, x: var uint32): untyped =
+  x = 0
+  x += s[i+0].uint32 shl 24
+  x += s[i+1].uint32 shl 16
+  x += s[i+2].uint32 shl 8
+  x += s[i+3].uint32
+
+proc clearBit(v: var uint32, bit: int) {.raises: [].} =
+  v = v and not (1'u32 shl bit)
+
 const
   frmHeaderSize* = 9  # 9 bytes = 72 bits
   frmPrioritySize* = 5
@@ -101,12 +117,6 @@ proc `==`*(a, b: FrmSid): bool {.borrow.}
 func `+=`*(a: var FrmSid, b: uint) {.raises: [].} =
   a = (a.uint + b).FrmSid
 
-proc clearBit(v: var FrmSid, bit: int) {.raises: [].} =
-  v = FrmSid(v.uint and not (1'u32 shl bit))
-
-proc clearBit(v: var uint, bit: int) {.raises: [].} =
-  v = v and not (1'u32 shl bit)
-
 const
   frmSidMain* = 0x00'u32.FrmSid
 
@@ -171,12 +181,10 @@ func flags2(frm: Frame): FrmFlags {.raises: [].} =
   result = frm.s[4].FrmFlags
 
 func sid*(frm: Frame): FrmSid {.raises: [].} =
-  result = FrmSid(0)
-  result += frm.s[5].uint shl 24
-  result += frm.s[6].uint shl 16
-  result += frm.s[7].uint shl 8
-  result += frm.s[8].uint
-  result.clearBit 31  # clear reserved byte
+  var sid = 0'u32
+  u32At(frm.s, 5, sid)
+  sid.clearBit 31
+  return FrmSid sid
 
 func setPayloadLen*(frm: Frame, n: FrmPayloadLen) {.raises: [].} =
   doAssert n <= 24.ones.uint
@@ -192,10 +200,7 @@ func setFlags*(frm: Frame, f: FrmFlags) {.raises: [].} =
 
 func setSid*(frm: Frame, sid: FrmSid) {.raises: [].} =
   ## Set the stream ID
-  frm.s[5] = ((sid.uint shr 24) and 8.ones).byte
-  frm.s[6] = ((sid.uint shr 16) and 8.ones).byte
-  frm.s[7] = ((sid.uint shr 8) and 8.ones).byte
-  frm.s[8] = (sid.uint and 8.ones).byte
+  frm.s.assignAt(5, sid.uint32)
 
 func add*(frm: Frame, payload: openArray[byte]) {.raises: [].} =
   frm.s.add payload
@@ -224,12 +229,6 @@ func isPadded*(frm: Frame): bool {.raises: [].} =
 
 func hasPrio*(frm: Frame): bool {.raises: [].} =
   frmfPriority in frm.flags and frm.typ == frmtHeaders
-
-template assignAt(s: var seq[byte], i: int, x: uint32): untyped =
-  s[i+0] = ((x shr 24) and 8.ones).byte
-  s[i+1] = ((x shr 16) and 8.ones).byte
-  s[i+2] = ((x shr 8) and 8.ones).byte
-  s[i+3] = (x and 8.ones).byte
 
 func newGoAwayFrame*(
   lastSid, errorCode: int
@@ -325,72 +324,48 @@ iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline, raises: [].} =
       dec skip[id.int]
       if skip[id.int] == 0:
         value = 0'u32
-        value += frm.s[i+2].uint32 shl 24
-        value += frm.s[i+3].uint32 shl 16
-        value += frm.s[i+4].uint32 shl 8
-        value += frm.s[i+5].uint32
+        u32At(frm.s, i+2, value)
         yield (id.FrmSetting, value)
     # else skip
     i += frmSettingsSize
 
 func prioDependency*(prio: openArray[byte]): FrmSid {.raises: [].} =
-  result = FrmSid(0)
-  result += prio[0].uint shl 24
-  result += prio[1].uint shl 16
-  result += prio[2].uint shl 8
-  result += prio[3].uint
-  result.clearBit 31  # clear reserved byte
+  var sid = 0'u32
+  u32At(prio, 0, sid)
+  sid.clearBit 31
+  return FrmSid sid
 
 func strmDependency*(frm: Frame): FrmSid {.raises: [].} =
   doAssert frm.typ == frmtPriority
-  result = FrmSid(0)
-  result += frm.s[frmHeaderSize+0].uint shl 24
-  result += frm.s[frmHeaderSize+1].uint shl 16
-  result += frm.s[frmHeaderSize+2].uint shl 8
-  result += frm.s[frmHeaderSize+3].uint
-  result.clearBit 31  # clear reserved byte
+  var sid = 0'u32
+  u32At(frm.s, frmHeaderSize, sid)
+  sid.clearBit 31
+  return FrmSid sid
 
-func windowSizeInc*(frm: Frame): uint {.raises: [].} =
+func windowSizeInc*(frm: Frame): uint32 {.raises: [].} =
   doAssert frm.typ == frmtWindowUpdate
-  result = 0
-  result += frm.s[frmHeaderSize+0].uint shl 24
-  result += frm.s[frmHeaderSize+1].uint shl 16
-  result += frm.s[frmHeaderSize+2].uint shl 8
-  result += frm.s[frmHeaderSize+3].uint
+  u32At(frm.s, frmHeaderSize, result)
   result.clearBit 31  # clear reserved byte
 
 func errorCode*(frm: Frame): uint32 {.raises: [].} =
-  result = 0'u32
+  result = 0
   case frm.typ
   of frmtRstStream:
-    result += frm.s[frmHeaderSize+0].uint32 shl 24
-    result += frm.s[frmHeaderSize+1].uint32 shl 16
-    result += frm.s[frmHeaderSize+2].uint32 shl 8
-    result += frm.s[frmHeaderSize+3].uint32
+    u32At(frm.s, frmHeaderSize, result)
   of frmtGoAway:
-    result += frm.s[frmHeaderSize+4].uint32 shl 24
-    result += frm.s[frmHeaderSize+5].uint32 shl 16
-    result += frm.s[frmHeaderSize+6].uint32 shl 8
-    result += frm.s[frmHeaderSize+7].uint32
+    u32At(frm.s, frmHeaderSize+4, result)
   else:
     doAssert false
 
 func pingData*(frm: Frame): uint32 {.raises: [].} =
   # note we ignore the last 4 bytes
   doAssert frm.typ == frmtPing
-  result = 0
-  result += frm.s[frmHeaderSize+0].uint32 shl 24
-  result += frm.s[frmHeaderSize+1].uint32 shl 16
-  result += frm.s[frmHeaderSize+2].uint32 shl 8
-  result += frm.s[frmHeaderSize+3].uint32
+  u32At(frm.s, frmHeaderSize, result)
 
 func lastStreamId*(frm: Frame): uint32 =
   doAssert frm.typ == frmtGoAway
-  result = 0'u32
-  result += frm.s[frmHeaderSize+0].uint32 shl 24
-  result += frm.s[frmHeaderSize+1].uint32 shl 16
-  result += frm.s[frmHeaderSize+2].uint32 shl 8
-  result += frm.s[frmHeaderSize+3].uint32
+  u32At(frm.s, frmHeaderSize, result)
+  result.clearBit 31
 
 func `$`*(frm: Frame): string {.raises: [].} =
   result = ""
@@ -411,31 +386,19 @@ func debugPayload*(frm: Frame): string {.raises: [].} =
     result.add "===Payload==="
     case frm.typ
     of frmtRstStream:
-      var errCode = 0.uint
-      errCode += frm.s[i+0].uint shl 24
-      errCode += frm.s[i+1].uint shl 16
-      errCode += frm.s[i+2].uint shl 8
-      errCode += frm.s[i+3].uint
+      var errCode = 0'u32
+      u32At(frm.s, i, errCode)
       result.add fmt("\nError Code {$errCode}")
     of frmtGoAway:
-      var lastStreamId = 0.uint
-      lastStreamId += frm.s[i+0].uint shl 24
-      lastStreamId += frm.s[i+1].uint shl 16
-      lastStreamId += frm.s[i+2].uint shl 8
-      lastStreamId += frm.s[i+3].uint
+      var lastStreamId = 0'u32
+      u32At(frm.s, i, lastStreamId)
       result.add fmt("\nLast-Stream-ID {$lastStreamId}")
-      var errCode = 0.uint
-      errCode += frm.s[i+4].uint shl 24
-      errCode += frm.s[i+5].uint shl 16
-      errCode += frm.s[i+6].uint shl 8
-      errCode += frm.s[i+7].uint
+      var errCode = 0'u32
+      u32At(frm.s, i+4, errCode)
       result.add fmt("\nError Code {$errCode}")
     of frmtWindowUpdate:
-      var wsIncrement = 0.uint
-      wsIncrement += frm.s[i+0].uint shl 24
-      wsIncrement += frm.s[i+1].uint shl 16
-      wsIncrement += frm.s[i+2].uint shl 8
-      wsIncrement += frm.s[i+3].uint
+      var wsIncrement = 0'u32
+      u32At(frm.s, i, wsIncrement)
       result.add fmt("\nWindow Size Increment {$wsIncrement}")
     of frmtSettings:
       if frm.payloadLen.int mod 6 != 0:
@@ -446,11 +409,8 @@ func debugPayload*(frm: Frame): string {.raises: [].} =
         iden += frm.s[i].uint shl 8
         iden += frm.s[i+1].uint
         result.add fmt("\nIdentifier {$iden}")
-        var value = 0.uint
-        value += frm.s[i+2].uint shl 24
-        value += frm.s[i+3].uint shl 16
-        value += frm.s[i+4].uint shl 8
-        value += frm.s[i+5].uint
+        var value = 0'u32
+        u32At(frm.s, i+2, value)
         result.add fmt("\nValue {$value}")
         i += 6
     of frmtPing:
