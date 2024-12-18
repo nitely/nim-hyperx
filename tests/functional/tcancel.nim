@@ -37,7 +37,7 @@ proc recv(strm: ClientStream) {.async.} =
   data[].setLen 0
   while not strm.recvEnded:
     await strm.recvBody(data)
-    await strm.cancel(errCancel)  # CANCEL
+    await strm.cancel(hyxCancel)  # CANCEL
 
 proc spawnStream(
   client: ClientContext,
@@ -49,14 +49,14 @@ proc spawnStream(
     let recvFut = strm.recv()
     try:
       await recvFut
-    except StrmError as err:
-      doAssert err.typ == hxLocalErr
-      doAssert err.code == errStreamClosed
+    except HyperxStrmError as err:
+      doAssert err.typ == hyxLocalErr
+      doAssert err.code == hyxStreamClosed
     try:
       await sendFut
-    except StrmError as err:
-      doAssert err.typ == hxLocalErr
-      doAssert err.code == errStreamClosed
+    except HyperxStrmError as err:
+      doAssert err.typ == hyxLocalErr
+      doAssert err.code == hyxStreamClosed
     inc checked[]
     return
 

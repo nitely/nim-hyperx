@@ -6,7 +6,7 @@ from std/strutils import contains
 import std/asyncdispatch
 import ../../src/hyperx/server
 import ./tutils
-from ../../src/hyperx/errors import errCancel
+from ../../src/hyperx/errors import hyxCancel
 
 const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
@@ -26,7 +26,7 @@ proc processStream(strm: ClientStream) {.async.} =
     await strm.sendHeaders(
       @[("x-trailer", "bye")], finish = true
     )
-    await strm.cancel(errCancel)
+    await strm.cancel(hyxCancel)
   if "x-graceful-close-remote" in data[]:
     await strm.client.gracefulClose()
   if "x-no-echo-headers" notin data[]:

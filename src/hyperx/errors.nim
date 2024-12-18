@@ -1,97 +1,107 @@
 ## Exception types
 
+import ./frame
+
 # https://httpwg.org/specs/rfc9113.html#ErrorCodes
-# XXX HyperxErrCode
 type
-  ErrorCode* = distinct uint8
+  HyperxErrCode* = FrmErrCode
 const
-  errNoError* = 0x00.ErrorCode
-  errProtocolError* = 0x01.ErrorCode
-  errInternalError* = 0x02.ErrorCode
-  errFlowControlError* = 0x03.ErrorCode
-  errSettingsTimeout* = 0x04.ErrorCode
-  errStreamClosed* = 0x05.ErrorCode
-  errFrameSizeError* = 0x06.ErrorCode
-  errRefusedStream* = 0x07.ErrorCode
-  errCancel* = 0x08.ErrorCode
-  errCompressionError* = 0x09.ErrorCode
-  errConnectError* = 0x0a.ErrorCode
-  errEnhanceYourCalm* = 0x0b.ErrorCode
-  errInadequateSecurity* = 0x0c.ErrorCode
-  errHttp11Required* = 0x0d.ErrorCode
-  errUnknown = 0xff.ErrorCode  # not in the spec
+  hyxNoError* = frmeNoError
+  hyxProtocolError* = frmeProtocolError
+  hyxInternalError* = frmeInternalError
+  hyxFlowControlError* = frmeFlowControlError
+  hyxSettingsTimeout* = frmeSettingsTimeout
+  hyxStreamClosed* = frmeStreamClosed
+  hyxFrameSizeError* = frmeFrameSizeError
+  hyxRefusedStream* = frmeRefusedStream
+  hyxCancel* = frmeCancel
+  hyxCompressionError* = frmeCompressionError
+  hyxConnectError* = frmeConnectError
+  hyxEnhanceYourCalm* = frmeEnhanceYourCalm
+  hyxInadequateSecurity* = frmeInadequateSecurity
+  hyxHttp11Required* = frmeHttp11Required
+  hyxUnknown = 0xff.HyperxErrCode  # not in the spec
 
-proc `==`*(a, b: ErrorCode): bool {.borrow.}
+proc `==`*(a, b: HyperxErrCode): bool {.borrow.}
 
-func `$`(errCode: ErrorCode): string {.raises: [].} =
+func `$`(errCode: HyperxErrCode): string {.raises: [].} =
   case errCode
-  of errNoError: "NO_ERROR"
-  of errProtocolError: "PROTOCOL_ERROR"
-  of errInternalError: "INTERNAL_ERROR"
-  of errFlowControlError: "FLOW_CONTROL_ERROR"
-  of errSettingsTimeout: "SETTINGS_TIMEOUT"
-  of errStreamClosed: "STREAM_CLOSED"
-  of errFrameSizeError: "FRAME_SIZE_ERROR"
-  of errRefusedStream: "REFUSED_STREAM"
-  of errCancel: "CANCEL"
-  of errCompressionError: "COMPRESSION_ERROR"
-  of errConnectError: "CONNECT_ERROR"
-  of errEnhanceYourCalm: "ENHANCE_YOUR_CALM"
-  of errInadequateSecurity: "INADEQUATE_SECURITY"
-  of errHttp11Required: "HTTP_1_1_REQUIRED"
+  of hyxNoError: "NO_ERROR"
+  of hyxProtocolError: "PROTOCOL_ERROR"
+  of hyxInternalError: "INTERNAL_ERROR"
+  of hyxFlowControlError: "FLOW_CONTROL_ERROR"
+  of hyxSettingsTimeout: "SETTINGS_TIMEOUT"
+  of hyxStreamClosed: "STREAM_CLOSED"
+  of hyxFrameSizeError: "FRAME_SIZE_ERROR"
+  of hyxRefusedStream: "REFUSED_STREAM"
+  of hyxCancel: "CANCEL"
+  of hyxCompressionError: "COMPRESSION_ERROR"
+  of hyxConnectError: "CONNECT_ERROR"
+  of hyxEnhanceYourCalm: "ENHANCE_YOUR_CALM"
+  of hyxInadequateSecurity: "INADEQUATE_SECURITY"
+  of hyxHttp11Required: "HTTP_1_1_REQUIRED"
   else: "UNKNOWN ERROR CODE"
 
-func toErrorCode(e: uint32): ErrorCode {.raises: [].} =
-  if e in errNoError.uint32 .. errHttp11Required.uint32:
-    return e.ErrorCode
-  return errUnknown
+func toErrorCode(e: uint32): HyperxErrCode {.raises: [].} =
+  if e in hyxNoError.uint32 .. hyxHttp11Required.uint32:
+    return e.HyperxErrCode
+  return hyxUnknown
 
-# XXX remove ConnError and StrmError; expose code in Hyperx*
 type
   HyperxErrTyp* = enum
-    hxLocalErr, hxRemoteErr
+    hyxLocalErr, hyxRemoteErr
   HyperxError* = object of CatchableError
+    #typ*: HyperxErrTyp
+    #code*: HyperxErrCode
   HyperxConnError* = object of HyperxError
+    code*: HyperxErrCode
   HyperxStrmError* = object of HyperxError
-  ConnClosedError* = object of HyperxConnError
-  ConnError* = object of HyperxConnError
-    code*: ErrorCode
-  GracefulShutdownError* = ConnError
-  StrmError* = object of HyperxStrmError
     typ*: HyperxErrTyp
-    code*: ErrorCode
+    code*: HyperxErrCode
+  ConnClosedError* = object of HyperxConnError
+  GracefulShutdownError* = HyperxConnError
   QueueClosedError* = object of HyperxError
 
-func newHyperxConnError*(msg: string): ref HyperxConnError {.raises: [].} =
-  result = (ref HyperxConnError)(msg: msg)
-
 func newConnClosedError*: ref ConnClosedError {.raises: [].} =
-  result = (ref ConnClosedError)(msg: "Connection Closed")
+  result = (ref ConnClosedError)(code: hyxUnknown, msg: "Connection Closed")
 
-func newConnError*(errCode: ErrorCode): ref ConnError {.raises: [].} =
-  result = (ref ConnError)(code: errCode, msg: "Connection Error: " & $errCode)
+func newConnError*(msg: string): ref HyperxConnError {.raises: [].} =
+  result = (ref HyperxConnError)(code: hyxInternalError, msg: msg)
 
-func newConnError*(errCode: uint32): ref ConnError {.raises: [].} =
-  result = (ref ConnError)(
+func newConnError*(errCode: HyperxErrCode): ref HyperxConnError {.raises: [].} =
+  result = (ref HyperxConnError)(code: errCode, msg: "Connection Error: " & $errCode)
+
+func newConnError*(errCode: uint32): ref HyperxConnError {.raises: [].} =
+  result = (ref HyperxConnError)(
     code: errCode.toErrorCode,
     msg: "Connection Error: " & $errCode.toErrorCode
   )
 
-func newStrmError*(errCode: ErrorCode, typ = hxLocalErr): ref StrmError {.raises: [].} =
-  let msg = case typ
-    of hxLocalErr: "Stream Error: " & $errCode
-    of hxRemoteErr: "Got Rst Error: " & $errCode
-  result = (ref StrmError)(typ: typ, code: errCode, msg: msg)
+# XXX fix
+func newError*(err: ref HyperxError): ref HyperxConnError {.raises: [].} =
+  result = (ref HyperxConnError)(code: hyxUnknown, msg: err.msg)
 
-func newStrmError*(errCode: uint32, typ = hxLocalErr): ref StrmError {.raises: [].} =
+func newStrmError*(
+  errCode: HyperxErrCode, typ = hyxLocalErr
+): ref HyperxStrmError {.raises: [].} =
+  let msg = case typ
+    of hyxLocalErr: "Stream Error: " & $errCode
+    of hyxRemoteErr: "Got Rst Error: " & $errCode
+  result = (ref HyperxStrmError)(typ: typ, code: errCode, msg: msg)
+
+func newStrmError*(
+  errCode: uint32, typ = hyxLocalErr
+): ref HyperxStrmError {.raises: [].} =
   result = newStrmError(errCode.toErrorCode, typ)
 
-func newError*(err: ref StrmError): ref StrmError {.raises: [].} =
-  result = (ref StrmError)(
+func newError*(err: ref HyperxStrmError): ref HyperxStrmError {.raises: [].} =
+  result = (ref HyperxStrmError)(
     typ: err.typ, code: err.code, msg: err.msg
   )
 
-func newErrorOrDefault*(err, default: ref StrmError): ref StrmError {.raises: [].} =
+func newErrorOrDefault*(
+  err, default: ref HyperxStrmError
+): ref HyperxStrmError {.raises: [].} =
   if err != nil:
     return newError(err)
   else:
@@ -99,5 +109,5 @@ func newErrorOrDefault*(err, default: ref StrmError): ref StrmError {.raises: []
 
 func newGracefulShutdownError*(): ref GracefulShutdownError {.raises: [].} =
   result = (ref GracefulShutdownError)(
-    code: errNoError, msg: "Connection Error: " & $errNoError
+    code: hyxNoError, msg: "Connection Error: " & $hyxNoError
   )
