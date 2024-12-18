@@ -420,7 +420,7 @@ testAsync "stream error NO_ERROR handling":
     var frm = frame(frmtHeaders, sid, @[frmfEndHeaders, frmfEndStream])
     frm.add hencode(tc, headers).toBytes
     await tc.reply frm
-    await tc.reply newRstStreamFrame(sid, frmeNoError.int)
+    await tc.reply newRstStreamFrame(sid, frmeNoError)
   let dataIn = newStringRef()
   let dataOut = newStringRef("123")
   var tc = newTestClient("foo.bar")
@@ -445,7 +445,7 @@ testAsync "stream NO_ERROR before request completes":
     var frm = frame(frmtHeaders, sid, @[frmfEndHeaders, frmfEndStream])
     frm.add hencode(tc, headers).toBytes
     await tc.reply frm
-    await tc.reply newRstStreamFrame(sid, frmeNoError.int)
+    await tc.reply newRstStreamFrame(sid, frmeNoError)
   let dataIn = newStringRef()
   let dataOut = newStringRef("123")
   var tc = newTestClient("foo.bar")
