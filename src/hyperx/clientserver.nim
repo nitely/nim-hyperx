@@ -142,7 +142,7 @@ type
     peerWindowUpdateSig: SignalAsync
     windowPending, windowProcessed: int
     windowUpdateSig: SignalAsync
-    error*: ref HyperxError  # XXX HyperxConnError
+    error*: ref HyperxConnError
     when defined(hyperxStats):
       frmsSent: int
       frmsSentTyp: array[10, int]
@@ -334,7 +334,14 @@ proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
 proc send(client: ClientContext, frm: Frame) {.async.} =
   try:
     await client.sendNaked(frm)
-  except HyperxConnError, OsError, SslError:
+  except HyperxConnError as err:
+    if client.isConnected:
+      debugInfo err.getStackTrace()
+      debugInfo err.msg
+      client.error = newError err
+      client.close()
+    raise err
+  except OsError, SslError:
     let err = getCurrentException()
     if client.isConnected:
       debugInfo err.getStackTrace()
@@ -520,7 +527,7 @@ proc recvTask(client: ClientContext) {.async.} =
     debugInfo err.getStackTrace()
     debugInfo err.msg
     if client.isConnected:
-      client.error = newConnError(err.code)
+      client.error = newError err
       await client.sendSilently newGoAwayFrame(
         client.maxPeerStreamIdSeen, err.code
       )
@@ -614,7 +621,7 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
           strm.pingSig.trigger()
   of frmtGoAway:
     client.isGracefulShutdown = true
-    client.error ?= newConnError frm.errCode()
+    client.error ?= newConnError(frm.errCode(), hyxRemoteErr)
     # streams are never created by ctServer,
     # so there are no streams to close
     if client.typ == ctClient:
@@ -709,7 +716,7 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     debugInfo err.getStackTrace()
     debugInfo err.msg
     if client.isConnected:
-      client.error = newConnError(err.code)
+      client.error = newError err
       await client.sendSilently newGoAwayFrame(
         client.maxPeerStreamIdSeen, err.code
       )
@@ -718,12 +725,6 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     debugInfo getCurrentException().getStackTrace()
     debugInfo getCurrentException().msg
     doAssert false
-  except HyperxError as err:  # XXX remove
-    if client.isConnected:
-      debugInfo err.getStackTrace()
-      debugInfo err.msg
-      client.error = err  # XXX fix
-    raise err
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
@@ -748,11 +749,11 @@ proc windowUpdateTask(client: ClientContext) {.async.} =
     await client.windowUpdateTaskNaked()
   except QueueClosedError:
     doAssert not client.isConnected
-  except HyperxError as err:
+  except HyperxConnError as err:
     if client.isConnected:
       debugInfo err.getStackTrace()
       debugInfo err.msg
-      client.error = err
+      client.error = newError err
     raise err
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -1029,7 +1030,7 @@ proc recvTask(strm: ClientStream) {.async.} =
     debugInfo err.msg
     connErr = true
     if client.isConnected:
-      client.error = newConnError(err.code)
+      client.error = newError err
       await client.sendSilently newGoAwayFrame(
         client.maxPeerStreamIdSeen, err.code
       )
