@@ -335,19 +335,17 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
   try:
     await client.sendNaked(frm)
   except HyperxConnError as err:
-    if client.isConnected:
-      debugInfo err.getStackTrace()
-      debugInfo err.msg
-      client.error = newError err
-      client.close()
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    client.error ?= newError err
+    client.close()
     raise err
   except OsError, SslError:
     let err = getCurrentException()
-    if client.isConnected:
-      debugInfo err.getStackTrace()
-      debugInfo err.msg
-      client.error = newConnError(err.msg)
-      client.close()
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    client.error ?= newConnError(err.msg)
+    client.close()
     raise newConnError(err.msg)
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
@@ -412,7 +410,7 @@ proc handshake(client: ClientContext) {.async.} =
     debugInfo err.msg
     doAssert client.isConnected
     # XXX err.msg includes a traceback for SslError but it should not
-    client.error = newConnError(err.msg)
+    client.error ?= newConnError(err.msg)
     client.close()
     raise newConnError(err.msg)
 
@@ -526,18 +524,16 @@ proc recvTask(client: ClientContext) {.async.} =
   except HyperxConnError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    if client.isConnected:
-      client.error = newError err
-      await client.sendSilently newGoAwayFrame(
-        client.maxPeerStreamIdSeen, err.code
-      )
+    client.error ?= newError err
+    await client.sendSilently newGoAwayFrame(
+      client.maxPeerStreamIdSeen, err.code
+    )
     raise err
   except OsError, SslError:
     let err = getCurrentException()
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    if client.isConnected:
-      client.error = newConnError(err.msg)
+    client.error ?= newConnError(err.msg)
     raise newConnError(err.msg)
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -715,11 +711,10 @@ proc recvDispatcher(client: ClientContext) {.async.} =
   except HyperxConnError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    if client.isConnected:
-      client.error = newError err
-      await client.sendSilently newGoAwayFrame(
-        client.maxPeerStreamIdSeen, err.code
-      )
+    client.error ?= newError err
+    await client.sendSilently newGoAwayFrame(
+      client.maxPeerStreamIdSeen, err.code
+    )
     raise err
   except HyperxStrmError:
     debugInfo getCurrentException().getStackTrace()
@@ -750,10 +745,9 @@ proc windowUpdateTask(client: ClientContext) {.async.} =
   except QueueClosedError:
     doAssert not client.isConnected
   except HyperxConnError as err:
-    if client.isConnected:
-      debugInfo err.getStackTrace()
-      debugInfo err.msg
-      client.error = newError err
+    debugInfo err.getStackTrace()
+    debugInfo err.msg
+    client.error ?= newError err
     raise err
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -1016,7 +1010,6 @@ proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
 proc recvTask(strm: ClientStream) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
-  var connErr = false
   try:
     await recvHeadersTaskNaked(strm)
     if strm.stateRecv != csStateEnded:
@@ -1028,12 +1021,11 @@ proc recvTask(strm: ClientStream) {.async.} =
   except HyperxConnError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    connErr = true
-    if client.isConnected:
-      client.error = newError err
-      await client.sendSilently newGoAwayFrame(
-        client.maxPeerStreamIdSeen, err.code
-      )
+    client.error ?= newError err
+    await client.sendSilently newGoAwayFrame(
+      client.maxPeerStreamIdSeen, err.code
+    )
+    client.close()
     raise err
   except HyperxStrmError as err:
     debugInfo err.getStackTrace()
@@ -1047,8 +1039,6 @@ proc recvTask(strm: ClientStream) {.async.} =
     debugInfo err.msg
     raise err
   finally:
-    if connErr:
-      client.close()
     strm.close()
 
 proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
