@@ -1,6 +1,5 @@
 import std/strutils
 import std/strformat
-import ./utils
 
 template ones(n: untyped): uint = (1.uint shl n) - 1
 
@@ -113,9 +112,11 @@ type
   FrmSid* = distinct uint32  #range[0 .. 31.ones.int]
 
 proc `==`*(a, b: FrmSid): bool {.borrow.}
+proc `+=`*(a: var FrmSid, b: FrmSid) {.borrow.}
+proc `<`*(a, b: FrmSid): bool {.borrow.}
 
-func `+=`*(a: var FrmSid, b: uint) {.raises: [].} =
-  a = (a.uint + b).FrmSid
+#func `+=`*(a: var FrmSid, b: uint) {.raises: [].} =
+#  a = (a.uint + b).FrmSid
 
 const
   frmSidMain* = 0x00'u32.FrmSid
@@ -231,7 +232,7 @@ func hasPrio*(frm: Frame): bool {.raises: [].} =
   frmfPriority in frm.flags and frm.typ == frmtHeaders
 
 func newGoAwayFrame*(
-  lastSid, errorCode: int
+  lastSid: FrmSid, errorCode: FrmErrCode
 ): Frame {.raises: [].} =
   result = newFrame(frmGoAwaySize)
   result.setTyp frmtGoAway
@@ -241,7 +242,7 @@ func newGoAwayFrame*(
 
 func newRstStreamFrame*(
   sid: FrmSid,
-  errorCode: int
+  errorCode: FrmErrCode
 ): Frame {.raises: [].} =
   result = newFrame(frmRstStreamSize)
   result.setTyp frmtRstStream
@@ -347,7 +348,7 @@ func windowSizeInc*(frm: Frame): uint32 {.raises: [].} =
   u32At(frm.s, frmHeaderSize, result)
   result.clearBit 31  # clear reserved byte
 
-func errorCode*(frm: Frame): uint32 {.raises: [].} =
+func errCode*(frm: Frame): uint32 {.raises: [].} =
   result = 0
   case frm.typ
   of frmtRstStream:
@@ -368,70 +369,67 @@ func lastStreamId*(frm: Frame): uint32 =
   result.clearBit 31
 
 func `$`*(frm: Frame): string {.raises: [].} =
-  result = ""
-  untrackExceptions:
-    result = fmt"""
-      ===Frame===
-      sid: {$frm.sid.int}
-      typ: {$frm.typ.int}
-      ack: {$(frmfAck in frm.flags)}
-      endStrm: {$(frmfEndStream in frm.flags)}
-      payload len: {$frm.payloadLen.int}
-      ===========""".unindent
+  result = fmt"""
+    ===Frame===
+    sid: {$frm.sid.int}
+    typ: {$frm.typ.int}
+    ack: {$(frmfAck in frm.flags)}
+    endStrm: {$(frmfEndStream in frm.flags)}
+    payload len: {$frm.payloadLen.int}
+    ===========""".unindent
 
 func debugPayload*(frm: Frame): string {.raises: [].} =
   result = ""
-  untrackExceptions:
-    var i = frmHeaderSize
-    result.add "===Payload==="
-    case frm.typ
-    of frmtRstStream:
-      var errCode = 0'u32
-      u32At(frm.s, i, errCode)
-      result.add fmt("\nError Code {$errCode}")
-    of frmtGoAway:
-      var lastStreamId = 0'u32
-      u32At(frm.s, i, lastStreamId)
-      result.add fmt("\nLast-Stream-ID {$lastStreamId}")
-      var errCode = 0'u32
-      u32At(frm.s, i+4, errCode)
-      result.add fmt("\nError Code {$errCode}")
-    of frmtWindowUpdate:
-      var wsIncrement = 0'u32
-      u32At(frm.s, i, wsIncrement)
-      result.add fmt("\nWindow Size Increment {$wsIncrement}")
-    of frmtSettings:
-      if frm.payloadLen.int mod 6 != 0:
-        result.add "\nbad payload"
-        return
-      for _ in 0 .. int(frm.payloadLen.int div 6)-1:
-        var iden = 0.uint
-        iden += frm.s[i].uint shl 8
-        iden += frm.s[i+1].uint
-        result.add fmt("\nIdentifier {$iden}")
-        var value = 0'u32
-        u32At(frm.s, i+2, value)
-        result.add fmt("\nValue {$value}")
-        i += 6
-    of frmtPing:
-      var value = 0
-      for x in frm.payload:
-        value += x.int
-      result.add fmt("\nPing {$value}")
-    of frmtData:
-      if frm.payload.len > 0:
-        result.add "\n"
-        var x = 0
-        for byt in frm.payload:
-          result.add byt.char
-          inc x
-          if x == 10:
-            break
-        if frm.payload.len > 10:
-          result.add "[truncated]"
-    else:
-      result.add "\nUnimplemented debug"
-    result.add "\n============="
+  var i = frmHeaderSize
+  result.add "===Payload==="
+  case frm.typ
+  of frmtRstStream:
+    var errCode = 0'u32
+    u32At(frm.s, i, errCode)
+    result.add fmt("\nError Code {$errCode}")
+  of frmtGoAway:
+    var lastStreamId = 0'u32
+    u32At(frm.s, i, lastStreamId)
+    result.add fmt("\nLast-Stream-ID {$lastStreamId}")
+    var errCode = 0'u32
+    u32At(frm.s, i+4, errCode)
+    result.add fmt("\nError Code {$errCode}")
+  of frmtWindowUpdate:
+    var wsIncrement = 0'u32
+    u32At(frm.s, i, wsIncrement)
+    result.add fmt("\nWindow Size Increment {$wsIncrement}")
+  of frmtSettings:
+    if frm.payloadLen.int mod 6 != 0:
+      result.add "\nbad payload"
+      return
+    for _ in 0 .. int(frm.payloadLen.int div 6)-1:
+      var iden = 0.uint
+      iden += frm.s[i].uint shl 8
+      iden += frm.s[i+1].uint
+      result.add fmt("\nIdentifier {$iden}")
+      var value = 0'u32
+      u32At(frm.s, i+2, value)
+      result.add fmt("\nValue {$value}")
+      i += 6
+  of frmtPing:
+    var value = 0
+    for x in frm.payload:
+      value += x.int
+    result.add fmt("\nPing {$value}")
+  of frmtData:
+    if frm.payload.len > 0:
+      result.add "\n"
+      var x = 0
+      for byt in frm.payload:
+        result.add byt.char
+        inc x
+        if x == 10:
+          break
+      if frm.payload.len > 10:
+        result.add "[truncated]"
+  else:
+    result.add "\nUnimplemented debug"
+  result.add "\n============="
 
 when isMainModule:
   block:

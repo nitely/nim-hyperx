@@ -203,22 +203,19 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
 func stream(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
   client.streams.get sid
 
-func stream(client: ClientContext, sid: FrmSid): Stream {.raises: [].} =
-  client.stream sid.StreamId
-
 func openMainStream(client: ClientContext): Stream {.raises: [StreamsClosedError].} =
-  doAssert frmSidMain.StreamId notin client.streams
-  result = client.streams.open(frmSidMain.StreamId, client.peerWindowSize.int32)
+  doAssert frmSidMain notin client.streams
+  result = client.streams.open(frmSidMain, client.peerWindowSize.int32)
 
 func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError, GracefulShutdownError].} =
   # XXX some error if max sid is reached
   # XXX error if maxStreams is reached
   doAssert client.typ == ctClient
   check not client.isGracefulShutdown, newGracefulShutdownError()
-  var sid = client.currStreamId.uint32
-  sid += (if sid == 0: 1 else: 2)
-  result = client.streams.open(StreamId sid, client.peerWindowSize.int32)
-  client.currStreamId = StreamId sid
+  var sid = client.currStreamId
+  sid += (if sid == StreamId 0: StreamId 1 else: StreamId 2)
+  result = client.streams.open(sid, client.peerWindowSize.int32)
+  client.currStreamId = sid
 
 func maxPeerStreamIdSeen(client: ClientContext): StreamId {.raises: [].} =
   case client.typ
@@ -387,7 +384,7 @@ proc handshakeNaked(client: ClientContext) {.async.} =
   doAssert client.isConnected
   debugInfo "handshake"
   let strm = client.openMainStream()
-  doAssert strm.id == frmSidMain.StreamId
+  doAssert strm.id == frmSidMain
   check not client.sock.isClosed, newConnClosedError()
   case client.typ
   of ctClient: await client.sock.send(clientHandshakeBlob)
@@ -413,7 +410,7 @@ proc handshake(client: ClientContext) {.async.} =
     raise newHyperxConnError(err.msg)
 
 func doTransitionRecv(s: Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
-  doAssert frm.sid.StreamId == s.id
+  doAssert frm.sid == s.id
   doAssert frm.sid != frmSidMain
   doAssert s.state != strmInvalid
   check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
@@ -525,7 +522,7 @@ proc recvTask(client: ClientContext) {.async.} =
       # XXX close queues
       client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
-        client.maxPeerStreamIdSeen.int, err.code.int
+        client.maxPeerStreamIdSeen, err.code.FrmErrCode
       )
       #client.close()
     raise err
@@ -618,7 +615,7 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
           strm.pingSig.trigger()
   of frmtGoAway:
     client.isGracefulShutdown = true
-    client.error ?= newConnError frm.errorCode()
+    client.error ?= newConnError frm.errCode()
     # streams are never created by ctServer,
     # so there are no streams to close
     if client.typ == ctClient:
@@ -652,13 +649,13 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
     check frm.sid.int mod 2 != 0, newConnError(errProtocolError)
     if client.typ == ctServer and
-        frm.sid.StreamId > client.currStreamId and
+        frm.sid > client.currStreamId and
         not client.isGracefulShutdown:
       check client.streams.len <= stgServerMaxConcurrentStreams,
         newConnError(errProtocolError)
-      client.currStreamId = frm.sid.StreamId
+      client.currStreamId = frm.sid
       # we do not store idle streams, so no need to close them
-      let strm = client.streams.open(frm.sid.StreamId, client.peerWindowSize.int32)
+      let strm = client.streams.open(frm.sid, client.peerWindowSize.int32)
       await client.streamOpenedMsgs.put strm
     if frm.typ == frmtHeaders:
       headers.setLen 0
@@ -674,23 +671,23 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
     if frm.typ == frmtPushPromise:
       check client.typ == ctClient, newConnError(errProtocolError)
     # Process headers even if the stream does not exist
-    if frm.sid.StreamId notin client.streams:
+    if frm.sid notin client.streams:
       if frm.typ == frmtData:
         client.windowProcessed += frm.payloadLen.int
         if client.windowProcessed > stgWindowSize.int div 2:
           client.windowUpdateSig.trigger()
       if client.typ == ctServer and
-          frm.sid.StreamId > client.currStreamId:
+          frm.sid > client.currStreamId:
         doAssert client.isGracefulShutdown
         await client.send newGoAwayFrame(
-          client.maxPeerStreamIdSeen.int, errNoError.int
+          client.maxPeerStreamIdSeen, frmeNoError
         )
       else:
         check frm.typ in {frmtRstStream, frmtWindowUpdate},
           newConnError errStreamClosed
       debugInfo "stream not found " & $frm.sid.int
       continue
-    var stream = client.streams.get frm.sid.StreamId
+    var stream = client.streams.get frm.sid
     if frm.typ == frmtData:
       check stream.windowPending <= stgWindowSize.int - frm.payloadLen.int,
         newConnError(errFlowControlError)
@@ -715,7 +712,7 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     if client.isConnected:
       client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
-        client.maxPeerStreamIdSeen.int, err.code.int
+        client.maxPeerStreamIdSeen, err.code.FrmErrCode
       )
     raise err
   except StrmError:
@@ -886,7 +883,7 @@ func doTransitionSend(s: Stream, frm: Frame) {.raises: [].} =
   # we cannot raise stream errors here because of
   # hpack state the frame needs to be sent or close the conn;
   # could raise stream errors for typ != header
-  doAssert frm.sid.StreamId == s.id
+  doAssert frm.sid == s.id
   doAssert frm.sid != frmSidMain
   doAssert s.state != strmInvalid
   if frm.typ == frmtContinuation:
@@ -919,14 +916,14 @@ proc read(stream: Stream): Future[Frame] {.async.} =
   while true:
     frm = await stream.msgs.get()
     #stream.msgs.getDone()
-    doAssert stream.id == frm.sid.StreamId
+    doAssert stream.id == frm.sid
     doAssert frm.typ in frmStreamAllowed
     # this can raise stream/conn error
     stream.doTransitionRecv frm
     if frm.typ == frmtRstStream:
-      stream.error = newStrmError(frm.errorCode, hxRemoteErr)
+      stream.error = newStrmError(frm.errCode, hxRemoteErr)
       stream.close()
-      raise newStrmError(frm.errorCode, hxRemoteErr)
+      raise newStrmError(frm.errCode, hxRemoteErr)
     if frm.typ == frmtPushPromise:
       raise newStrmError errProtocolError
     if frm.typ == frmtWindowUpdate:
@@ -942,14 +939,12 @@ proc read(stream: Stream): Future[Frame] {.async.} =
   return frm
 
 # this needs to be {.async.} to fail-silently
-proc writeRst(strm: ClientStream, code: ErrorCode) {.async.} =
+proc writeRst(strm: ClientStream, code: FrmErrCode) {.async.} =
   template stream: untyped = strm.stream
   check stream.state in strmStateRstSendAllowed,
     newStrmError errStreamClosed
   strm.stateSend = csStateEnded
-  await strm.write newRstStreamFrame(
-    stream.id.FrmSid, code.int
-  )
+  await strm.write newRstStreamFrame(stream.id, code)
 
 proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
   doAssert strm.stateRecv == csStateOpened
@@ -1037,7 +1032,7 @@ proc recvTask(strm: ClientStream) {.async.} =
     if client.isConnected:
       client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
-        client.maxPeerStreamIdSeen.int, err.code.int
+        client.maxPeerStreamIdSeen, err.code.FrmErrCode
       )
     raise err
   except StrmError as err:
@@ -1045,7 +1040,7 @@ proc recvTask(strm: ClientStream) {.async.} =
     debugInfo err.msg
     stream.error = newError err
     if err.typ == hxLocalErr:
-      await failSilently strm.writeRst(err.code)
+      await failSilently strm.writeRst(err.code.FrmErrCode)
     raise err
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -1100,9 +1095,7 @@ proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
     stream.windowPending -= stream.windowProcessed
     let oldWindow = stream.windowProcessed
     stream.windowProcessed = 0
-    await strm.write newWindowUpdateFrame(
-      stream.id.FrmSid, oldWindow
-    )
+    await strm.write newWindowUpdateFrame(stream.id, oldWindow)
 
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   try:
@@ -1135,7 +1128,7 @@ proc sendHeadersImpl*(
   var frm = newFrame()
   frm.add headers
   frm.setTyp frmtHeaders
-  frm.setSid strm.stream.id.FrmSid
+  frm.setSid strm.stream.id
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
   frm.flags.incl frmfEndHeaders
   if finish:
@@ -1183,7 +1176,7 @@ proc sendBodyNaked(
     dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
     var frm = newFrame()
     frm.setTyp frmtData
-    frm.setSid stream.id.FrmSid
+    frm.setSid stream.id
     frm.setPayloadLen (dataIdxB-dataIdxA).FrmPayloadLen
     if finish and dataIdxB == L:
       frm.flags.incl frmfEndStream
@@ -1256,7 +1249,7 @@ proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
   # fail silently because if it fails, it closes
   # the stream anyway
   try:
-    await failSilently strm.writeRst(code)
+    await failSilently strm.writeRst(code.FrmErrCode)
     if strm.stream.state == strmClosedRst:
       await failSilently strm.ping()
   finally:
@@ -1270,12 +1263,12 @@ proc gracefulClose*(client: ClientContext) {.async.} =
   # fail silently because it's best effort,
   # setting isGracefulShutdown is the only important thing
   await failSilently client.send newGoAwayFrame(
-    int32.high, errNoError.int
+    int32.high.FrmSid, frmeNoError
   )
   await failSilently client.ping client.streams.get(StreamId 0)
   client.isGracefulShutdown = true
   await failSilently client.send newGoAwayFrame(
-    client.maxPeerStreamIdSeen.int, errNoError.int
+    client.maxPeerStreamIdSeen, frmeNoError
   )
 
 proc isGracefulClose*(client: ClientContext): bool {.raises: [].} =

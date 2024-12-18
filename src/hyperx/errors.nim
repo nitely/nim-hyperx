@@ -2,6 +2,7 @@
 
 # https://httpwg.org/specs/rfc9113.html#ErrorCodes
 # XXX HyperxErrCode
+# XXX alias for FrmErrCode
 type
   ErrorCode* = distinct uint8
 const

@@ -162,13 +162,7 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     strmInvalid
 
 type
-  StreamId* = distinct uint32  # range[0 .. 31.ones.int]
-
-proc `==`*(a, b: StreamId): bool {.borrow.}
-proc `+=`*(a: var StreamId, b: StreamId) {.borrow.}
-proc `<`*(a, b: StreamId): bool {.borrow.}
-
-type
+  StreamId* = FrmSid
   Stream* = ref object
     id*: StreamId
     state*: StreamState
