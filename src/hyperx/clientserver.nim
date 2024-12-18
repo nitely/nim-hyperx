@@ -304,7 +304,7 @@ func hpackEncode*(
   client: ClientContext,
   payload: var seq[byte],  # XXX var string
   name, value: openArray[char]
-) {.raises: [HyperxError].} =
+) {.raises: [HyperxConnError].} =
   ## headers must be added synchronously, no await in between,
   ## or else a table resize could occur in the meantime
   try:
@@ -312,7 +312,7 @@ func hpackEncode*(
   except HpackError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    raise newException(HyperxError, err.msg)
+    raise newConnError(err.msg)
 
 proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
   debugInfo "===SENT==="
