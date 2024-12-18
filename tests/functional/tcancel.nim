@@ -49,14 +49,14 @@ proc spawnStream(
     let recvFut = strm.recv()
     try:
       await recvFut
-    except StrmError as err:
-      doAssert err.typ == hxLocalErr
-      doAssert err.code == errStreamClosed
+    except HyperxStrmError as err:
+      doAssert err.typ == hyxLocalErr
+      doAssert err.code == hyxStreamClosed
     try:
       await sendFut
-    except StrmError as err:
-      doAssert err.typ == hxLocalErr
-      doAssert err.code == errStreamClosed
+    except HyperxStrmError as err:
+      doAssert err.typ == hyxLocalErr
+      doAssert err.code == hyxStreamClosed
     inc checked[]
     return
 

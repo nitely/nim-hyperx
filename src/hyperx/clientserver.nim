@@ -83,7 +83,7 @@ proc defaultSslContext*(
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    raise newHyperxConnError(err.msg)
+    raise newConnError(err.msg)
   except Defect as err:
     raise err
   except Exception as err:
@@ -142,7 +142,7 @@ type
     peerWindowUpdateSig: SignalAsync
     windowPending, windowProcessed: int
     windowUpdateSig: SignalAsync
-    error*: ref HyperxError
+    error*: ref HyperxError  # XXX HyperxConnError
     when defined(hyperxStats):
       frmsSent: int
       frmsSentTyp: array[10, int]
@@ -186,7 +186,7 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    raise newHyperxConnError(err.msg)
+    raise newConnError(err.msg)
   except Defect as err:
     raise err  # raise original error
   except Exception as err:
@@ -245,7 +245,7 @@ when defined(hyperxSanityCheck):
 func validateHeader(
   ss: string,
   nn, vv: Slice[int]
-) {.raises: [ConnError].} =
+) {.raises: [HyperxConnError].} =
   # https://www.rfc-editor.org/rfc/rfc9113.html#name-field-validity
   # field validity only because headers and trailers don't have
   # the same validation
@@ -254,24 +254,24 @@ func validateHeader(
     0x41'u8 .. 0x5a'u8,
     0x7f'u8 .. 0xff'u8
   }
-  check nn.len > 0, newConnError(errProtocolError)
+  check nn.len > 0, newConnError(hyxProtocolError)
   var i = 0
   for ii in nn:
-    check ss[ii].uint8 notin badNameChars, newConnError(errProtocolError)
+    check ss[ii].uint8 notin badNameChars, newConnError(hyxProtocolError)
     if i > 0:
-      check ss[ii] != ':', newConnError(errProtocolError)
+      check ss[ii] != ':', newConnError(hyxProtocolError)
     inc i
   for ii in vv:
-    check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(errProtocolError)
+    check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(hyxProtocolError)
   if vv.len > 0:
-    check ss[vv.a].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
-    check ss[vv.b].uint8 notin {0x20'u8, 0x09}, newConnError(errProtocolError)
+    check ss[vv.a].uint8 notin {0x20'u8, 0x09}, newConnError(hyxProtocolError)
+    check ss[vv.b].uint8 notin {0x20'u8, 0x09}, newConnError(hyxProtocolError)
 
 func hpackDecode(
   client: ClientContext,
   ss: var string,
   payload: openArray[byte]
-) {.raises: [ConnError].} =
+) {.raises: [HyperxConnError].} =
   var dhSize = -1
   var nn = 0 .. -1
   var vv = 0 .. -1
@@ -287,8 +287,8 @@ func hpackDecode(
         client.headersDec, ss, nn, vv, dhSize
       )
       if dhSize > -1:
-        check canResize, newConnError(errCompressionError)
-        check dhSize <= stgHeaderTableSize.int, newConnError(errCompressionError)
+        check canResize, newConnError(hyxCompressionError)
+        check dhSize <= stgHeaderTableSize.int, newConnError(hyxCompressionError)
         client.headersDec.setSize dhSize
       else:
         # note this validate headers and trailers
@@ -298,7 +298,7 @@ func hpackDecode(
     doAssert i == L
   except HpackError:
     debugInfo getCurrentException().msg
-    raise newConnError(errCompressionError)
+    raise newConnError(hyxCompressionError)
 
 func hpackEncode*(
   client: ClientContext,
@@ -339,9 +339,9 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
     if client.isConnected:
       debugInfo err.getStackTrace()
       debugInfo err.msg
-      client.error = newHyperxConnError(err.msg)
+      client.error = newConnError(err.msg)
       client.close()
-    raise newHyperxConnError(err.msg)
+    raise newConnError(err.msg)
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
@@ -394,7 +394,7 @@ proc handshakeNaked(client: ClientContext) {.async.} =
     check not client.sock.isClosed, newConnClosedError()
     let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
     check blobRln == blob.len, newConnClosedError()
-    check blob == preface, newConnError(errProtocolError)
+    check blob == preface, newConnError(hyxProtocolError)
 
 proc handshake(client: ClientContext) {.async.} =
   try:
@@ -405,22 +405,24 @@ proc handshake(client: ClientContext) {.async.} =
     debugInfo err.msg
     doAssert client.isConnected
     # XXX err.msg includes a traceback for SslError but it should not
-    client.error = newHyperxConnError(err.msg)
+    client.error = newConnError(err.msg)
     client.close()
-    raise newHyperxConnError(err.msg)
+    raise newConnError(err.msg)
 
-func doTransitionRecv(s: Stream, frm: Frame) {.raises: [ConnError, StrmError].} =
+func doTransitionRecv(
+  s: Stream, frm: Frame
+) {.raises: [HyperxConnError, HyperxStrmError].} =
   doAssert frm.sid == s.id
   doAssert frm.sid != frmSidMain
   doAssert s.state != strmInvalid
-  check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
+  check frm.typ in frmStreamAllowed, newConnError(hyxProtocolError)
   let nextState = toNextStateRecv(s.state, frm.toStreamEvent)
   if nextState == strmInvalid:
     if s.state == strmHalfClosedRemote:
-      raise newStrmError(errStreamClosed)
+      raise newStrmError(hyxStreamClosed)
     if s.state == strmClosed:
-      raise newConnError(errStreamClosed)
-    raise newConnError(errProtocolError)
+      raise newConnError(hyxStreamClosed)
+    raise newConnError(hyxProtocolError)
   s.state = nextState
 
 proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
@@ -433,16 +435,16 @@ proc readUntilEnd(client: ClientContext, frm: Frame) {.async.} =
     let headerRln = await client.sock.recvInto(frm2.rawBytesPtr, frm2.len)
     check headerRln == frmHeaderSize, newConnClosedError()
     debugInfo $frm2
-    check frm2.sid == frm.sid, newConnError(errProtocolError)
-    check frm2.typ == frmtContinuation, newConnError(errProtocolError)
-    check frm2.payloadLen <= stgInitialMaxFrameSize, newConnError(errProtocolError)
-    check frm2.payloadLen >= 0, newConnError(errProtocolError)
+    check frm2.sid == frm.sid, newConnError(hyxProtocolError)
+    check frm2.typ == frmtContinuation, newConnError(hyxProtocolError)
+    check frm2.payloadLen <= stgInitialMaxFrameSize, newConnError(hyxProtocolError)
+    check frm2.payloadLen >= 0, newConnError(hyxProtocolError)
     if frm2.payloadLen == 0:
       continue
     # XXX the spec does not limit total headers size,
     #     but there needs to be a limit unless we stream
     let totalPayloadLen = frm2.payloadLen.int + frm.payload.len
-    check totalPayloadLen <= stgInitialMaxFrameSize.int, newConnError(errProtocolError)
+    check totalPayloadLen <= stgInitialMaxFrameSize.int, newConnError(hyxProtocolError)
     let oldFrmLen = frm.len
     frm.grow frm2.payloadLen.int
     check not client.sock.isClosed, newConnClosedError()
@@ -464,11 +466,11 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   check headerRln == frmHeaderSize, newConnClosedError()
   debugInfo $frm
   var payloadLen = frm.payloadLen.int
-  check payloadLen <= stgInitialMaxFrameSize.int, newConnError(errFrameSizeError)
+  check payloadLen <= stgInitialMaxFrameSize.int, newConnError(hyxFrameSizeError)
   var paddingLen = 0'u8
   if frm.isPadded:
     debugInfo "Padding"
-    check payloadLen >= frmPaddingSize, newConnError(errProtocolError)
+    check payloadLen >= frmPaddingSize, newConnError(hyxProtocolError)
     check not client.sock.isClosed, newConnClosedError()
     let paddingRln = await client.sock.recvInto(addr paddingLen, frmPaddingSize)
     check paddingRln == frmPaddingSize, newConnClosedError()
@@ -476,16 +478,16 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
   # prio is deprecated so do nothing with it
   if frm.hasPrio:
     debugInfo "Priority"
-    check payloadLen >= frmPrioritySize, newConnError(errProtocolError)
+    check payloadLen >= frmPrioritySize, newConnError(hyxProtocolError)
     var prio = [0'u8, 0, 0, 0, 0]
     check not client.sock.isClosed, newConnClosedError()
     let prioRln = await client.sock.recvInto(addr prio, prio.len)
     check prioRln == frmPrioritySize, newConnClosedError()
-    check prioDependency(prio) != frm.sid, newConnError(errProtocolError)
+    check prioDependency(prio) != frm.sid, newConnError(hyxProtocolError)
     payloadLen -= frmPrioritySize
   # padding can be equal at this point, because we don't count frmPaddingSize
-  check payloadLen >= paddingLen.int, newConnError(errProtocolError)
-  check isValidSize(frm, payloadLen), newConnError(errFrameSizeError)
+  check payloadLen >= paddingLen.int, newConnError(hyxProtocolError)
+  check isValidSize(frm, payloadLen), newConnError(hyxFrameSizeError)
   if payloadLen > 0:
     frm.grow payloadLen
     check not client.sock.isClosed, newConnClosedError()
@@ -514,25 +516,22 @@ proc recvTask(client: ClientContext) {.async.} =
     await client.recvTaskNaked()
   except QueueClosedError:
     doAssert not client.isConnected
-  except ConnError as err:
+  except HyperxConnError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
     if client.isConnected:
-      # XXX close all streams
-      # XXX close queues
       client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
-        client.maxPeerStreamIdSeen, err.code.FrmErrCode
+        client.maxPeerStreamIdSeen, err.code
       )
-      #client.close()
     raise err
-  except HyperxConnError, OsError, SslError:
+  except OsError, SslError:
     let err = getCurrentException()
     debugInfo err.getStackTrace()
     debugInfo err.msg
     if client.isConnected:
-      client.error = newHyperxConnError(err.msg)
-    raise newHyperxConnError(err.msg)
+      client.error = newConnError(err.msg)
+    raise newConnError(err.msg)
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
@@ -553,15 +552,15 @@ const connFrmAllowed = {
 proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
   case frm.typ
   of frmtWindowUpdate:
-    check frm.windowSizeInc > 0, newConnError(errProtocolError)
-    check frm.windowSizeInc <= stgMaxWindowSize, newConnError(errProtocolError)
+    check frm.windowSizeInc > 0, newConnError(hyxProtocolError)
+    check frm.windowSizeInc <= stgMaxWindowSize, newConnError(hyxProtocolError)
     check client.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
-      newConnError(errFlowControlError)
+      newConnError(hyxFlowControlError)
     client.peerWindow += frm.windowSizeInc.int32
     client.peerWindowUpdateSig.trigger()
   of frmtSettings:
     check frm.payloadLen.int <= stgMaxSettingsList * frmSettingsSize,
-      newConnError(errProtocolError)
+      newConnError(hyxProtocolError)
     for (setting, value) in frm.settings:
       # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
       case setting
@@ -571,16 +570,16 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
       of frmsEnablePush:
         case client.typ
         of ctClient:
-          check value == 0, newConnError(errProtocolError)
+          check value == 0, newConnError(hyxProtocolError)
         of ctServer:
-          check value == 0 or value == 1, newConnError(errProtocolError)
+          check value == 0 or value == 1, newConnError(hyxProtocolError)
       of frmsMaxConcurrentStreams:
         client.peerMaxConcurrentStreams = value
       of frmsInitialWindowSize:
-        check value <= stgMaxWindowSize, newConnError(errFlowControlError)
+        check value <= stgMaxWindowSize, newConnError(hyxFlowControlError)
         template subtBoundCheck(a, b: untyped): untyped =
-          if b < 0 and a > int32.high + b: raise newConnError(errFlowControlError)
-          if b > 0 and a < int32.low + b: raise newConnError(errFlowControlError)
+          if b < 0 and a > int32.high + b: raise newConnError(hyxFlowControlError)
+          if b > 0 and a < int32.low + b: raise newConnError(hyxFlowControlError)
         for strm in values client.streams:
           subtBoundCheck(client.peerWindowSize.int32, strm.peerWindow)
           strm.peerWindow = client.peerWindowSize.int32 - strm.peerWindow
@@ -592,8 +591,8 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
         if not client.peerWindowUpdateSig.isClosed:
           client.peerWindowUpdateSig.trigger()
       of frmsMaxFrameSize:
-        check value >= stgInitialMaxFrameSize, newConnError(errProtocolError)
-        check value <= stgMaxFrameSize, newConnError(errProtocolError)
+        check value >= stgInitialMaxFrameSize, newConnError(hyxProtocolError)
+        check value <= stgMaxFrameSize, newConnError(hyxProtocolError)
         client.peerMaxFrameSize = value
       of frmsMaxHeaderListSize:
         # this is only advisory, do nothing for now.
@@ -625,7 +624,7 @@ proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
           strm.close()
   else:
     doAssert frm.typ notin connFrmAllowed
-    raise newConnError(errProtocolError)
+    raise newConnError(hyxProtocolError)
 
 proc recvDispatcherNaked(client: ClientContext) {.async.} =
   ## Dispatch messages to open streams.
@@ -640,19 +639,19 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       continue
     # Prio is deprecated and needs to be ignored here
     if frm.typ == frmtPriority:
-      check frm.strmDependency != frm.sid, newConnError(errProtocolError)
+      check frm.strmDependency != frm.sid, newConnError(hyxProtocolError)
       continue
     if frm.sid == frmSidMain:
       # Settings need to be applied before consuming following messages
       await consumeMainStream(client, frm)
       continue
-    check frm.typ in frmStreamAllowed, newConnError(errProtocolError)
-    check frm.sid.int mod 2 != 0, newConnError(errProtocolError)
+    check frm.typ in frmStreamAllowed, newConnError(hyxProtocolError)
+    check frm.sid.int mod 2 != 0, newConnError(hyxProtocolError)
     if client.typ == ctServer and
         frm.sid > client.currStreamId and
         not client.isGracefulShutdown:
       check client.streams.len <= stgServerMaxConcurrentStreams,
-        newConnError(errProtocolError)
+        newConnError(hyxProtocolError)
       client.currStreamId = frm.sid
       # we do not store idle streams, so no need to close them
       let strm = client.streams.open(frm.sid, client.peerWindowSize.int32)
@@ -664,12 +663,12 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       frm.s.add headers
     if frm.typ == frmtData and frm.payloadLen.int > 0:
       check client.windowPending <= stgWindowSize.int - frm.payloadLen.int,
-        newConnError(errFlowControlError)
+        newConnError(hyxFlowControlError)
       client.windowPending += frm.payloadLen.int
     if frm.typ == frmtWindowUpdate:
-      check frm.windowSizeInc > 0, newConnError(errProtocolError)
+      check frm.windowSizeInc > 0, newConnError(hyxProtocolError)
     if frm.typ == frmtPushPromise:
-      check client.typ == ctClient, newConnError(errProtocolError)
+      check client.typ == ctClient, newConnError(hyxProtocolError)
     # Process headers even if the stream does not exist
     if frm.sid notin client.streams:
       if frm.typ == frmtData:
@@ -684,19 +683,19 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
         )
       else:
         check frm.typ in {frmtRstStream, frmtWindowUpdate},
-          newConnError errStreamClosed
+          newConnError hyxStreamClosed
       debugInfo "stream not found " & $frm.sid.int
       continue
     var stream = client.streams.get frm.sid
     if frm.typ == frmtData:
       check stream.windowPending <= stgWindowSize.int - frm.payloadLen.int,
-        newConnError(errFlowControlError)
+        newConnError(hyxFlowControlError)
       stream.windowPending += frm.payloadLen.int
     try:
       await stream.msgs.put frm
     except QueueClosedError:
       check frm.typ in {frmtRstStream, frmtWindowUpdate},
-        newConnError errStreamClosed
+        newConnError hyxStreamClosed
       debugInfo "stream is closed " & $frm.sid.int
 
 proc recvDispatcher(client: ClientContext) {.async.} =
@@ -706,16 +705,16 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     await client.recvDispatcherNaked()
   except QueueClosedError:
     doAssert not client.isConnected
-  except ConnError as err:
+  except HyperxConnError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
     if client.isConnected:
       client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
-        client.maxPeerStreamIdSeen, err.code.FrmErrCode
+        client.maxPeerStreamIdSeen, err.code
       )
     raise err
-  except StrmError:
+  except HyperxStrmError:
     debugInfo getCurrentException().getStackTrace()
     debugInfo getCurrentException().msg
     doAssert false
@@ -769,7 +768,7 @@ proc connect(client: ClientContext) {.async.} =
   except OsError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    raise newHyperxConnError(err.msg)
+    raise newConnError(err.msg)
 
 proc failSilently(f: Future[void]) {.async.} =
   ## Be careful when wrapping non {.async.} procs,
@@ -874,7 +873,7 @@ proc windowEnd(strm: ClientStream) {.raises: [].} =
   except SignalClosedError:
     doAssert not client.isConnected
 
-func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [StrmError].} =
+func validateHeaders(s: openArray[byte], typ: ClientTyp) {.raises: [HyperxStrmError].} =
   case typ
   of ctServer: serverHeadersValidation(s)
   of ctClient: clientHeadersValidation(s)
@@ -921,16 +920,16 @@ proc read(stream: Stream): Future[Frame] {.async.} =
     # this can raise stream/conn error
     stream.doTransitionRecv frm
     if frm.typ == frmtRstStream:
-      stream.error = newStrmError(frm.errCode, hxRemoteErr)
+      stream.error = newStrmError(frm.errCode, hyxRemoteErr)
       stream.close()
-      raise newStrmError(frm.errCode, hxRemoteErr)
+      raise newStrmError(frm.errCode, hyxRemoteErr)
     if frm.typ == frmtPushPromise:
-      raise newStrmError errProtocolError
+      raise newStrmError hyxProtocolError
     if frm.typ == frmtWindowUpdate:
-      check frm.windowSizeInc > 0, newStrmError errProtocolError
-      check frm.windowSizeInc <= stgMaxWindowSize, newStrmError errProtocolError
+      check frm.windowSizeInc > 0, newStrmError hyxProtocolError
+      check frm.windowSizeInc <= stgMaxWindowSize, newStrmError hyxProtocolError
       check stream.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
-        newStrmError errFlowControlError
+        newStrmError hyxFlowControlError
       stream.peerWindow += frm.windowSizeInc.int32
       if not stream.peerWindowUpdateSig.isClosed:
         stream.peerWindowUpdateSig.trigger()
@@ -942,7 +941,7 @@ proc read(stream: Stream): Future[Frame] {.async.} =
 proc writeRst(strm: ClientStream, code: FrmErrCode) {.async.} =
   template stream: untyped = strm.stream
   check stream.state in strmStateRstSendAllowed,
-    newStrmError errStreamClosed
+    newStrmError hyxStreamClosed
   strm.stateSend = csStateEnded
   await strm.write newRstStreamFrame(stream.id, code)
 
@@ -953,13 +952,13 @@ proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
   var frm: Frame
   while true:
     frm = await strm.stream.read()
-    check frm.typ == frmtHeaders, newStrmError errProtocolError
+    check frm.typ == frmtHeaders, newStrmError hyxProtocolError
     validateHeaders(frm.payload, strm.client.typ)
     if strm.client.typ == ctServer:
       break
-    check frm.payload.len >= statusLineLen, newStrmError errProtocolError
+    check frm.payload.len >= statusLineLen, newStrmError hyxProtocolError
     if frm.payload[9] == '1'.byte:
-      check frmfEndStream notin frm.flags, newStrmError(errProtocolError)
+      check frmfEndStream notin frm.flags, newStrmError(hyxProtocolError)
     else:
       break
   strm.headersRecv.add frm.payload
@@ -968,19 +967,19 @@ proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
   except ValueError:
     debugInfo getCurrentException().getStackTrace()
     debugInfo getCurrentException().msg
-    raise newStrmError(errProtocolError)
+    raise newStrmError(hyxProtocolError)
   if frmfEndStream in frm.flags:
     # XXX dont do for no content status 1xx/204/304 and HEAD response
     if strm.client.typ == ctServer:
-      check strm.contentLen <= 0, newStrmError(errProtocolError)
+      check strm.contentLen <= 0, newStrmError(hyxProtocolError)
     strm.stateRecv = csStateEnded
   strm.headersRecvSig.trigger()
   strm.headersRecvSig.close()
 
-func contentLenCheck(strm: ClientStream) {.raises: [StrmError].} =
+func contentLenCheck(strm: ClientStream) {.raises: [HyperxStrmError].} =
   check(
     strm.contentLen == -1 or strm.contentLen == strm.contentLenRecv,
-    newStrmError(errProtocolError)
+    newStrmError(hyxProtocolError)
   )
 
 proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
@@ -992,13 +991,13 @@ proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
     # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
     if frm.typ == frmtHeaders:
       strm.trailersRecv.add frm.payload
-      check frmfEndStream in frm.flags, newStrmError(errProtocolError)
+      check frmfEndStream in frm.flags, newStrmError(hyxProtocolError)
       if strm.client.typ == ctServer:
         strm.contentLenCheck()
       validateTrailers(frm.payload)
       strm.stateRecv = csStateEnded
       break
-    check frm.typ == frmtData, newStrmError(errProtocolError)
+    check frm.typ == frmtData, newStrmError(hyxProtocolError)
     strm.bodyRecv.add frm.payload
     strm.bodyRecvLen += frm.payloadLen.int
     strm.contentLenRecv += frm.payload.len
@@ -1025,22 +1024,22 @@ proc recvTask(strm: ClientStream) {.async.} =
       discard await stream.read()
   except QueueClosedError:
     discard
-  except ConnError as err:
+  except HyperxConnError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
     connErr = true
     if client.isConnected:
       client.error = newConnError(err.code)
       await client.sendSilently newGoAwayFrame(
-        client.maxPeerStreamIdSeen, err.code.FrmErrCode
+        client.maxPeerStreamIdSeen, err.code
       )
     raise err
-  except StrmError as err:
+  except HyperxStrmError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
     stream.error = newError err
-    if err.typ == hxLocalErr:
-      await failSilently strm.writeRst(err.code.FrmErrCode)
+    if err.typ == hyxLocalErr:
+      await failSilently strm.writeRst(err.code)
     raise err
   except CatchableError as err:
     debugInfo err.getStackTrace()
@@ -1064,7 +1063,7 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
     if strm.client.error != nil:
       debugInfo strm.client.error.getStackTrace()
       debugInfo strm.client.error.msg
-      raise newHyperxConnError(strm.client.error.msg)
+      raise newError strm.client.error
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
       debugInfo strm.stream.error.msg
@@ -1104,7 +1103,7 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
     if strm.client.error != nil:
       debugInfo strm.client.error.getStackTrace()
       debugInfo strm.client.error.msg
-      raise newHyperxConnError(strm.client.error.msg)
+      raise newError strm.client.error
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
       debugInfo strm.stream.error.msg
@@ -1144,7 +1143,7 @@ proc sendHeaders*(
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   check stream.state in strmStateHeaderSendAllowed,
-    newErrorOrDefault(stream.error, newStrmError errStreamClosed)
+    newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
   var henc = newSeq[byte]()
   for (n, v) in headers:
     client.hpackEncode(henc, n, v)
@@ -1158,7 +1157,7 @@ proc sendBodyNaked(
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   check stream.state in strmStateDataSendAllowed,
-    newErrorOrDefault(stream.error, newStrmError errStreamClosed)
+    newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
   doAssert strm.stateSend in {csStateHeaders, csStateData}
   strm.stateSend = csStateData
   var dataIdxA = 0
@@ -1170,7 +1169,7 @@ proc sendBodyNaked(
         await stream.peerWindowUpdateSig.waitFor()
       while client.peerWindow <= 0:
         check stream.state in strmStateDataSendAllowed,
-          newErrorOrDefault(stream.error, newStrmError errStreamClosed)
+          newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
         await client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(client.peerWindow, stream.peerWindow)
     dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
@@ -1185,7 +1184,7 @@ proc sendBodyNaked(
     stream.peerWindow -= frm.payloadLen.int32
     client.peerWindow -= frm.payloadLen.int32
     check stream.state in strmStateDataSendAllowed,
-      newErrorOrDefault(stream.error, newStrmError errStreamClosed)
+      newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
     await strm.write frm
     dataIdxA = dataIdxB
     # allow sending empty data frame
@@ -1203,7 +1202,7 @@ proc sendBody*(
     if strm.client.error != nil:
       debugInfo strm.client.error.getStackTrace()
       debugInfo strm.client.error.msg
-      raise newHyperxConnError(strm.client.error.msg)
+      raise newError strm.client.error
     if strm.stream.error != nil:
       debugInfo strm.stream.error.getStackTrace()
       debugInfo strm.stream.error.msg
@@ -1242,18 +1241,18 @@ proc ping(client: ClientContext, strm: Stream) {.async.} =
 proc ping(strm: ClientStream) {.async.} =
   await strm.client.ping(strm.stream)
 
-proc cancel*(strm: ClientStream, code: ErrorCode) {.async.} =
+proc cancel*(strm: ClientStream, code: HyperxErrCode) {.async.} =
   ## This may never return until the stream/conn is closed.
   ## This can be called multiple times concurrently,
   ## and it will wait for the cancelation
   # fail silently because if it fails, it closes
   # the stream anyway
   try:
-    await failSilently strm.writeRst(code.FrmErrCode)
+    await failSilently strm.writeRst(code)
     if strm.stream.state == strmClosedRst:
       await failSilently strm.ping()
   finally:
-    strm.stream.error ?= newStrmError(errStreamClosed)
+    strm.stream.error ?= newStrmError(hyxStreamClosed)
     strm.close()
 
 proc gracefulClose*(client: ClientContext) {.async.} =

@@ -67,7 +67,7 @@ when not defined(hyperxTest):
     except CatchableError as err:
       debugInfo err.getStackTrace()
       debugInfo err.msg
-      raise newHyperxConnError(err.msg)
+      raise newConnError(err.msg)
 
 type
   ServerContext* = ref object
@@ -103,7 +103,7 @@ proc close*(server: ServerContext) {.raises: [HyperxConnError].} =
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    raise newHyperxConnError(err.msg)
+    raise newConnError(err.msg)
   except Defect as err:
     raise err
   except Exception as err:
@@ -122,7 +122,7 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
     let err = getCurrentException()
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    raise newHyperxConnError(err.msg)
+    raise newConnError(err.msg)
 
 # XXX dont allow receive push promise
 
@@ -141,7 +141,7 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
   except CatchableError as err:
     debugInfo err.getStackTrace()
     debugInfo err.msg
-    raise newHyperxConnError(err.msg)
+    raise newConnError(err.msg)
 
 template with*(server: ServerContext, body: untyped): untyped =
   try:
@@ -162,7 +162,7 @@ proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
       # https://github.com/nim-lang/Nim/issues/15182
       debugInfo client.error.getStackTrace()
       debugInfo client.error.msg
-      raise newHyperxConnError(client.error.msg)
+      raise newConnError(client.error.msg)
     raise err
 
 proc sendHeaders*(
@@ -174,7 +174,7 @@ proc sendHeaders*(
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   check stream.state in strmStateHeaderSendAllowed,
-    newErrorOrDefault(stream.error, newStrmError errStreamClosed)
+    newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
   var headers = newSeq[byte]()
   client.hpackEncode(headers, ":status", $status)
   if contentType.len > 0:

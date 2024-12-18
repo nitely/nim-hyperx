@@ -428,7 +428,7 @@ testAsync "stream error NO_ERROR handling":
     await tc.checkHandshake()
     let strm = tc.client.newClientStream()
     with strm:
-      await tc.replyNoError(strm.stream.id.FrmSid)
+      await tc.replyNoError(strm.stream.id)
       let sendFut = strm.send(dataOut)
       let recvFut = strm.recv(dataIn)
       await sendFut  # this could raise
@@ -457,7 +457,7 @@ testAsync "stream NO_ERROR before request completes":
         await strm.sendHeaders(
           hmPost, "/foo", contentLen = dataOut[].len
         )
-        await tc.replyNoError(strm.stream.id.FrmSid)
+        await tc.replyNoError(strm.stream.id)
         # wait for the rst
         while strm.stream.state != strmClosed:
           await sleepAsync(1)
@@ -468,6 +468,6 @@ testAsync "stream NO_ERROR before request completes":
         await strm.sendBody(dataOut, finish = true)
         doAssert false
       doAssert false
-    except StrmError as err:
-      doAssert err.code == errNoError
+    except HyperxStrmError as err:
+      doAssert err.code == hyxNoError
   doAssert dataIn[] == headers

@@ -172,7 +172,7 @@ type
     windowPending*: int
     windowProcessed*: int
     pingSig*: SignalAsync
-    error*: ref StrmError
+    error*: ref HyperxStrmError
 
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
   doAssert peerWindow >= 0

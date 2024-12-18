@@ -59,7 +59,7 @@ when not defined(hyperxTest):
     except CatchableError as err:
       debugInfo err.getStackTrace()
       debugInfo err.msg
-      raise newHyperxConnError(err.msg)
+      raise newConnError(err.msg)
 
 proc newClient*(
   hostname: string,
@@ -99,7 +99,7 @@ proc sendHeaders*(
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   check stream.state in strmStateHeaderSendAllowed,
-    newErrorOrDefault(stream.error, newStrmError errStreamClosed)
+    newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
   var headers = newSeq[byte]()
   client.hpackEncode(headers, ":method", $httpMethod)
   client.hpackEncode(headers, ":scheme", "https")
