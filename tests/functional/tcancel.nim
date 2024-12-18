@@ -37,7 +37,7 @@ proc recv(strm: ClientStream) {.async.} =
   data[].setLen 0
   while not strm.recvEnded:
     await strm.recvBody(data)
-    await strm.cancel(errCancel)  # CANCEL
+    await strm.cancel(hyxCancel)  # CANCEL
 
 proc spawnStream(
   client: ClientContext,

@@ -40,8 +40,8 @@ testAsync "cancel many times":
       var data = new string
       await strm.recvHeaders(data)
       doAssert data[] == ":status: 200\r\n"
-      await strm.cancel(errCancel)
-      await strm.cancel(errCancel)
+      await strm.cancel(hyxCancel)
+      await strm.cancel(hyxCancel)
       inc checked
     inc checked
   doAssert checked == 2
@@ -56,8 +56,8 @@ testAsync "cancel concurrently":
       var data = new string
       await strm.recvHeaders(data)
       doAssert data[] == ":status: 200\r\n"
-      let fut1 = strm.cancel(errCancel)
-      let fut2 = strm.cancel(errCancel)
+      let fut1 = strm.cancel(hyxCancel)
+      let fut2 = strm.cancel(hyxCancel)
       await fut1
       await fut2
       inc checked
@@ -75,8 +75,8 @@ testAsync "cancel task":
       var data = new string
       await strm.recvHeaders(data)
       doAssert data[] == ":status: 200\r\n"
-      cancelFut = strm.cancel(errCancel)
-      await strm.cancel(errCancel)
+      cancelFut = strm.cancel(hyxCancel)
+      await strm.cancel(hyxCancel)
       inc checked
     inc checked
   await cancelFut
