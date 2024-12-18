@@ -51,35 +51,40 @@ type
   HyperxErrTyp* = enum
     hyxLocalErr, hyxRemoteErr
   HyperxError* = object of CatchableError
-    #typ*: HyperxErrTyp
-    #code*: HyperxErrCode
-  HyperxConnError* = object of HyperxError
-    code*: HyperxErrCode
-  HyperxStrmError* = object of HyperxError
     typ*: HyperxErrTyp
     code*: HyperxErrCode
+  HyperxConnError* = object of HyperxError
+  HyperxStrmError* = object of HyperxError
   ConnClosedError* = object of HyperxConnError
   GracefulShutdownError* = HyperxConnError
   QueueClosedError* = object of HyperxError
 
 func newConnClosedError*: ref ConnClosedError {.raises: [].} =
-  result = (ref ConnClosedError)(code: hyxUnknown, msg: "Connection Closed")
+  result = (ref ConnClosedError)(typ: hyxLocalErr, code: hyxInternalError, msg: "Connection Closed")
 
 func newConnError*(msg: string): ref HyperxConnError {.raises: [].} =
-  result = (ref HyperxConnError)(code: hyxInternalError, msg: msg)
+  result = (ref HyperxConnError)(typ: hyxLocalErr, code: hyxInternalError, msg: msg)
 
-func newConnError*(errCode: HyperxErrCode): ref HyperxConnError {.raises: [].} =
-  result = (ref HyperxConnError)(code: errCode, msg: "Connection Error: " & $errCode)
-
-func newConnError*(errCode: uint32): ref HyperxConnError {.raises: [].} =
+func newConnError*(
+  errCode: HyperxErrCode, typ = hyxLocalErr
+): ref HyperxConnError {.raises: [].} =
   result = (ref HyperxConnError)(
+    typ: typ, code: errCode, msg: "Connection Error: " & $errCode
+  )
+
+func newConnError*(
+  errCode: uint32, typ = hyxLocalErr
+): ref HyperxConnError {.raises: [].} =
+  result = (ref HyperxConnError)(
+    typ: typ,
     code: errCode.toErrorCode,
     msg: "Connection Error: " & $errCode.toErrorCode
   )
 
-# XXX fix
-func newError*(err: ref HyperxError): ref HyperxConnError {.raises: [].} =
-  result = (ref HyperxConnError)(code: hyxUnknown, msg: err.msg)
+func newError*(err: ref HyperxConnError): ref HyperxConnError {.raises: [].} =
+  result = (ref HyperxConnError)(
+    typ: err.typ, code: err.code, msg: err.msg
+  )
 
 func newStrmError*(
   errCode: HyperxErrCode, typ = hyxLocalErr
