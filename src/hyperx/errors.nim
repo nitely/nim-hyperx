@@ -62,14 +62,16 @@ type
 func newConnClosedError*: ref ConnClosedError {.raises: [].} =
   result = (ref ConnClosedError)(typ: hyxLocalErr, code: hyxInternalError, msg: "Connection Closed")
 
-func newConnError*(msg: string): ref HyperxConnError {.raises: [].} =
-  result = (ref HyperxConnError)(typ: hyxLocalErr, code: hyxInternalError, msg: msg)
+func newConnError*(msg: string, parent: ref Exception = nil): ref HyperxConnError {.raises: [].} =
+  result = (ref HyperxConnError)(
+    typ: hyxLocalErr, code: hyxInternalError, msg: msg, parent: parent
+  )
 
 func newConnError*(
-  errCode: HyperxErrCode, typ = hyxLocalErr
+  errCode: HyperxErrCode, typ = hyxLocalErr, parent: ref Exception = nil
 ): ref HyperxConnError {.raises: [].} =
   result = (ref HyperxConnError)(
-    typ: typ, code: errCode, msg: "Connection Error: " & $errCode
+    typ: typ, code: errCode, msg: "Connection Error: " & $errCode, parent: parent
   )
 
 func newConnError*(
@@ -81,27 +83,33 @@ func newConnError*(
     msg: "Connection Error: " & $errCode.toErrorCode
   )
 
-func newError*(err: ref HyperxConnError): ref HyperxConnError {.raises: [].} =
+func newError*(
+  err: ref HyperxConnError, parent: ref Exception = nil
+): ref HyperxConnError {.raises: [].} =
   result = (ref HyperxConnError)(
-    typ: err.typ, code: err.code, msg: err.msg
+    typ: err.typ, code: err.code, msg: err.msg, parent: parent
   )
 
 func newStrmError*(
-  errCode: HyperxErrCode, typ = hyxLocalErr
+  errCode: HyperxErrCode, typ = hyxLocalErr, parent: ref Exception = nil
 ): ref HyperxStrmError {.raises: [].} =
   let msg = case typ
     of hyxLocalErr: "Stream Error: " & $errCode
     of hyxRemoteErr: "Got Rst Error: " & $errCode
-  result = (ref HyperxStrmError)(typ: typ, code: errCode, msg: msg)
+  result = (ref HyperxStrmError)(
+    typ: typ, code: errCode, msg: msg, parent: parent
+  )
 
 func newStrmError*(
   errCode: uint32, typ = hyxLocalErr
 ): ref HyperxStrmError {.raises: [].} =
   result = newStrmError(errCode.toErrorCode, typ)
 
-func newError*(err: ref HyperxStrmError): ref HyperxStrmError {.raises: [].} =
+func newError*(
+  err: ref HyperxStrmError, parent: ref Exception = nil
+): ref HyperxStrmError {.raises: [].} =
   result = (ref HyperxStrmError)(
-    typ: err.typ, code: err.code, msg: err.msg
+    typ: err.typ, code: err.code, msg: err.msg, parent: parent
   )
 
 func newErrorOrDefault*(

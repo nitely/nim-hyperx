@@ -36,7 +36,8 @@ export
   HyperxStrmError,
   HyperxError,
   gracefulClose,
-  isGracefulClose
+  isGracefulClose,
+  trace
 
 var sslContext {.threadvar.}: SslContext
 
@@ -65,9 +66,8 @@ when not defined(hyperxTest):
       if ssl:
         wrapSocket(defaultSslContext(certFile, keyFile), result)
     except CatchableError as err:
-      debugInfo err.getStackTrace()
-      debugInfo err.msg
-      raise newConnError(err.msg)
+      debugErr2 err
+      raise newConnError(err.msg, err)
 
 type
   ServerContext* = ref object
@@ -101,15 +101,13 @@ proc close*(server: ServerContext) {.raises: [HyperxConnError].} =
   try:
     server.sock.close()
   except CatchableError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise newConnError(err.msg)
+    debugErr2 err
+    raise newConnError(err.msg, err)
   except Defect as err:
     raise err
   except Exception as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise newException(Defect, err.msg)
+    debugErr2 err
+    raise newException(Defect, err.msg, err)
 
 proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
   try:
@@ -120,9 +118,8 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
     server.sock.listen()
   except OSError, ValueError:
     let err = getCurrentException()
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise newConnError(err.msg)
+    debugErr2 err
+    raise newConnError(err.msg, err)
 
 # XXX dont allow receive push promise
 
@@ -139,9 +136,8 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
       )
     result = newClient(ctServer, sock, server.hostname)
   except CatchableError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise newConnError(err.msg)
+    debugErr2 err
+    raise newConnError(err.msg, err)
 
 template with*(server: ServerContext, body: untyped): untyped =
   try:
@@ -157,12 +153,10 @@ proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
     let strm = await client.streamOpenedMsgs.pop()
     result = newClientStream(client, strm)
   except QueueClosedError as err:
+    debugErr2 err
     doAssert not client.isConnected
     if client.error != nil:
-      # https://github.com/nim-lang/Nim/issues/15182
-      debugInfo client.error.getStackTrace()
-      debugInfo client.error.msg
-      raise newConnError(client.error.msg)
+      raise newConnError(client.error.msg, err)
     raise err
 
 proc sendHeaders*(
@@ -195,8 +189,8 @@ proc processStreamHandler(
     with strm:
       await callback(strm)
   except HyperxError:
-    debugInfo getCurrentException().getStackTrace()
-    debugInfo getCurrentException().msg
+    debugErr2 getCurrentException()
+    debugErr getCurrentException()
 
 proc processClientHandler(
   client: ClientContext,
@@ -208,8 +202,8 @@ proc processClientHandler(
         let strm = await client.recvStream()
         asyncCheck processStreamHandler(strm, callback)
   except HyperxError:
-    debugInfo getCurrentException().getStackTrace()
-    debugInfo getCurrentException().msg
+    debugErr2 getCurrentException()
+    debugErr getCurrentException()
   when defined(hyperxStats):
     echoStats client
 

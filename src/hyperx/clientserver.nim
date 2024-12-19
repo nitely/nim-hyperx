@@ -81,16 +81,14 @@ proc defaultSslContext*(
       keyFile = keyFile
     )
   except CatchableError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise newConnError(err.msg)
+    debugErr2 err
+    raise newConnError(err.msg, err)
   except Defect as err:
     raise err
   except Exception as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     # workaround for newContext raising Exception
-    raise newException(Defect, err.msg)
+    raise newException(Defect, err.msg, err)
   doAssert result != nil, "failure to initialize the SSL context"
   # https://httpwg.org/specs/rfc9113.html#tls12features
   const ctxOps = SSL_OP_ALL or
@@ -184,15 +182,13 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
   try:
     client.sock.close()
   except CatchableError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise newConnError(err.msg)
+    debugErr2 err
+    raise newConnError(err.msg, err)
   except Defect as err:
-    raise err  # raise original error
+    raise err
   except Exception as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise newException(Defect, err.msg)
+    debugErr2 err
+    raise newException(Defect, err.msg, err)
   finally:
     client.recvMsgs.close()
     client.streamOpenedMsgs.close()
@@ -296,9 +292,9 @@ func hpackDecode(
         # can resize multiple times before a header, but not after
         canResize = false
     doAssert i == L
-  except HpackError:
-    debugInfo getCurrentException().msg
-    raise newConnError(hyxCompressionError)
+  except HpackError as err:
+    debugErr2 err
+    raise newConnError(hyxCompressionError, parent=err)
 
 func hpackEncode*(
   client: ClientContext,
@@ -310,9 +306,8 @@ func hpackEncode*(
   try:
     discard hencode(name, value, client.headersEnc, payload, huffman = false)
   except HpackError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise newConnError(err.msg)
+    debugErr2 err
+    raise newConnError(err.msg, err)
 
 proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
   debugInfo "===SENT==="
@@ -335,18 +330,16 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
   try:
     await client.sendNaked(frm)
   except HyperxConnError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     client.error ?= newError err
     client.close()
     raise err
   except OsError, SslError:
     let err = getCurrentException()
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     client.error ?= newConnError(err.msg)
     client.close()
-    raise newConnError(err.msg)
+    raise newConnError(err.msg, err)
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
@@ -358,8 +351,7 @@ proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   try:
     await client.sendNaked(frm)
   except HyperxError, OsError, SslError:
-    debugInfo getCurrentException().getStackTrace()
-    debugInfo getCurrentException().msg
+    debugErr getCurrentException()
 
 func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
   result = ""
@@ -406,13 +398,12 @@ proc handshake(client: ClientContext) {.async.} =
     await client.handshakeNaked()
   except OsError, SslError:
     let err = getCurrentException()
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     doAssert client.isConnected
     # XXX err.msg includes a traceback for SslError but it should not
     client.error ?= newConnError(err.msg)
     client.close()
-    raise newConnError(err.msg)
+    raise newConnError(err.msg, err)
 
 func doTransitionRecv(
   s: Stream, frm: Frame
@@ -522,8 +513,7 @@ proc recvTask(client: ClientContext) {.async.} =
   except QueueClosedError:
     doAssert not client.isConnected
   except HyperxConnError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     client.error ?= newError err
     await client.sendSilently newGoAwayFrame(
       client.maxPeerStreamIdSeen, err.code
@@ -531,13 +521,11 @@ proc recvTask(client: ClientContext) {.async.} =
     raise err
   except OsError, SslError:
     let err = getCurrentException()
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     client.error ?= newConnError(err.msg)
-    raise newConnError(err.msg)
+    raise newConnError(err.msg, err)
   except CatchableError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     raise err
   finally:
     debugInfo "recvTask exited"
@@ -709,20 +697,17 @@ proc recvDispatcher(client: ClientContext) {.async.} =
   except QueueClosedError:
     doAssert not client.isConnected
   except HyperxConnError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     client.error ?= newError err
     await client.sendSilently newGoAwayFrame(
       client.maxPeerStreamIdSeen, err.code
     )
     raise err
   except HyperxStrmError:
-    debugInfo getCurrentException().getStackTrace()
-    debugInfo getCurrentException().msg
+    debugErr getCurrentException()
     doAssert false
   except CatchableError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     raise err
   finally:
     debugInfo "responseDispatcher exited"
@@ -745,13 +730,11 @@ proc windowUpdateTask(client: ClientContext) {.async.} =
   except QueueClosedError:
     doAssert not client.isConnected
   except HyperxConnError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     client.error ?= newError err
     raise err
   except CatchableError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     raise err
   finally:
     debugInfo "windowUpdateTask exited"
@@ -761,9 +744,8 @@ proc connect(client: ClientContext) {.async.} =
   try:
     await client.sock.connect(client.hostname, client.port)
   except OsError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
-    raise newConnError(err.msg)
+    debugErr2 err
+    raise newConnError(err.msg, err)
 
 proc failSilently(f: Future[void]) {.async.} =
   ## Be careful when wrapping non {.async.} procs,
@@ -773,7 +755,7 @@ proc failSilently(f: Future[void]) {.async.} =
   try:
     await f
   except HyperxError:
-    debugInfo getCurrentException().msg
+    debugErr getCurrentException()
 
 template with*(client: ClientContext, body: untyped): untyped =
   doAssert not client.isConnected
@@ -959,10 +941,9 @@ proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
   strm.headersRecv.add frm.payload
   try:
     strm.contentLen = contentLen(frm.payload)
-  except ValueError:
-    debugInfo getCurrentException().getStackTrace()
-    debugInfo getCurrentException().msg
-    raise newStrmError(hyxProtocolError)
+  except ValueError as err:
+    debugErr2 err
+    raise newStrmError(hyxProtocolError, parent=err)
   if frmfEndStream in frm.flags:
     # XXX dont do for no content status 1xx/204/304 and HEAD response
     if strm.client.typ == ctServer:
@@ -1019,8 +1000,7 @@ proc recvTask(strm: ClientStream) {.async.} =
   except QueueClosedError:
     discard
   except HyperxConnError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     client.error ?= newError err
     await client.sendSilently newGoAwayFrame(
       client.maxPeerStreamIdSeen, err.code
@@ -1028,15 +1008,13 @@ proc recvTask(strm: ClientStream) {.async.} =
     client.close()
     raise err
   except HyperxStrmError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     stream.error = newError err
     if err.typ == hyxLocalErr:
       await failSilently strm.writeRst(err.code)
     raise err
   except CatchableError as err:
-    debugInfo err.getStackTrace()
-    debugInfo err.msg
+    debugErr2 err
     raise err
   finally:
     strm.close()
@@ -1051,14 +1029,11 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   try:
     await recvHeadersNaked(strm, data)
   except QueueClosedError as err:
+    debugErr2 err
     if strm.client.error != nil:
-      debugInfo strm.client.error.getStackTrace()
-      debugInfo strm.client.error.msg
-      raise newError strm.client.error
+      raise newError(strm.client.error, err)
     if strm.stream.error != nil:
-      debugInfo strm.stream.error.getStackTrace()
-      debugInfo strm.stream.error.msg
-      raise newError strm.stream.error
+      raise newError(strm.stream.error, err)
     raise err
 
 proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
@@ -1091,14 +1066,11 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   try:
     await recvBodyNaked(strm, data)
   except QueueClosedError as err:
+    debugErr2 err
     if strm.client.error != nil:
-      debugInfo strm.client.error.getStackTrace()
-      debugInfo strm.client.error.msg
-      raise newError strm.client.error
+      raise newError(strm.client.error, err)
     if strm.stream.error != nil:
-      debugInfo strm.stream.error.getStackTrace()
-      debugInfo strm.stream.error.msg
-      raise newError strm.stream.error
+      raise newError(strm.stream.error, err)
     raise err
 
 func recvTrailers*(strm: ClientStream): string =
@@ -1190,14 +1162,11 @@ proc sendBody*(
   try:
     await sendBodyNaked(strm, data, finish)
   except QueueClosedError as err:
+    debugErr2 err
     if strm.client.error != nil:
-      debugInfo strm.client.error.getStackTrace()
-      debugInfo strm.client.error.msg
-      raise newError strm.client.error
+      raise newError(strm.client.error, err)
     if strm.stream.error != nil:
-      debugInfo strm.stream.error.getStackTrace()
-      debugInfo strm.stream.error.msg
-      raise newError strm.stream.error
+      raise newError(strm.stream.error, err)
     raise err
 
 template with*(strm: ClientStream, body: untyped): untyped =

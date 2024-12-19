@@ -34,7 +34,8 @@ export
   HyperxConnError,
   HyperxStrmError,
   HyperxError,
-  isGracefulClose
+  isGracefulClose,
+  trace
 
 var sslContext {.threadvar.}: SslContext
 
@@ -57,9 +58,8 @@ when not defined(hyperxTest):
       if ssl:
         wrapSocket(defaultSslContext(), result)
     except CatchableError as err:
-      debugInfo err.getStackTrace()
-      debugInfo err.msg
-      raise newConnError(err.msg)
+      debugErr2 err
+      raise newConnError(err.msg, err)
 
 proc newClient*(
   hostname: string,
