@@ -3,6 +3,7 @@
 import ./errors
 
 func stackTrace2(err: ref Exception): string {.raises: [].} =
+  doAssert err != nil
   result = ""
   result.add err.getStackTrace
   result.add "Error: "
