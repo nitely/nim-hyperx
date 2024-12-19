@@ -56,7 +56,7 @@ type
   HyperxConnError* = object of HyperxError
   HyperxStrmError* = object of HyperxError
   ConnClosedError* = object of HyperxConnError
-  GracefulShutdownError* = HyperxConnError
+  GracefulShutdownError* = object of HyperxConnError
   QueueClosedError* = object of HyperxError
 
 func newConnClosedError*: ref ConnClosedError {.raises: [].} =
