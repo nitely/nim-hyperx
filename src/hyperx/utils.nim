@@ -1,20 +1,28 @@
 ## Shared utilities
 
-import std/strformat
 import ./errors
 
-func `$`(err: ref Exception): string {.raises: [].} =
+func stackTrace2(err: ref Exception): string {.raises: [].} =
+  result = ""
+  result.add err.getStackTrace
+  result.add "Error: "
+  result.add err.msg
+  result.add " ["
+  result.add err.name
+  result.add ']'
+
+func fulltrace(err: ref Exception): string {.raises: [].} =
   doAssert err != nil
   result = ""
   var e = err
   while e != nil:
-    result.add &"{e.getStackTrace}Error: {e.msg} [{e.name}]"
+    result.add e.stackTrace2()
     if e.parent != nil:
-      result.add "\nASDASDASDASDreraised from:\n"
+      result.add "\nreraised from:\n"
     e = e.parent
 
 func trace*(err: ref HyperxError): string {.raises: [].} =
-  $err
+  fulltrace err
 
 template `?=`*(exp1, exp2: untyped): untyped =
   if exp1 == nil:
@@ -23,13 +31,13 @@ template `?=`*(exp1, exp2: untyped): untyped =
 func debugErr2*(err: ref Exception) {.raises: [].} =
   # This func should not be needed, but just in case
   when defined(hyperxDebugErr2):
-    debugEcho &"{e.getStackTrace}Error: {e.msg} [{e.name}]"
+    debugEcho err.stackTrace2()
   else:
     discard
 
 func debugErr*(err: ref Exception) {.raises: [].} =
   when defined(hyperxDebug) or defined(hyperxDebugErr):
-    debugEcho err
+    debugEcho fulltrace(err)
   else:
     discard
 
