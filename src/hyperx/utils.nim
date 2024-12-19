@@ -2,9 +2,45 @@
 
 import ./errors
 
+func stackTrace2(err: ref Exception): string {.raises: [].} =
+  doAssert err != nil
+  result = ""
+  result.add err.getStackTrace
+  result.add "Error: "
+  result.add err.msg
+  result.add " ["
+  result.add err.name
+  result.add ']'
+
+func fulltrace(err: ref Exception): string {.raises: [].} =
+  doAssert err != nil
+  result = ""
+  var e = err
+  while e != nil:
+    result.add e.stackTrace2()
+    if e.parent != nil:
+      result.add "\nreraised from:\n"
+    e = e.parent
+
+func trace*(err: ref HyperxError): string {.raises: [].} =
+  fulltrace err
+
 template `?=`*(exp1, exp2: untyped): untyped =
   if exp1 == nil:
     exp1 = exp2
+
+func debugErr2*(err: ref Exception) {.raises: [].} =
+  # This func should not be needed, but just in case
+  when defined(hyperxDebugErr2):
+    debugEcho err.stackTrace2()
+  else:
+    discard
+
+func debugErr*(err: ref Exception) {.raises: [].} =
+  when defined(hyperxDebug) or defined(hyperxDebugErr):
+    debugEcho fulltrace(err)
+  else:
+    discard
 
 template debugInfo*(s: untyped): untyped =
   when defined(hyperxDebug):
@@ -38,9 +74,8 @@ template untrackExceptions*(body: untyped): untyped =
     except Defect as err:
       raise err  # raise original error
     except Exception as err:
-      debugInfo err.getStackTrace()
-      debugInfo err.msg
-      raise newException(Defect, err.msg)
+      debugErr err
+      raise newException(Defect, err.msg, err)
 
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
   let L = s.len
