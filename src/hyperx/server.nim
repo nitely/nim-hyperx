@@ -11,6 +11,7 @@ import std/net
 import ./clientserver
 import ./stream
 import ./queue
+import ./limiter
 import ./errors
 import ./utils
 
@@ -207,11 +208,18 @@ proc processClientHandler(
   when defined(hyperxStats):
     echoStats client
 
+const defaultMaxConns = int.high
+
 proc serve*(
   server: ServerContext,
-  callback: StreamCallback
+  callback: StreamCallback,
+  maxConnections = defaultMaxConns
 ) {.async.} =
-  with server:
-    while server.isConnected:
-      let client = await server.recvClient()
-      asyncCheck processClientHandler(client, callback)
+  let lt = newLimiter maxConnections
+  try:
+    with server:
+      while server.isConnected:
+        let client = await server.recvClient()
+        await lt.spawn processClientHandler(client, callback)
+  finally:
+    await lt.join()
