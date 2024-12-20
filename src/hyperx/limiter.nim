@@ -17,13 +17,13 @@ type LimiterAsync* = ref object
 
 func newLimiter*(size: int): LimiterAsync {.raises: [].} =
   doAssert size > 0
-    LimiterAsync(
-      used: 0,
-      size: size,
-      waiter: nil,
-      wakingUp: false,
-      isClosed: false
-    )
+  LimiterAsync(
+    used: 0,
+    size: size,
+    waiter: nil,
+    wakingUp: false,
+    isClosed: false
+  )
 
 proc wakeup(lt: LimiterAsync) {.raises: [].} =
   if lt.waiter == nil:

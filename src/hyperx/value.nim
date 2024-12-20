@@ -16,12 +16,12 @@ type
     isClosed: bool
 
 func newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
-    ValueAsync[T](
-      putWaiter: nil,
-      getWaiter: nil,
-      val: nil,
-      isClosed: false
-    )
+  ValueAsync[T](
+    putWaiter: nil,
+    getWaiter: nil,
+    val: nil,
+    isClosed: false
+  )
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
   if f == nil:
