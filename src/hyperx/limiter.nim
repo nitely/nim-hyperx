@@ -3,8 +3,6 @@ import std/asyncdispatch
 import ./utils
 import ./errors
 
-template fut[T](f: FutureVar[T]): Future[T] = Future[T](f)
-
 type LimiterAsyncClosedError* = QueueClosedError
 
 func newLimiterAsyncClosedError(): ref LimiterAsyncClosedError {.raises: [].} =
@@ -13,25 +11,23 @@ func newLimiterAsyncClosedError(): ref LimiterAsyncClosedError {.raises: [].} =
 type LimiterAsync* = ref object
   ## Async concurrency limiter.
   used, size: int
-  waiter: FutureVar[void]
+  waiter: Future[void]
   wakingUp: bool
   isClosed: bool
 
 func newLimiter*(size: int): LimiterAsync {.raises: [].} =
   doAssert size > 0
-  {.cast(noSideEffect).}:
-    let waiter = newFutureVar[void]()
-    untrackExceptions:
-      waiter.complete()
     LimiterAsync(
       used: 0,
       size: size,
-      waiter: waiter,
+      waiter: nil,
       wakingUp: false,
       isClosed: false
     )
 
 proc wakeup(lt: LimiterAsync) {.raises: [].} =
+  if lt.waiter == nil:
+    return
   if lt.waiter.finished:
     return
   proc wakeup =
@@ -63,18 +59,20 @@ proc isEmpty*(lt: LimiterAsync): bool {.raises: [].} =
 proc wait*(lt: LimiterAsync): Future[void] {.raises: [LimiterAsyncClosedError].} =
   doAssert lt.used > 0
   doAssert lt.used <= lt.size
-  doAssert lt.waiter.finished
+  doAssert lt.waiter == nil or lt.waiter.finished
   check not lt.isClosed, newLimiterAsyncClosedError()
-  lt.waiter.clean()
-  return lt.waiter.fut
+  lt.waiter = newFuture[void]()
+  return lt.waiter
 
 proc failSoon(lt: LimiterAsync) {.raises: [].} =
+  if lt.waiter == nil:
+    return
   if lt.waiter.finished:
     return
   proc wakeup =
     lt.wakingUp = false
     if not lt.waiter.finished:
-      lt.waiter.fut.fail newLimiterAsyncClosedError()
+      lt.waiter.fail newLimiterAsyncClosedError()
   if not lt.wakingUp:
     lt.wakingUp = true
     untrackExceptions:

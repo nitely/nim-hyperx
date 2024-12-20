@@ -13,7 +13,6 @@ func newSignalClosedError(): ref SignalClosedError {.raises: [].} =
 type
   SignalAsync* = ref object
     ## Wait for a signal. When triggers wakes everyone up
-    # XXX use/reuse FutureVars
     waiters: Deque[Future[void]]
     isClosed: bool
 

@@ -3,8 +3,6 @@ import std/asyncdispatch
 import ./utils
 import ./errors
 
-template fut[T](f: FutureVar[T]): Future[T] = Future[T](f)
-
 type
   ValueAsyncClosedError* = QueueClosedError
 
@@ -13,25 +11,21 @@ func newValueAsyncClosedError(): ref ValueAsyncClosedError {.raises: [].} =
 
 type
   ValueAsync*[T] = ref object
-    putWaiter, getWaiter: FutureVar[void]
+    putWaiter, getWaiter: Future[void]
     val: T
     isClosed: bool
 
 func newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
-  {.cast(noSideEffect).}:
-    let putWaiter = newFutureVar[void]()
-    let getWaiter = newFutureVar[void]()
-    untrackExceptions:
-      putWaiter.complete()
-      getWaiter.complete()
     ValueAsync[T](
-      putWaiter: putWaiter,
-      getWaiter: getWaiter,
+      putWaiter: nil,
+      getWaiter: nil,
       val: nil,
       isClosed: false
     )
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
+  if f == nil:
+    return
   if f.finished:
     return
   proc wakeup =
@@ -45,24 +39,26 @@ proc put*[T](vala: ValueAsync[T], val: T) {.async.} =
   doAssert val != nil
   doAssert vala.val == nil
   vala.val = val
-  wakeupSoon vala.getWaiter.fut
-  doAssert vala.putWaiter.finished
-  vala.putWaiter.clean()
-  await vala.putWaiter.fut
+  wakeupSoon vala.getWaiter
+  doAssert vala.putWaiter == nil or vala.putWaiter.finished
+  vala.putWaiter = newFuture[void]()
+  await vala.putWaiter
   doAssert vala.val == nil
 
 proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
   check not vala.isClosed, newValueAsyncClosedError()
-  doAssert vala.getWaiter.finished
+  doAssert vala.getWaiter == nil or vala.getWaiter.finished
   if vala.val == nil:
-    vala.getWaiter.clean()
-    await vala.getWaiter.fut
+    vala.getWaiter = newFuture[void]()
+    await vala.getWaiter
   doAssert vala.val != nil
   result = vala.val
   vala.val = nil
   wakeupSoon vala.putWaiter.fut
 
 proc failSoon(f: Future[void]) {.raises: [].} =
+  if f == nil:
+    return
   if f.finished:
     return
   proc wakeup =
@@ -75,8 +71,8 @@ proc close*[T](vala: ValueAsync[T]) {.raises: [].} =
   if vala.isClosed:
     return
   vala.isClosed = true
-  failSoon vala.putWaiter.fut
-  failSoon vala.getWaiter.fut
+  failSoon vala.putWaiter
+  failSoon vala.getWaiter
 
 when isMainModule:
   func newIntRef(n: int): ref int =

@@ -3,8 +3,6 @@ import std/deques
 import ./utils
 import ./errors
 
-template fut[T](f: FutureVar[T]): Future[T] = Future[T](f)
-
 func newQueueClosedError(): ref QueueClosedError {.raises: [].} =
   result = (ref QueueClosedError)(msg: "Queue is closed")
 
@@ -15,27 +13,21 @@ type
   QueueAsync*[T] = ref object
     s: Deque[T]
     size: int
-    putWaiter, popWaiter: FutureVar[void]
+    putWaiter, popWaiter: Future[void]
     wakingPut, wakingPop: bool
     isClosed: bool
 
 func newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
   doAssert size > 0
-  {.cast(noSideEffect).}:
-    let putWaiter = newFutureVar[void]()
-    let popWaiter = newFutureVar[void]()
-    untrackExceptions:
-      putWaiter.complete()
-      popWaiter.complete()
-    QueueAsync[T](
-      s: initDeque[T](size),
-      size: size,
-      putWaiter: putWaiter,
-      popWaiter: popWaiter,
-      wakingPut: false,
-      wakingPop: false,
-      isClosed: false
-    )
+  QueueAsync[T](
+    s: initDeque[T](size),
+    size: size,
+    putWaiter: nil,
+    popWaiter: nil,
+    wakingPut: false,
+    wakingPop: false,
+    isClosed: false
+  )
 
 iterator items*[T](q: QueueAsync[T]): T {.inline.} =
   for elm in items q.s:
@@ -45,6 +37,8 @@ func used[T](q: QueueAsync[T]): int {.raises: [].} =
   q.s.len
 
 proc wakeupPop[T](q: QueueAsync[T]) {.raises: [].} =
+  if q.popWaiter == nil:
+    return
   if q.popWaiter.finished:
     return
   proc wakeup =
@@ -59,16 +53,18 @@ proc wakeupPop[T](q: QueueAsync[T]) {.raises: [].} =
 proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   doAssert q.used <= q.size
   check not q.isClosed, newQueueClosedError()
-  doAssert q.putWaiter.finished
+  doAssert q.putWaiter == nil or q.putWaiter.finished
   if q.used == q.size:
-    q.putWaiter.clean()
-    await q.putWaiter.fut
+    q.putWaiter = newFuture[void]()
+    await q.putWaiter
     check not q.isClosed, newQueueClosedError()
   doAssert q.used < q.size
   q.s.addFirst v
   q.wakeupPop()
 
 proc wakeupPut[T](q: QueueAsync[T]) {.raises: [].} =
+  if q.putWaiter == nil:
+    return
   if q.putWaiter.finished:
     return
   proc wakeup =
@@ -83,10 +79,10 @@ proc wakeupPut[T](q: QueueAsync[T]) {.raises: [].} =
 proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
   check not q.isClosed, newQueueClosedError()
-  doAssert q.popWaiter.finished
+  doAssert q.popWaiter == nil or q.popWaiter.finished
   if q.used == 0:
-    q.popWaiter.clean()
-    await q.popWaiter.fut
+    q.popWaiter = newFuture[void]()
+    await q.popWaiter
     check not q.isClosed, newQueueClosedError()
   doAssert q.used > 0
   result = q.s.popLast()
@@ -95,17 +91,21 @@ proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
 func isClosed*[T](q: QueueAsync[T]): bool {.raises: [].} =
   q.isClosed
 
+proc failSoon(f: Future[void]) {.raises: [].} =
+  if f == nil:
+    return
+  proc wakeup =
+    if not f.finished:
+      f.fail newQueueClosedError()
+  untrackExceptions:
+    callSoon wakeup
+
 proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   if q.isClosed:
     return
   q.isClosed = true
-  proc failWaiters =
-    if not q.putWaiter.finished:
-      q.putWaiter.fut.fail newQueueClosedError()
-    if not q.popWaiter.finished:
-      q.popWaiter.fut.fail newQueueClosedError()
-  untrackExceptions:
-    callSoon failWaiters
+  failSoon q.putWaiter
+  failSoon q.popWaiter
 
 when isMainModule:
   proc sleepCycle: Future[void] =
