@@ -54,7 +54,7 @@ proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
   doAssert vala.val != nil
   result = vala.val
   vala.val = nil
-  wakeupSoon vala.putWaiter.fut
+  wakeupSoon vala.putWaiter
 
 proc failSoon(f: Future[void]) {.raises: [].} =
   if f == nil:
