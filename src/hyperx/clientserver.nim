@@ -72,23 +72,12 @@ proc defaultSslContext*(
   # protSSLv23 will disable all protocols
   # lower than the min protocol defined
   # in openssl.config, usually +TLSv1.2
-  result = nil
-  try:
-    result = newContext(
-      protSSLv23,
-      verifyMode = CVerifyPeer,
-      certFile = certFile,
-      keyFile = keyFile
-    )
-  except CatchableError as err:
-    debugErr2 err
-    raise newConnError(err.msg, err)
-  except Defect as err:
-    raise err
-  except Exception as err:
-    debugErr2 err
-    # workaround for newContext raising Exception
-    raise newException(Defect, err.msg, err)
+  result = tryCatch newContext(
+    protSSLv23,
+    verifyMode = CVerifyPeer,
+    certFile = certFile,
+    keyFile = keyFile
+  )
   doAssert result != nil, "failure to initialize the SSL context"
   # https://httpwg.org/specs/rfc9113.html#tls12features
   const ctxOps = SSL_OP_ALL or
@@ -180,15 +169,7 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     return
   client.isConnected = false
   try:
-    client.sock.close()
-  except CatchableError as err:
-    debugErr2 err
-    raise newConnError(err.msg, err)
-  except Defect as err:
-    raise err
-  except Exception as err:
-    debugErr2 err
-    raise newException(Defect, err.msg, err)
+    tryCatch client.sock.close()
   finally:
     client.recvMsgs.close()
     client.streamOpenedMsgs.close()
@@ -741,11 +722,7 @@ proc windowUpdateTask(client: ClientContext) {.async.} =
     client.close()
 
 proc connect(client: ClientContext) {.async.} =
-  try:
-    await client.sock.connect(client.hostname, client.port)
-  except OsError as err:
-    debugErr2 err
-    raise newConnError(err.msg, err)
+  tryCatch await client.sock.connect(client.hostname, client.port)
 
 proc failSilently(f: Future[void]) {.async.} =
   ## Be careful when wrapping non {.async.} procs,

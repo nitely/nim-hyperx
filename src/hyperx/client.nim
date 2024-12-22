@@ -52,14 +52,11 @@ proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
 when not defined(hyperxTest):
   proc newMySocket(ssl: bool): MyAsyncSocket {.raises: [HyperxConnError].} =
     result = nil
-    try:
+    tryCatch:
       result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
       doAssert result != nil
       if ssl:
         wrapSocket(defaultSslContext(), result)
-    except CatchableError as err:
-      debugErr2 err
-      raise newConnError(err.msg, err)
 
 proc newClient*(
   hostname: string,

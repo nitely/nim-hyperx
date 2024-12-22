@@ -61,14 +61,11 @@ when not defined(hyperxTest):
     keyFile = ""
   ): MyAsyncSocket {.raises: [HyperxConnError].} =
     result = nil
-    try:
+    tryCatch:
       result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
       doAssert result != nil
       if ssl:
         wrapSocket(defaultSslContext(certFile, keyFile), result)
-    except CatchableError as err:
-      debugErr2 err
-      raise newConnError(err.msg, err)
 
 type
   ServerContext* = ref object
@@ -99,34 +96,21 @@ proc close*(server: ServerContext) {.raises: [HyperxConnError].} =
   if not server.isConnected:
     return
   server.isConnected = false
-  try:
-    server.sock.close()
-  except CatchableError as err:
-    debugErr2 err
-    raise newConnError(err.msg, err)
-  except Defect as err:
-    raise err
-  except Exception as err:
-    debugErr2 err
-    raise newException(Defect, err.msg, err)
+  tryCatch server.sock.close()
 
 proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
-  try:
+  tryCatch:
     server.sock.setSockOpt(OptReuseAddr, true)
     server.sock.setSockOpt(OptReusePort, true)
     server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
     server.sock.bindAddr server.port
     server.sock.listen()
-  except OSError, ValueError:
-    let err = getCurrentException()
-    debugErr2 err
-    raise newConnError(err.msg, err)
 
 # XXX dont allow receive push promise
 
 # XXX limit number of active clients
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
-  try:
+  tryCatch:
     # note OptNoDelay is inherited from server.sock
     let sock = await server.sock.accept()
     if server.sock.isSsl:
@@ -135,10 +119,7 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
       wrapConnectedSocket(
         sslContext, sock, handshakeAsServer, server.hostname
       )
-    result = newClient(ctServer, sock, server.hostname)
-  except CatchableError as err:
-    debugErr2 err
-    raise newConnError(err.msg, err)
+    return newClient(ctServer, sock, server.hostname)
 
 template with*(server: ServerContext, body: untyped): untyped =
   try:
