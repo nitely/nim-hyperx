@@ -68,14 +68,22 @@ template raisesAssertion*(exp: untyped): untyped =
 
 template untrackExceptions*(body: untyped): untyped =
   ## workaround for API errors in Nim's stdlib
-  {.line: instantiationInfo(fullPaths = true).}:
-    try:
-      body
-    except Defect as err:
-      raise err  # raise original error
-    except Exception as err:
-      debugErr err
-      raise newException(Defect, err.msg, err)
+  try:
+    body
+  except Defect as err:
+    raise err  # raise original error
+  except Exception as err:
+    debugErr err
+    raise newException(Defect, err.msg, err)
+
+template tryCatch*(body: untyped): untyped =
+  try:
+    body
+  except Defect as err:
+    raise err
+  except Exception as err:
+    debugErr2 err
+    raise newConnError(err.msg, err)
 
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
   let L = s.len
@@ -241,6 +249,16 @@ when isMainModule:
     except AssertionDefect:
       raised = true
     doAssert raised
+  block:
+    raisesAssertion(tryCatch(doAssert false))
+  block:
+    try:
+      tryCatch:
+        raise newException(ValueError, "foo")
+      doAssert false
+    except HyperxConnError as err:
+      doAssert err.msg == "foo"
+      doAssert err.parent.msg == "foo"
   block content_len:
     doAssert contentLen(newSeq[byte]()) == -1
     doAssert contentLen(":foo: abc\r\n".toBytes) == -1
