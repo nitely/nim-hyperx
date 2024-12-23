@@ -108,6 +108,8 @@ Also try:
 
 Nim's stdlib async creates cycles, and the ORC cycle collector does not run often enough. If you want to use orc, you'll need to call `GC_runOrc()` at some point, for example on client close or stream close. Related [nim issue](https://github.com/nim-lang/Nim/issues/21631). `--mm:refc` does not have this issue.
 
+This has been fixed in devel, and next Nim 2.2.1 release.
+
 ### Related libs
 
 - [nim-grpc](https://github.com/nitely/nim-grpc)
