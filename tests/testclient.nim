@@ -428,10 +428,10 @@ testAsync "stream error NO_ERROR handling":
     await tc.checkHandshake()
     let strm = tc.client.newClientStream()
     with strm:
-      await tc.replyNoError(strm.stream.id)
       let sendFut = strm.send(dataOut)
       let recvFut = strm.recv(dataIn)
-      await sendFut  # this could raise
+      await sendFut
+      await tc.replyNoError(strm.stream.id)
       await recvFut  # this should never raise
   doAssert dataIn[] == headers
 
