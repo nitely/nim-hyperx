@@ -794,10 +794,11 @@ func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   )
 
 func newClientStream*(client: ClientContext): ClientStream =
-  let stream = client.openStream()
+  let stream = client.streams.dummy()
   newClientStream(client, stream)
 
 proc close(strm: ClientStream) {.raises: [].} =
+  strm.stream.close()
   strm.client.streams.close(strm.stream.id)
   strm.bodyRecvSig.close()
   strm.headersRecvSig.close()
@@ -805,6 +806,17 @@ proc close(strm: ClientStream) {.raises: [].} =
     strm.client.peerWindowUpdateSig.trigger()
   except SignalClosedError:
     discard
+
+func openStream(strm: ClientStream) {.raises: [StreamsClosedError, GracefulShutdownError].} =
+  # XXX some error if max sid is reached
+  # XXX error if maxStreams is reached
+  template client: untyped = strm.client
+  doAssert client.typ == ctClient
+  check not client.isGracefulShutdown, newGracefulShutdownError()
+  var sid = client.currStreamId
+  sid += (if sid == StreamId 0: StreamId 1 else: StreamId 2)
+  client.streams.open(strm.stream, sid, client.peerWindowSize.int32)
+  client.currStreamId = sid
 
 func recvEnded*(strm: ClientStream): bool {.raises: [].} =
   strm.stateRecv == csStateEnded and
@@ -1063,6 +1075,8 @@ proc sendHeadersImpl*(
   doAssert strm.stream.state in strmStateHeaderSendAllowed
   doAssert strm.stateSend == csStateOpened or
     (strm.stateSend in {csStateHeaders, csStateData} and finish)
+  if strm.stream.state == strmIdle:
+    strm.openStream()
   strm.stateSend = csStateHeaders
   var frm = newFrame()
   frm.add headers

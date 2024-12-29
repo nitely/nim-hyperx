@@ -174,6 +174,17 @@ type
     pingSig*: SignalAsync
     error*: ref HyperxStrmError
 
+proc newStream*: Stream {.raises: [].} =
+  Stream(
+    id: uint32.high.StreamId,
+    state: strmIdle,
+    msgs: newValueAsync[Frame](),
+    peerWindowUpdateSig: newSignal(),
+    windowPending: 0,
+    windowProcessed: 0,
+    pingSig: newSignal()
+  )
+
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
   doAssert peerWindow >= 0
   Stream(
@@ -234,6 +245,23 @@ func open*(
   check not s.isClosed, newStreamsClosedError("Cannot open stream")
   result = newStream(sid, peerWindow)
   s.t[sid] = result
+
+func open*(
+  s: var Streams,
+  stream: Stream,
+  sid: StreamId,
+  peerWindow: int32
+) {.raises: [StreamsClosedError].} =
+  doAssert stream.id == uint32.high.StreamId
+  doAssert stream.state == strmIdle
+  check not s.isClosed, newStreamsClosedError("Cannot open stream")
+  stream.id = sid
+  stream.peerWindow = peerWindow
+  s.t[sid] = stream
+
+func dummy*(s: var Streams): Stream {.raises: [StreamsClosedError].} =
+  check not s.isClosed, newStreamsClosedError("Cannot open stream")
+  result = newStream()
 
 iterator values*(s: Streams): Stream {.inline.} =
   for v in values s.t:
