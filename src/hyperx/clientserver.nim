@@ -26,8 +26,9 @@ const SSL_OP_NO_RENEGOTIATION = 1073741824
 const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
 
 const
-  preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
-  statusLineLen* = ":status: xxx\r\n".len
+  preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
+  statusLineLen = ":status: xxx\r\n".len
+  maxStreamId = (1'u32 shl 31) - 1'u32
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize* = 4096'u32
   stgInitialMaxConcurrentStreams* = uint32.high
@@ -286,6 +287,7 @@ proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
   debugInfo debugPayload(frm)
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
+  doAssert frm.sid <= StreamId maxStreamId
   check not client.sock.isClosed, newConnClosedError()
   GC_ref frm
   try:
@@ -1174,6 +1176,7 @@ template with*(strm: ClientStream, body: untyped): untyped =
 proc ping(client: ClientContext, strm: Stream) {.async.} =
   # this is done for rst and go-away pings; only one stream ping
   # will ever be in progress
+  doAssert strm.id in client.streams
   if strm.pingSig.len > 0:
     await strm.pingSig.waitFor()
   else:

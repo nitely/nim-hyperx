@@ -114,6 +114,7 @@ type
 proc `==`*(a, b: FrmSid): bool {.borrow.}
 proc `+=`*(a: var FrmSid, b: FrmSid) {.borrow.}
 proc `<`*(a, b: FrmSid): bool {.borrow.}
+proc `<=`*(a, b: FrmSid): bool {.borrow.}
 
 #func `+=`*(a: var FrmSid, b: uint) {.raises: [].} =
 #  a = (a.uint + b).FrmSid
