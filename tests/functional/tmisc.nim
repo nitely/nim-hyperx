@@ -21,6 +21,12 @@ template testAsync(name: string, body: untyped): untyped =
     doAssert checked
   )()
 
+proc sleepCycle: Future[void] =
+  let fut = newFuture[void]()
+  proc wakeup = fut.complete()
+  callSoon wakeup
+  return fut
+
 const defaultHeaders = @[
   (":method", "POST"),
   (":scheme", "https"),
@@ -177,3 +183,34 @@ testAsync "send after client graceful close":
     except GracefulShutdownError:
       inc checked
   doAssert checked == 1
+
+testAsync "lazy client stream id":
+  var checked = new int
+  checked[] = 0
+  proc stream(client: ClientContext, sleep = 0) {.async.} =
+    let strm = client.newClientStream()
+    with strm:
+      for i in 0 .. sleep-1:
+        await sleepCycle()
+        #echo $sleep
+      var headers = defaultHeaders
+      headers.add ("x-no-echo-headers", "true")
+      await strm.sendHeaders(headers, finish = false)
+      var data = new string
+      await strm.recvHeaders(data)
+      doAssert data[] == ":status: 200\r\n"
+      data[] = "foobar" & $sleep
+      await strm.sendBody(data, finish = true)
+      data[] = ""
+      await strm.recvBody(data)
+      doAssert data[] == "foobar" & $sleep
+      checked[] += 1
+    checked[] += 1
+  var client = newClient(localHost, localPort)
+  with client:
+    let strm1 = client.stream(300)
+    let strm2 = client.stream(100)
+    await strm1
+    await strm2
+    checked[] += 1
+  doAssert checked[] == 5
