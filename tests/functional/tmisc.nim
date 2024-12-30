@@ -218,3 +218,19 @@ testAsync "lazy client stream id":
     doAssert order[] == @[100, 200]
     checked[] += 1
   doAssert checked[] == 5
+
+testAsync "cancel lazy stream":
+  var checked = 0
+  var client = newClient(localHost, localPort)
+  with client:
+    let strm = client.newClientStream()
+    await strm.cancel(hyxCancel)
+    with strm:
+      try:
+        await strm.sendHeaders(defaultHeaders, finish = true)
+        doAssert false
+      except HyperxStrmError as err:
+        doAssert err.code == hyxStreamClosed
+      inc checked
+    inc checked
+  doAssert checked == 2
