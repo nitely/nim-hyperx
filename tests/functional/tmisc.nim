@@ -107,6 +107,8 @@ testAsync "server graceful close":
       inc checked
   doAssert checked == 2
 
+# XXX cannot longer check server is sending GoAway
+#     since cannot create a stream before sending headers
 testAsync "send after server graceful close":
   var checked = 0
   var client = newClient(localHost, localPort)
@@ -127,10 +129,8 @@ testAsync "send after server graceful close":
     try:
       with strm2:
         await strm2.sendHeaders(defaultHeaders, finish = true)
-        var data = new string
-        await strm2.recvHeaders(data)
         doAssert false
-    except HyperxError:
+    except GracefulShutdownError:
       inc checked
   doAssert checked == 2
 
@@ -162,20 +162,18 @@ testAsync "client graceful close":
       inc checked
   doAssert checked == 2
 
+# XXX cannot longer create a stream before shutdown
+#     and send on it after because of lazy stream id
 testAsync "send after client graceful close":
   var checked = 0
   var client = newClient(localHost, localPort)
   with client:
     let strm = client.newClientStream()
-    with strm:
-      # This is not correct usage
-      await client.gracefulClose()
-      try:
+    await client.gracefulClose()
+    try:
+      with strm:
         await strm.sendHeaders(defaultHeaders, finish = true)
-        var data = new string
-        await strm.recvHeaders(data)
-      except HyperxConnError:
-        #doAssert err.code == errNoError
-        inc checked
-    inc checked
-  doAssert checked == 2
+        doAssert false
+    except GracefulShutdownError:
+      inc checked
+  doAssert checked == 1

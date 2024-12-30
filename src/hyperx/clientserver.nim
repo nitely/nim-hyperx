@@ -794,6 +794,8 @@ func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   )
 
 func newClientStream*(client: ClientContext): ClientStream =
+  doAssert client.typ == ctClient
+  check not client.isGracefulShutdown, newGracefulShutdownError()
   let stream = client.streams.dummy()
   newClientStream(client, stream)
 
