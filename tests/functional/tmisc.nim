@@ -185,6 +185,8 @@ testAsync "send after client graceful close":
   doAssert checked == 1
 
 testAsync "lazy client stream id":
+  var order = new seq[int]
+  order[] = newSeq[int]()
   var checked = new int
   checked[] = 0
   proc stream(client: ClientContext, sleep = 0) {.async.} =
@@ -193,6 +195,7 @@ testAsync "lazy client stream id":
       for i in 0 .. sleep-1:
         await sleepCycle()
         #echo $sleep
+      order[].add sleep
       var headers = defaultHeaders
       headers.add ("x-no-echo-headers", "true")
       await strm.sendHeaders(headers, finish = false)
@@ -208,9 +211,10 @@ testAsync "lazy client stream id":
     checked[] += 1
   var client = newClient(localHost, localPort)
   with client:
-    let strm1 = client.stream(300)
+    let strm1 = client.stream(200)
     let strm2 = client.stream(100)
     await strm1
     await strm2
+    doAssert order[] == @[100, 200]
     checked[] += 1
   doAssert checked[] == 5

@@ -225,15 +225,9 @@ func del*(s: var Streams, sid: StreamId) {.raises: [].} =
 func contains*(s: Streams, sid: StreamId): bool {.raises: [].} =
   s.t.contains sid
 
-func open*(
-  s: var Streams,
-  sid: StreamId,
-  peerWindow: int32
-): Stream {.raises: [StreamsClosedError].} =
-  doAssert sid notin s.t, $sid.int
+func dummy*(s: var Streams): Stream {.raises: [StreamsClosedError].} =
   check not s.isClosed, newStreamsClosedError("Cannot open stream")
-  result = newStream(sid, peerWindow)
-  s.t[sid] = result
+  result = newStream(uint32.high.StreamId, 0)
 
 func open*(
   s: var Streams,
@@ -241,6 +235,7 @@ func open*(
   sid: StreamId,
   peerWindow: int32
 ) {.raises: [StreamsClosedError].} =
+  doAssert sid notin s.t, $sid.int
   doAssert stream.id == uint32.high.StreamId
   doAssert stream.state == strmIdle
   check not s.isClosed, newStreamsClosedError("Cannot open stream")
@@ -248,9 +243,13 @@ func open*(
   stream.peerWindow = peerWindow
   s.t[sid] = stream
 
-func dummy*(s: var Streams): Stream {.raises: [StreamsClosedError].} =
-  check not s.isClosed, newStreamsClosedError("Cannot open stream")
-  result = newStream(uint32.high.StreamId, 0)
+func open*(
+  s: var Streams,
+  sid: StreamId,
+  peerWindow: int32
+): Stream {.raises: [StreamsClosedError].} =
+  result = s.dummy()
+  s.open(result, sid, peerWindow)
 
 iterator values*(s: Streams): Stream {.inline.} =
   for v in values s.t:

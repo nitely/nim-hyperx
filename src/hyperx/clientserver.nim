@@ -184,16 +184,6 @@ func openMainStream(client: ClientContext): Stream {.raises: [StreamsClosedError
   doAssert frmSidMain notin client.streams
   result = client.streams.open(frmSidMain, client.peerWindowSize.int32)
 
-func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError, GracefulShutdownError].} =
-  # XXX some error if max sid is reached
-  # XXX error if maxStreams is reached
-  doAssert client.typ == ctClient
-  check not client.isGracefulShutdown, newGracefulShutdownError()
-  var sid = client.currStreamId
-  sid += (if sid == StreamId 0: StreamId 1 else: StreamId 2)
-  result = client.streams.open(sid, client.peerWindowSize.int32)
-  client.currStreamId = sid
-
 func maxPeerStreamIdSeen(client: ClientContext): StreamId {.raises: [].} =
   case client.typ
   of ctClient: StreamId 0
