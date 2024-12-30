@@ -21,6 +21,12 @@ template testAsync(name: string, body: untyped): untyped =
     doAssert checked
   )()
 
+proc sleepCycle: Future[void] =
+  let fut = newFuture[void]()
+  proc wakeup = fut.complete()
+  callSoon wakeup
+  return fut
+
 const defaultHeaders = @[
   (":method", "POST"),
   (":scheme", "https"),
@@ -107,6 +113,8 @@ testAsync "server graceful close":
       inc checked
   doAssert checked == 2
 
+# XXX cannot longer check server is sending GoAway
+#     since cannot create a stream before sending headers
 testAsync "send after server graceful close":
   var checked = 0
   var client = newClient(localHost, localPort)
@@ -127,10 +135,8 @@ testAsync "send after server graceful close":
     try:
       with strm2:
         await strm2.sendHeaders(defaultHeaders, finish = true)
-        var data = new string
-        await strm2.recvHeaders(data)
         doAssert false
-    except HyperxError:
+    except GracefulShutdownError:
       inc checked
   doAssert checked == 2
 
@@ -162,20 +168,69 @@ testAsync "client graceful close":
       inc checked
   doAssert checked == 2
 
+# XXX cannot longer create a stream before shutdown
+#     and send on it after because of lazy stream id
 testAsync "send after client graceful close":
   var checked = 0
   var client = newClient(localHost, localPort)
   with client:
     let strm = client.newClientStream()
+    await client.gracefulClose()
+    try:
+      with strm:
+        await strm.sendHeaders(defaultHeaders, finish = true)
+        doAssert false
+    except GracefulShutdownError:
+      inc checked
+  doAssert checked == 1
+
+testAsync "lazy client stream id":
+  var order = new seq[int]
+  order[] = newSeq[int]()
+  var checked = new int
+  checked[] = 0
+  proc stream(client: ClientContext, sleep = 0) {.async.} =
+    let strm = client.newClientStream()
     with strm:
-      # This is not correct usage
-      await client.gracefulClose()
+      for i in 0 .. sleep-1:
+        await sleepCycle()
+        #echo $sleep
+      order[].add sleep
+      var headers = defaultHeaders
+      headers.add ("x-no-echo-headers", "true")
+      await strm.sendHeaders(headers, finish = false)
+      var data = new string
+      await strm.recvHeaders(data)
+      doAssert data[] == ":status: 200\r\n"
+      data[] = "foobar" & $sleep
+      await strm.sendBody(data, finish = true)
+      data[] = ""
+      await strm.recvBody(data)
+      doAssert data[] == "foobar" & $sleep
+      checked[] += 1
+    checked[] += 1
+  var client = newClient(localHost, localPort)
+  with client:
+    let strm1 = client.stream(200)
+    let strm2 = client.stream(100)
+    await strm1
+    await strm2
+    doAssert order[] == @[100, 200]
+    checked[] += 1
+  doAssert checked[] == 5
+
+testAsync "cancel lazy stream":
+  var checked = 0
+  var client = newClient(localHost, localPort)
+  with client:
+    let strm = client.newClientStream()
+    await strm.cancel(hyxCancel)
+    with strm:
       try:
         await strm.sendHeaders(defaultHeaders, finish = true)
-        var data = new string
-        await strm.recvHeaders(data)
-      except HyperxConnError:
-        #doAssert err.code == errNoError
-        inc checked
+        doAssert false
+      except HyperxStrmError as err:
+        doAssert err.code == hyxStreamClosed
+      inc checked
     inc checked
   doAssert checked == 2

@@ -26,8 +26,9 @@ const SSL_OP_NO_RENEGOTIATION = 1073741824
 const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
 
 const
-  preface* = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
-  statusLineLen* = ":status: xxx\r\n".len
+  preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
+  statusLineLen = ":status: xxx\r\n".len
+  maxStreamId = (1'u32 shl 31) - 1'u32
   # https://httpwg.org/specs/rfc9113.html#SettingValues
   stgHeaderTableSize* = 4096'u32
   stgInitialMaxConcurrentStreams* = uint32.high
@@ -184,16 +185,6 @@ func openMainStream(client: ClientContext): Stream {.raises: [StreamsClosedError
   doAssert frmSidMain notin client.streams
   result = client.streams.open(frmSidMain, client.peerWindowSize.int32)
 
-func openStream(client: ClientContext): Stream {.raises: [StreamsClosedError, GracefulShutdownError].} =
-  # XXX some error if max sid is reached
-  # XXX error if maxStreams is reached
-  doAssert client.typ == ctClient
-  check not client.isGracefulShutdown, newGracefulShutdownError()
-  var sid = client.currStreamId
-  sid += (if sid == StreamId 0: StreamId 1 else: StreamId 2)
-  result = client.streams.open(sid, client.peerWindowSize.int32)
-  client.currStreamId = sid
-
 func maxPeerStreamIdSeen(client: ClientContext): StreamId {.raises: [].} =
   case client.typ
   of ctClient: StreamId 0
@@ -296,6 +287,7 @@ proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
   debugInfo debugPayload(frm)
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
+  doAssert frm.sid <= StreamId maxStreamId
   check not client.sock.isClosed, newConnClosedError()
   GC_ref frm
   try:
@@ -794,10 +786,13 @@ func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   )
 
 func newClientStream*(client: ClientContext): ClientStream =
-  let stream = client.openStream()
+  doAssert client.typ == ctClient
+  check not client.isGracefulShutdown, newGracefulShutdownError()
+  let stream = client.streams.dummy()
   newClientStream(client, stream)
 
 proc close(strm: ClientStream) {.raises: [].} =
+  strm.stream.close()
   strm.client.streams.close(strm.stream.id)
   strm.bodyRecvSig.close()
   strm.headersRecvSig.close()
@@ -805,6 +800,17 @@ proc close(strm: ClientStream) {.raises: [].} =
     strm.client.peerWindowUpdateSig.trigger()
   except SignalClosedError:
     discard
+
+func openStream(strm: ClientStream) {.raises: [StreamsClosedError, GracefulShutdownError].} =
+  # XXX some error if max sid is reached
+  # XXX error if maxStreams is reached
+  template client: untyped = strm.client
+  doAssert client.typ == ctClient
+  check not client.isGracefulShutdown, newGracefulShutdownError()
+  var sid = client.currStreamId
+  sid += (if sid == StreamId 0: StreamId 1 else: StreamId 2)
+  client.streams.open(strm.stream, sid, client.peerWindowSize.int32)
+  client.currStreamId = sid
 
 func recvEnded*(strm: ClientStream): bool {.raises: [].} =
   strm.stateRecv == csStateEnded and
@@ -1063,6 +1069,8 @@ proc sendHeadersImpl*(
   doAssert strm.stream.state in strmStateHeaderSendAllowed
   doAssert strm.stateSend == csStateOpened or
     (strm.stateSend in {csStateHeaders, csStateData} and finish)
+  if strm.stream.state == strmIdle:
+    strm.openStream()
   strm.stateSend = csStateHeaders
   var frm = newFrame()
   frm.add headers
@@ -1168,6 +1176,7 @@ template with*(strm: ClientStream, body: untyped): untyped =
 proc ping(client: ClientContext, strm: Stream) {.async.} =
   # this is done for rst and go-away pings; only one stream ping
   # will ever be in progress
+  doAssert strm.id in client.streams
   if strm.pingSig.len > 0:
     await strm.pingSig.waitFor()
   else:
