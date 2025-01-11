@@ -51,30 +51,25 @@ when defined(ssl):
     return sslContext
 
 when not defined(hyperxTest):
-  proc newMySocket: MyAsyncSocket {.raises: [HyperxConnError].} =
-    result = tryCatch newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
-    doAssert result != nil
-
-  proc newMySocket(
-    ssl: bool,
-    certFile = "",
-    keyFile = ""
-  ): MyAsyncSocket {.raises: [HyperxConnError].} =
+  proc newMySocketSsl: MyAsyncSocket {.raises: [HyperxConnError], definedSsl.} =
     result = newMySocket()
-    when defined(ssl):
-      if ssl:
-        tryCatch wrapSocket(defaultSslContext(), result)
+    tryCatch wrapSocket(defaultSslContext(), result)
 
-const definedSsl = defined(ssl)
+const isSslDefined = defined(ssl)
 
 proc newClient*(
   hostname: string,
   port = Port 443,
   ssl: static[bool] = true
 ): ClientContext {.raises: [HyperxConnError].} =
-  when ssl and not definedSsl:
+  when ssl and not isSslDefined:
     {.error: "this lib needs -d:ssl".}
-  newClient(ctClient, newMySocket(ssl), hostname, port)
+  template sock: untyped =
+    when ssl:
+      newMySocketSsl()
+    else:
+      newMySocket()
+  newClient(ctClient, sock, hostname, port)
 
 type
   HttpMethod* = enum

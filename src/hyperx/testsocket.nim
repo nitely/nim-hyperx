@@ -19,7 +19,7 @@ type
     port*: Port
     isSsl*: bool
 
-proc newMySocket*(ssl: bool, certFile = "", keyFile = ""): TestSocket =
+proc newMySocket*: TestSocket =
   TestSocket(
     recvData: newQueue[seq[byte]](1000),
     sentData: newQueue[seq[byte]](1000),
@@ -30,8 +30,12 @@ proc newMySocket*(ssl: bool, certFile = "", keyFile = ""): TestSocket =
     isConnected: false,
     hostname: "",
     port: Port 0,
-    isSsl: ssl
+    isSsl: false
   )
+
+proc newMySocketSsl*(certFile = "", keyFile = ""): TestSocket =
+  result = newMySocket()
+  result.isSsl = true
 
 proc putRecvData*(s: TestSocket, data: seq[byte]) {.async.} =
   await s.recvData.put data

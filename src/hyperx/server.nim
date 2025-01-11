@@ -1,12 +1,10 @@
 ## HTTP/2 server
 
-#when not defined(ssl):
-#  {.error: "this lib needs -d:ssl".}
-
 import std/asyncdispatch
 import std/asyncnet
-import std/exitprocs
 import std/net
+when defined(ssl):
+  import std/exitprocs
 
 import ./clientserver
 import ./stream
@@ -40,35 +38,27 @@ export
   isGracefulClose,
   trace
 
-when defined(ssl):
-  var sslContext {.threadvar.}: SslContext
+var sslContext {.threadvar, definedSsl.}: SslContext
 
-  proc destroySslContext() {.noconv.} =
-    sslContext.destroyContext()
+proc destroySslContext() {.noconv, definedSsl.} =
+  sslContext.destroyContext()
 
-  proc defaultSslContext(
-    certFile, keyFile: string
-  ): SslContext {.raises: [HyperxConnError].} =
-    if not sslContext.isNil:
-      return sslContext
-    sslContext = defaultSslContext(ctServer, certFile, keyFile)
-    addExitProc(destroySslContext)
+proc defaultSslContext(
+  certFile, keyFile: string
+): SslContext {.raises: [HyperxConnError], definedSsl.} =
+  if not sslContext.isNil:
     return sslContext
+  sslContext = defaultSslContext(ctServer, certFile, keyFile)
+  addExitProc(destroySslContext)
+  return sslContext
 
 when not defined(hyperxTest):
-  proc newMySocket: MyAsyncSocket {.raises: [HyperxConnError].} =
-    result = tryCatch newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
-    doAssert result != nil
-
-  proc newMySocket(
-    ssl: bool,
+  proc newMySocketSsl(
     certFile = "",
     keyFile = ""
-  ): MyAsyncSocket {.raises: [HyperxConnError].} =
+  ): MyAsyncSocket {.raises: [HyperxConnError], definedSsl.} =
     result = newMySocket()
-    when defined(ssl):
-      if ssl:
-        tryCatch wrapSocket(defaultSslContext(certFile, keyFile), result)
+    tryCatch wrapSocket(defaultSslContext(certFile, keyFile), result)
 
 type
   ServerContext* = ref object
@@ -77,7 +67,7 @@ type
     port: Port
     isConnected: bool
 
-const definedSsl = defined(ssl)
+const defSsl = defined(ssl)
 
 proc newServer*(
   hostname: string,
@@ -86,15 +76,11 @@ proc newServer*(
   sslKeyFile = "",
   ssl: static[bool] = true
 ): ServerContext {.raises: [HyperxConnError].} =
-  when ssl and not definedSsl:
+  when ssl and not defSsl:
     {.error: "this lib needs -d:ssl".}
   template sock: untyped =
     when ssl:
-      newMySocket(
-        ssl,
-        certFile = sslCertFile,
-        keyFile = sslKeyFile
-      )
+      newMySocketSsl(sslCertFile, sslKeyFile)
     else:
       newMySocket()
   ServerContext(

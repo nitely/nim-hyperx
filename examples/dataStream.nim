@@ -2,7 +2,7 @@
 ## run: nim c -r -d:release examples/localServer.nim
 ## to start the server and then run this one
 
-#{.define: ssl.}
+{.define: ssl.}
 
 import std/strutils
 import std/asyncdispatch
@@ -56,7 +56,7 @@ when isMainModule:
       await sendFut
 
   proc main() {.async.} =
-    var client = newClient(localHost, localPort, ssl = false)
+    var client = newClient(localHost, localPort)
     with client:
       await streamChunks(client, "/foo")
 
