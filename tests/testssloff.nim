@@ -6,6 +6,16 @@ import ../src/hyperx/client
 
 const localHost = "127.0.0.1"
 const localPort = Port 8783
-let srv = newServer(localHost, localPort, ssl = false)
-let clt = newClient(localHost, localPort, ssl = false)
+discard newServer(localHost, localPort, ssl = false)
+discard newClient(localHost, localPort, ssl = false)
+
+template sslServer: untyped =
+  discard newServer(localHost, localPort, ssl = true)
+template sslClient: untyped =
+  discard newClient(localHost, localPort, ssl = true)
+static:
+  doAssert not compiles(sslServer)
+  doAssert not compiles(sslClient)
+  echo "ok"
+
 doAssert false  # do not run this file

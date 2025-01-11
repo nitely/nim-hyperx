@@ -114,7 +114,10 @@ proc listen*(s: TestSocket) =
   s.isConnected = true
 
 proc accept*(s: TestSocket): Future[TestSocket] {.async.} =
-  result = newMySocket(s.isSsl)
+  result = if s.isSsl:
+    newMySocketSsl()
+  else:
+    newMySocket()
   result.isConnected = true
 
 proc wrapConnectedSocket*(

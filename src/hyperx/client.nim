@@ -1,12 +1,9 @@
 ## HTTP/2 client
 
-#when not defined(ssl):
-#  {.error: "this lib needs -d:ssl".}
-
-import std/exitprocs
 import std/net
 import std/asyncdispatch
-import std/asyncnet
+when defined(ssl):
+  import std/exitprocs
 
 import ./clientserver
 import ./errors

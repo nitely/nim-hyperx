@@ -67,7 +67,7 @@ type
     port: Port
     isConnected: bool
 
-const defSsl = defined(ssl)
+const isSslDefined = defined(ssl)
 
 proc newServer*(
   hostname: string,
@@ -76,7 +76,7 @@ proc newServer*(
   sslKeyFile = "",
   ssl: static[bool] = true
 ): ServerContext {.raises: [HyperxConnError].} =
-  when ssl and not defSsl:
+  when ssl and not isSslDefined:
     {.error: "this lib needs -d:ssl".}
   template sock: untyped =
     when ssl:
