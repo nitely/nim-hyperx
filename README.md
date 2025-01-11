@@ -31,7 +31,7 @@ nimble install hyperx
 import std/asyncdispatch
 import pkg/hyperx/client
 
-proc main() {.async.} =
+proc main {.async.} =
   let client = newClient("www.google.com")
   with client:
     let queries = ["john+wick", "winston", "ms+perkins"]
@@ -48,9 +48,49 @@ echo "ok"
 
 ## Server
 
-See [examples/localServer.nim](https://github.com/nitely/nim-hyperx/blob/master/examples/localServer.nim)
+```nim
+{.define: ssl.}
 
-Beware HTTP/2 requires TLS, so if you want to test the server locally you'll need a local cert. I used [mkcert](https://github.com/FiloSottile/mkcert) to generate mine. Idk if there is an easier way to try this.
+import std/asyncdispatch
+import pkg/hyperx/server
+
+const
+  localHost = "127.0.0.1"
+  localPort = Port 8888
+  certFile = "/usr/src/app/example.com+5.pem"
+  keyFile = "/usr/src/app/example.com+5-key.pem"
+
+proc processStream(strm: ClientStream) {.async.} =
+  ## Consume the stream and send hello world!.
+  let data = new string
+  await strm.recvHeaders(data)
+  while not strm.recvEnded:
+    data[].setLen 0
+    await strm.recvBody(data)
+  await strm.sendHeaders(
+    @[(":status", "200")], finish = false
+  )
+  data[] = "Hello world!"
+  await strm.sendBody(data, finish = true)
+
+proc main {.async.} =
+  echo "Serving forever"
+  let server = newServer(
+    localHost, localPort, certFile, keyFile
+  )
+  await server.serve(processStream)
+
+waitFor main()
+echo "ok"
+```
+
+Beware HTTP/2 requires TLS, so if you want to test the server locally you'll need a local cert. I used [mkcert](https://github.com/FiloSottile/mkcert) to generate mine.
+
+You may disable SSL by passing `ssl = false` to `newServer/newClient` for local testing.
+
+## Usage
+
+Read the [examples](https://github.com/nitely/nim-hyperx/blob/master/examples/).
 
 ## Debugging
 
