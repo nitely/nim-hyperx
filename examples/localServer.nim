@@ -1,6 +1,6 @@
 ## Echo server
 
-{.define: ssl.}
+#{.define: ssl.}
 
 from std/os import getEnv
 import std/asyncdispatch
@@ -33,7 +33,7 @@ proc processStream(strm: ClientStream) {.async.} =
 proc main() {.async.} =
   echo "Serving forever"
   let server = newServer(
-    localHost, localPort, certFile, keyFile
+    localHost, localPort, certFile, keyFile, ssl = false
   )
   await server.serve(processStream)
 

@@ -1,7 +1,7 @@
 ## HTTP/2 client
 
-when not defined(ssl):
-  {.error: "this lib needs -d:ssl".}
+#when not defined(ssl):
+#  {.error: "this lib needs -d:ssl".}
 
 import std/exitprocs
 import std/net
@@ -37,32 +37,43 @@ export
   isGracefulClose,
   trace
 
-var sslContext {.threadvar.}: SslContext
-
-proc destroySslContext() {.noconv.} =
-  sslContext.destroyContext()
-
-proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
-  if not sslContext.isNil:
+when defined(ssl):
+  var sslContext {.threadvar.}: SslContext
+  
+  proc destroySslContext() {.noconv.} =
+    sslContext.destroyContext()
+  
+  proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
+    if not sslContext.isNil:
+      return sslContext
+    sslContext = defaultSslContext(ctClient)
+    addExitProc(destroySslContext)
     return sslContext
-  sslContext = defaultSslContext(ctClient)
-  addExitProc(destroySslContext)
-  return sslContext
 
 when not defined(hyperxTest):
-  proc newMySocket(ssl: bool): MyAsyncSocket {.raises: [HyperxConnError].} =
-    result = nil
-    tryCatch:
-      result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
-      doAssert result != nil
+  proc newMySocket: MyAsyncSocket {.raises: [HyperxConnError].} =
+    result = tryCatch newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
+    doAssert result != nil
+
+  proc newMySocket(
+    ssl: bool,
+    certFile = "",
+    keyFile = ""
+  ): MyAsyncSocket {.raises: [HyperxConnError].} =
+    result = newMySocket()
+    when defined(ssl):
       if ssl:
-        wrapSocket(defaultSslContext(), result)
+        tryCatch wrapSocket(defaultSslContext(), result)
+
+const definedSsl = defined(ssl)
 
 proc newClient*(
   hostname: string,
   port = Port 443,
-  ssl = true
+  ssl: static[bool] = true
 ): ClientContext {.raises: [HyperxConnError].} =
+  when ssl and not definedSsl:
+    {.error: "this lib needs -d:ssl".}
   newClient(ctClient, newMySocket(ssl), hostname, port)
 
 type
