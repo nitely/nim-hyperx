@@ -1,12 +1,10 @@
 ## HTTP/2 server
 
-when not defined(ssl):
-  {.error: "this lib needs -d:ssl".}
-
 import std/asyncdispatch
 import std/asyncnet
-import std/exitprocs
 import std/net
+when defined(ssl):
+  import std/exitprocs
 
 import ./clientserver
 import ./stream
@@ -40,14 +38,14 @@ export
   isGracefulClose,
   trace
 
-var sslContext {.threadvar.}: SslContext
+var sslContext {.threadvar, definedSsl.}: SslContext
 
-proc destroySslContext() {.noconv.} =
+proc destroySslContext() {.noconv, definedSsl.} =
   sslContext.destroyContext()
 
 proc defaultSslContext(
   certFile, keyFile: string
-): SslContext {.raises: [HyperxConnError].} =
+): SslContext {.raises: [HyperxConnError], definedSsl.} =
   if not sslContext.isNil:
     return sslContext
   sslContext = defaultSslContext(ctServer, certFile, keyFile)
@@ -55,17 +53,12 @@ proc defaultSslContext(
   return sslContext
 
 when not defined(hyperxTest):
-  proc newMySocket(
-    ssl: bool,
+  proc newMySocketSsl(
     certFile = "",
     keyFile = ""
-  ): MyAsyncSocket {.raises: [HyperxConnError].} =
-    result = nil
-    tryCatch:
-      result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
-      doAssert result != nil
-      if ssl:
-        wrapSocket(defaultSslContext(certFile, keyFile), result)
+  ): MyAsyncSocket {.raises: [HyperxConnError], definedSsl.} =
+    result = newMySocket()
+    tryCatch wrapSocket(defaultSslContext(certFile, keyFile), result)
 
 type
   ServerContext* = ref object
@@ -74,19 +67,24 @@ type
     port: Port
     isConnected: bool
 
+const isSslDefined = defined(ssl)
+
 proc newServer*(
   hostname: string,
   port: Port,
   sslCertFile = "",
   sslKeyFile = "",
-  ssl = true
+  ssl: static[bool] = true
 ): ServerContext {.raises: [HyperxConnError].} =
+  when ssl and not isSslDefined:
+    {.error: "this lib needs -d:ssl".}
+  template sock: untyped =
+    when ssl:
+      newMySocketSsl(sslCertFile, sslKeyFile)
+    else:
+      newMySocket()
   ServerContext(
-    sock: newMySocket(
-      ssl,
-      certFile = sslCertFile,
-      keyFile = sslKeyFile
-    ),
+    sock: sock,
     hostname: hostname,
     port: port,
     isConnected: false
@@ -113,12 +111,13 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
   tryCatch:
     # note OptNoDelay is inherited from server.sock
     let sock = await server.sock.accept()
-    if server.sock.isSsl:
-      when not defined(hyperxTest):
-        doAssert not sslContext.isNil
-      wrapConnectedSocket(
-        sslContext, sock, handshakeAsServer, server.hostname
-      )
+    when defined(ssl):
+      if server.sock.isSsl:
+        when not defined(hyperxTest):
+          doAssert not sslContext.isNil
+        wrapConnectedSocket(
+          sslContext, sock, handshakeAsServer, server.hostname
+        )
     return newClient(ctServer, sock, server.hostname)
 
 template with*(server: ServerContext, body: untyped): untyped =

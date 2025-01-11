@@ -1,12 +1,10 @@
 ## Functionality shared between client and server
 
-when not defined(ssl):
-  {.error: "this lib needs -d:ssl".}
-
 import std/asyncdispatch
 import std/asyncnet
-import std/openssl
 import std/net
+when defined(ssl):
+  import std/openssl
 
 import pkg/hpack
 
@@ -21,9 +19,13 @@ import ./utils
 when defined(hyperxTest):
   import ./testsocket
 
-proc SSL_CTX_set_options(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
-const SSL_OP_NO_RENEGOTIATION = 1073741824
-const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
+definedSsl:
+  proc SSL_CTX_set_options(ctx: SslCtx, options: clong): clong {.cdecl, dynlib: DLLSSLName, importc.}
+  const SSL_OP_NO_RENEGOTIATION = 1073741824
+  const SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION = 65536
+
+when not defined(ssl):
+  type SslError = object of CatchableError
 
 const
   preface = "PRI * HTTP/2.0\r\L\r\LSM\r\L\r\L"
@@ -53,7 +55,7 @@ proc sslContextAlpnSelect(
   inProto: cstring;
   inlen: cuint;
   arg: pointer
-): cint {.cdecl, raises: [].} =
+): cint {.cdecl, raises: [], definedSsl.} =
   const h2Alpn = "\x02h2"  # len + proto_name
   const h2AlpnL = h2Alpn.len
   var i = 0
@@ -69,7 +71,7 @@ proc defaultSslContext*(
   clientTyp: ClientTyp,
   certFile = "",
   keyFile = ""
-): SslContext {.raises: [HyperxConnError].} =
+): SslContext {.raises: [HyperxConnError], definedSsl.} =
   # protSSLv23 will disable all protocols
   # lower than the min protocol defined
   # in openssl.config, usually +TLSv1.2
@@ -109,6 +111,11 @@ when defined(hyperxTest):
   type MyAsyncSocket* = TestSocket
 else:
   type MyAsyncSocket* = AsyncSocket
+
+when not defined(hyperxTest):
+  proc newMySocket*: MyAsyncSocket {.raises: [HyperxConnError].} =
+    result = tryCatch newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
+    doAssert result != nil
 
 type
   ClientContext* = ref object

@@ -1,12 +1,10 @@
 ## HTTP/2 client
 
-when not defined(ssl):
-  {.error: "this lib needs -d:ssl".}
-
-import std/exitprocs
 import std/net
 import std/asyncdispatch
-import std/asyncnet
+when defined(ssl):
+  import std/asyncnet
+  import std/exitprocs
 
 import ./clientserver
 import ./errors
@@ -37,12 +35,12 @@ export
   isGracefulClose,
   trace
 
-var sslContext {.threadvar.}: SslContext
+var sslContext {.threadvar, definedSsl.}: SslContext
 
-proc destroySslContext() {.noconv.} =
+proc destroySslContext() {.noconv, definedSsl.} =
   sslContext.destroyContext()
 
-proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
+proc defaultSslContext(): SslContext {.raises: [HyperxConnError], definedSsl.} =
   if not sslContext.isNil:
     return sslContext
   sslContext = defaultSslContext(ctClient)
@@ -50,20 +48,25 @@ proc defaultSslContext(): SslContext {.raises: [HyperxConnError].} =
   return sslContext
 
 when not defined(hyperxTest):
-  proc newMySocket(ssl: bool): MyAsyncSocket {.raises: [HyperxConnError].} =
-    result = nil
-    tryCatch:
-      result = newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
-      doAssert result != nil
-      if ssl:
-        wrapSocket(defaultSslContext(), result)
+  proc newMySocketSsl: MyAsyncSocket {.raises: [HyperxConnError], definedSsl.} =
+    result = newMySocket()
+    tryCatch wrapSocket(defaultSslContext(), result)
+
+const isSslDefined = defined(ssl)
 
 proc newClient*(
   hostname: string,
   port = Port 443,
-  ssl = true
+  ssl: static[bool] = true
 ): ClientContext {.raises: [HyperxConnError].} =
-  newClient(ctClient, newMySocket(ssl), hostname, port)
+  when ssl and not isSslDefined:
+    {.error: "this lib needs -d:ssl".}
+  template sock: untyped =
+    when ssl:
+      newMySocketSsl()
+    else:
+      newMySocket()
+  newClient(ctClient, sock, hostname, port)
 
 type
   HttpMethod* = enum

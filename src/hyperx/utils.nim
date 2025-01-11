@@ -2,6 +2,10 @@
 
 import ./errors
 
+template definedSsl*(def: untyped): untyped =
+  when defined(ssl):
+    def
+
 func stackTrace2(err: ref Exception): string {.raises: [].} =
   doAssert err != nil
   result = ""
