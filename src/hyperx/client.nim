@@ -36,10 +36,10 @@ export
   trace
 
 var sslContext {.threadvar, definedSsl.}: SslContext
-  
+
 proc destroySslContext() {.noconv, definedSsl.} =
   sslContext.destroyContext()
-  
+
 proc defaultSslContext(): SslContext {.raises: [HyperxConnError], definedSsl.} =
   if not sslContext.isNil:
     return sslContext
