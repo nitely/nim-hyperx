@@ -41,7 +41,11 @@ export
 var sslContext {.threadvar, definedSsl.}: SslContext
 
 proc destroySslContext() {.noconv, definedSsl.} =
-  sslContext.destroyContext()
+  if not sslContext.isNil:
+    sslContext.destroyContext()
+
+proc destroyServerSslContext* {.definedSsl.} =
+  destroySslContext()
 
 proc defaultSslContext(
   certFile, keyFile: string
