@@ -7,6 +7,7 @@ import std/asyncdispatch
 const localHost* = "127.0.0.1"
 const localPort* = Port 8763
 const localInsecurePort* = Port 7770
+const localMultiThreadPort* = Port 7780
 const testDataBaseDir = "tests/functional/"
 
 type Header* = (string, string)
