@@ -44,8 +44,9 @@ proc destroySslContext() {.noconv, definedSsl.} =
   if not sslContext.isNil:
     sslContext.destroyContext()
 
-proc destroyServerSslContext* {.definedSsl.} =
-  destroySslContext()
+proc destroyServerSslContext* =
+  definedSsl:
+    destroySslContext()
 
 proc defaultSslContext(
   certFile, keyFile: string

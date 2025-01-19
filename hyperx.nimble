@@ -18,6 +18,7 @@ task test, "Test":
   exec "nim c -r src/hyperx/limiter.nim"
   exec "nim c -r src/hyperx/stream.nim"
   exec "nim c -r src/hyperx/frame.nim"
+  exec "nim c -r src/hyperx/atexit.nim"
   exec "nim c -r -f -d:hyperxTest -d:ssl src/hyperx/testutils.nim"
   exec "nim c -r -f -d:hyperxTest -d:ssl src/hyperx/client.nim"
   exec "nim c -r -f -d:hyperxTest -d:ssl src/hyperx/server.nim"
