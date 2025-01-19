@@ -74,6 +74,12 @@ task funcserveinsec, "Func Serve Insecure":
 task functestinsec, "Func test insecure":
   exec "nim c -r tests/functional/tserialinsecure.nim"
 
+task funcservemultithread, "Func Serve Multi-Thread":
+  exec "nim c -r -d:release tests/functional/tservermultithread.nim"
+
+task functestmultithread, "Func test multi-thread":
+  exec "nim c -r -d:release tests/functional/tclientmultithread.nim"
+
 task h2spec, "h2spec test":
   exec "./h2spec --tls --port 8783 --strict"
 
