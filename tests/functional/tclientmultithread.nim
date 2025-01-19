@@ -73,6 +73,7 @@ proc worker(result: ptr int) {.thread.} =
   checked[] = 0
   waitFor main(checked)
   doAssert not hasPendingOperations()
+  setGlobalDispatcher(nil)
   destroyClientSslContext()
   result[] = checked[]
 
