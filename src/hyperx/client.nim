@@ -4,7 +4,7 @@ import std/net
 import std/asyncdispatch
 when defined(ssl):
   import std/asyncnet
-  import std/exitprocs
+  import ./atexit
 
 import ./clientserver
 import ./errors
@@ -38,13 +38,18 @@ export
 var sslContext {.threadvar, definedSsl.}: SslContext
 
 proc destroySslContext() {.noconv, definedSsl.} =
-  sslContext.destroyContext()
+  if not sslContext.isNil:
+    sslContext.destroyContext()
+
+proc destroyClientSslContext* =
+  definedSsl:
+    destroySslContext()
 
 proc defaultSslContext(): SslContext {.raises: [HyperxConnError], definedSsl.} =
   if not sslContext.isNil:
     return sslContext
   sslContext = defaultSslContext(ctClient)
-  addExitProc(destroySslContext)
+  atExitCall(destroySslContext)
   return sslContext
 
 when not defined(hyperxTest):

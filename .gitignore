@@ -17,6 +17,8 @@ tests/functional/tcancel
 tests/functional/tcancelremote
 tests/functional/tmisc
 tests/functional/tgracefulclose
+tests/functional/tservermultithread
+tests/functional/tclientmultithread
 src/hyperx/client
 src/hyperx/server
 src/hyperx/clientserver
@@ -30,6 +32,7 @@ src/hyperx/frame
 src/hyperx/stream
 src/hyperx/utils
 src/hyperx/testutils
+src/hyperx/atexit
 examples/simpleQueries
 examples/multipleGets
 examples/streamClient

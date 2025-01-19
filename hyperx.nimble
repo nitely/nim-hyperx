@@ -18,6 +18,7 @@ task test, "Test":
   exec "nim c -r src/hyperx/limiter.nim"
   exec "nim c -r src/hyperx/stream.nim"
   exec "nim c -r src/hyperx/frame.nim"
+  exec "nim c -r src/hyperx/atexit.nim"
   exec "nim c -r -f -d:hyperxTest -d:ssl src/hyperx/testutils.nim"
   exec "nim c -r -f -d:hyperxTest -d:ssl src/hyperx/client.nim"
   exec "nim c -r -f -d:hyperxTest -d:ssl src/hyperx/server.nim"
@@ -72,6 +73,12 @@ task funcserveinsec, "Func Serve Insecure":
 
 task functestinsec, "Func test insecure":
   exec "nim c -r tests/functional/tserialinsecure.nim"
+
+task funcservemultithread, "Func Serve Multi-Thread":
+  exec "nim c -r -d:release tests/functional/tservermultithread.nim"
+
+task functestmultithread, "Func test multi-thread":
+  exec "nim c -r -d:release tests/functional/tclientmultithread.nim"
 
 task h2spec, "h2spec test":
   exec "./h2spec --tls --port 8783 --strict"
