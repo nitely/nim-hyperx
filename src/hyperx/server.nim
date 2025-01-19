@@ -4,7 +4,7 @@ import std/asyncdispatch
 import std/asyncnet
 import std/net
 when defined(ssl):
-  import std/exitprocs
+  import ./atexit
 
 import ./clientserver
 import ./stream
@@ -53,7 +53,7 @@ proc defaultSslContext(
   if not sslContext.isNil:
     return sslContext
   sslContext = defaultSslContext(ctServer, certFile, keyFile)
-  addExitProc(destroySslContext)
+  atExitCall(destroySslContext)
   return sslContext
 
 when not defined(hyperxTest):
