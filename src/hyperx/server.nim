@@ -208,3 +208,52 @@ proc serve*(
         await lt.spawn processClientHandler(client, callback)
   finally:
     await lt.join()
+
+type WorkerContext = object
+  hostname: cstring
+  port: Port
+  callback: StreamCallback
+  sslCertFile, sslKeyFile: cstring
+  maxConnections: int
+
+proc workerImpl(ctx: WorkerContext, ssl: static[bool] = true) =
+  var server = newServer(
+    ctx.localHost, ctx.localPort, ctx.certFile, ctx.keyFile, ssl = ssl
+  )
+  waitFor server.serve(ctx.callback, ctx.maxConnections)
+
+proc workerSsl(ctx: ptr WorkerContext) {.thread.} =
+  workerImpl(ctx[], ssl = true)
+
+proc worker(ctx: ptr WorkerContext) {.thread.} =
+  workerImpl(ctx[], ssl = false)
+
+proc run*(
+  hostname: string,
+  port: Port,
+  callback: StreamCallback,
+  sslCertFile = "",
+  sslKeyFile = "",
+  maxConnections = defaultMaxConns,
+  threads = 1,
+  ssl: static[bool] = true
+) =
+  let ctx = WorkerContext(
+    hostname: hostname,
+    port: port,
+    callback: callback,
+    sslCertFile: sslCertFile,
+    sslKeyFile: sslKeyFile,
+    maxConnections: maxConnections
+  )
+  if threads == 1:
+    workerImpl(ctx, ssl = ssl)
+  else:
+    var threads = newSeq[Thread[ptr WorkerContext]](threads)
+    for i in 0 .. threads.len-1:
+      when ssl:
+        createThread(threads[i], workerSsl, addr ctx)
+      else:
+        createThread(threads[i], worker, addr ctx)
+    for i in 0 .. threads.len-1:
+      joinThread(threads[i])
