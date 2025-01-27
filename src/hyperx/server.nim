@@ -226,7 +226,7 @@ proc workerImpl(ctx: WorkerContext, ssl: static[bool] = true) =
   finally:
     destroyServerSslContext()
 
-proc workerSsl(ctx: ptr WorkerContext) {.thread.} =
+proc workerSsl(ctx: ptr WorkerContext) {.thread, definedSsl.} =
   workerImpl(ctx[], ssl = true)
 
 proc worker(ctx: ptr WorkerContext) {.thread.} =
@@ -243,6 +243,8 @@ proc run*(
   threads = 1,
   ssl: static[bool] = true
 ) =
+  when ssl and not isSslDefined:
+    {.error: "this lib needs -d:ssl".}
   let ctx = WorkerContext(
     hostname: hostname,
     port: port,
