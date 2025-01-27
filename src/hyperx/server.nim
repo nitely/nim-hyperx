@@ -209,18 +209,22 @@ proc serve*(
   finally:
     await lt.join()
 
-type WorkerContext = object
-  hostname: cstring
-  port: Port
-  callback: StreamCallback
-  sslCertFile, sslKeyFile: cstring
-  maxConnections: int
+type
+  WorkerContext = object
+    hostname: cstring
+    port: Port
+    callback: StreamCallback
+    sslCertFile, sslKeyFile: cstring
+    maxConnections: int
 
 proc workerImpl(ctx: WorkerContext, ssl: static[bool] = true) =
   var server = newServer(
-    ctx.localHost, ctx.localPort, ctx.certFile, ctx.keyFile, ssl = ssl
+    $ctx.hostname, ctx.port, $ctx.sslCertFile, $ctx.sslKeyFile, ssl = ssl
   )
-  waitFor server.serve(ctx.callback, ctx.maxConnections)
+  try:
+    waitFor server.serve(ctx.callback, ctx.maxConnections)
+  finally:
+    destroyServerSslContext()
 
 proc workerSsl(ctx: ptr WorkerContext) {.thread.} =
   workerImpl(ctx[], ssl = true)
@@ -228,6 +232,7 @@ proc workerSsl(ctx: ptr WorkerContext) {.thread.} =
 proc worker(ctx: ptr WorkerContext) {.thread.} =
   workerImpl(ctx[], ssl = false)
 
+# XXX graceful shutdown
 proc run*(
   hostname: string,
   port: Port,

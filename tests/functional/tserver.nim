@@ -11,7 +11,7 @@ from ../../src/hyperx/errors import hyxCancel
 const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
-proc processStream(strm: ClientStream) {.async.} =
+proc processStream*(strm: ClientStream) {.async.} =
   let data = new string
   await strm.recvHeaders(data)
   if "x-flow-control-check" in data[]:
