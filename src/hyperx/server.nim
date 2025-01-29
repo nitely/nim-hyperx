@@ -166,6 +166,8 @@ proc sendHeaders*(
 
 type StreamCallback* =
   proc (stream: ClientStream): Future[void] {.closure, gcsafe.}
+type SafeStreamCallback* =
+  proc (stream: ClientStream): Future[void] {.nimcall, gcsafe.}
 
 proc processStreamHandler(
   strm: ClientStream,
@@ -236,7 +238,7 @@ proc worker(ctx: ptr WorkerContext) {.thread.} =
 proc run*(
   hostname: string,
   port: Port,
-  callback: StreamCallback,
+  callback: SafeStreamCallback,
   sslCertFile = "",
   sslKeyFile = "",
   maxConnections = defaultMaxConns,
