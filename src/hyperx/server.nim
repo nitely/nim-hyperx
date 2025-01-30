@@ -226,6 +226,7 @@ proc workerImpl(ctx: WorkerContext, ssl: static[bool] = true) =
   try:
     waitFor server.serve(ctx.callback, ctx.maxConnections)
   finally:
+    setGlobalDispatcher(nil)
     destroyServerSslContext()
 
 proc workerSsl(ctx: ptr WorkerContext) {.thread, definedSsl.} =
