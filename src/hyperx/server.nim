@@ -228,6 +228,8 @@ proc workerImpl(ctx: WorkerContext, ssl: static[bool] = true) =
   finally:
     setGlobalDispatcher(nil)
     destroyServerSslContext()
+    when defined(gcOrc):
+      GC_runOrc()
 
 proc workerSsl(ctx: ptr WorkerContext) {.thread, definedSsl.} =
   workerImpl(ctx[], ssl = true)
