@@ -478,41 +478,6 @@ proc read(client: ClientContext, frm: Frame) {.async.} =
     debugInfo "Continuation"
     await client.readUntilEnd(frm)
 
-proc recvTaskNaked(client: ClientContext) {.async.} =
-  ## Receive frames and dispatch to opened streams
-  ## Meant to be asyncCheck'ed
-  doAssert client.isConnected
-  while client.isConnected:
-    var frm = newFrame()
-    await client.read frm
-    await client.recvMsgs.put frm
-
-proc recvTask(client: ClientContext) {.async.} =
-  try:
-    await client.recvTaskNaked()
-  except QueueClosedError:
-    doAssert not client.isConnected
-  except HyperxConnError as err:
-    debugErr2 err
-    client.error ?= newError err
-    await client.sendSilently newGoAwayFrame(
-      client.maxPeerStreamIdSeen, err.code
-    )
-    raise err
-  except OsError, SslError:
-    let err = getCurrentException()
-    debugErr2 err
-    client.error ?= newConnError(err.msg)
-    raise newConnError(err.msg, err)
-  except CatchableError as err:
-    debugErr2 err
-    raise err
-  finally:
-    debugInfo "recvTask exited"
-    # xxx send goaway NO_ERROR
-    # await client.sendGoAway(NO_ERROR)
-    client.close()
-
 const connFrmAllowed = {
   frmtSettings,
   frmtPing,
@@ -603,8 +568,10 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
   ## so it needs to be done here. Same for processing the main
   ## stream messages.
   var headers = ""
+  var frm = newFrame()
   while client.isConnected:
-    let frm = await client.recvMsgs.pop()
+    frm.clear()
+    await client.read frm
     debugInfo "recv data on stream " & $frm.sid.int
     if frm.typ.isUnknown:
       continue
@@ -742,7 +709,7 @@ template with*(client: ClientContext, body: untyped): untyped =
     if client.typ == ctClient:
       await client.connect()
     await client.handshake()
-    recvFut = client.recvTask()
+    #recvFut = client.recvTask()
     dispFut = client.recvDispatcher()
     winupFut = client.windowUpdateTask()
     block:
@@ -755,7 +722,7 @@ template with*(client: ClientContext, body: untyped): untyped =
     client.close()
     # do not bother the user with hyperx errors
     # at this point body completed or errored out
-    await failSilently(recvFut)
+    #await failSilently(recvFut)
     await failSilently(dispFut)
     await failSilently(winupFut)
     when defined(hyperxSanityCheck):
@@ -776,6 +743,7 @@ type
     headersRecv, bodyRecv, trailersRecv: string
     headersRecvSig, bodyRecvSig: SignalAsync
     bodyRecvLen: int
+    frm: Frame
 
 func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   ClientStream(
@@ -791,6 +759,7 @@ func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
     headersRecv: "",
     headersRecvSig: newSignal(),
     trailersRecv: "",
+    frm: newEmptyFrame()
   )
 
 func newClientStream*(client: ClientContext): ClientStream =
@@ -1074,13 +1043,15 @@ proc sendHeadersImpl*(
 ): Future[void] =
   ## Headers must be HPACK encoded;
   ## headers may be trailers
+  template frm: untyped = strm.frm
   doAssert strm.stream.state in strmStateHeaderSendAllowed
   doAssert strm.stateSend == csStateOpened or
     (strm.stateSend in {csStateHeaders, csStateData} and finish)
   if strm.stream.state == strmIdle:
     strm.openStream()
   strm.stateSend = csStateHeaders
-  var frm = newFrame()
+  #var frm = newFrame()
+  frm.clear()
   frm.add headers
   frm.setTyp frmtHeaders
   frm.setSid strm.stream.id
@@ -1112,6 +1083,7 @@ proc sendBodyNaked(
 ) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
+  template frm: untyped = strm.frm
   check stream.state in strmStateDataSendAllowed,
     newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
   doAssert strm.stateSend in {csStateHeaders, csStateData}
@@ -1129,7 +1101,8 @@ proc sendBodyNaked(
         await client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(client.peerWindow, stream.peerWindow)
     dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
-    var frm = newFrame()
+    #var frm = newFrame()
+    frm.clear()
     frm.setTyp frmtData
     frm.setSid stream.id
     frm.setPayloadLen (dataIdxB-dataIdxA).FrmPayloadLen
