@@ -653,6 +653,11 @@ proc recvDispatcher(client: ClientContext) {.async.} =
   except HyperxStrmError:
     debugErr getCurrentException()
     doAssert false
+  except OsError, SslError:
+    let err = getCurrentException()
+    debugErr2 err
+    client.error ?= newConnError(err.msg)
+    raise newConnError(err.msg, err)
   except CatchableError as err:
     debugErr2 err
     raise err
