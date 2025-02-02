@@ -26,13 +26,8 @@ func newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
   if f == nil:
     return
-  if f.finished:
-    return
-  proc wakeup =
-    if not f.finished:
-      f.complete()
-  untrackExceptions:
-    callSoon wakeup
+  if not f.finished:
+    uncatch f.complete()
 
 proc put*[T](vala: ValueAsync[T], val: T) {.async.} =
   check not vala.isClosed, newValueAsyncClosedError()
@@ -59,13 +54,8 @@ proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
 proc failSoon(f: Future[void]) {.raises: [].} =
   if f == nil:
     return
-  if f.finished:
-    return
-  proc wakeup =
-    if not f.finished:
-      f.fail newValueAsyncClosedError()
-  untrackExceptions:
-    callSoon wakeup
+  if not f.finished:
+    uncatch f.fail newValueAsyncClosedError()
 
 proc close*[T](vala: ValueAsync[T]) {.raises: [].} =
   if vala.isClosed:

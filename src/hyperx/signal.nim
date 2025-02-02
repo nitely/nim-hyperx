@@ -33,11 +33,8 @@ proc waitFor*(sig: SignalAsync): Future[void] {.raises: [SignalClosedError].} =
   sig.waiters.addFirst result
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
-  proc wakeup =
-    if not f.finished:
-      f.complete()
-  untrackExceptions:
-    callSoon wakeup
+  if not f.finished:
+    uncatch f.complete()
 
 proc trigger*(sig: SignalAsync) {.raises: [SignalClosedError].} =
   if sig.isClosed:
@@ -49,11 +46,8 @@ func isClosed*(sig: SignalAsync): bool {.raises: [].} =
   sig.isClosed
 
 proc failSoon(f: Future[void]) {.raises: [].} =
-  proc wakeup =
-    if not f.finished:
-      f.fail newSignalClosedError()
-  untrackExceptions:
-    callSoon wakeup
+  if not f.finished:
+    uncatch f.fail newSignalClosedError()
 
 proc close*(sig: SignalAsync) {.raises: [].}  =
   if sig.isClosed:

@@ -14,7 +14,6 @@ type
     s: Deque[T]
     size: int
     putWaiter, popWaiter: Future[void]
-    wakingPut, wakingPop: bool
     isClosed: bool
 
 func newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
@@ -24,8 +23,6 @@ func newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
     size: size,
     putWaiter: nil,
     popWaiter: nil,
-    wakingPut: false,
-    wakingPop: false,
     isClosed: false
   )
 
@@ -39,16 +36,8 @@ func used[T](q: QueueAsync[T]): int {.raises: [].} =
 proc wakeupPop[T](q: QueueAsync[T]) {.raises: [].} =
   if q.popWaiter == nil:
     return
-  if q.popWaiter.finished:
-    return
-  proc wakeup =
-    q.wakingPop = false
-    if not q.popWaiter.finished:
-      q.popWaiter.complete()
-  if not q.wakingPop:
-    q.wakingPop = true
-    untrackExceptions:
-      callSoon wakeup
+  if not q.popWaiter.finished:
+    uncatch q.popWaiter.complete()
 
 proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   doAssert q.used <= q.size
@@ -65,16 +54,8 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
 proc wakeupPut[T](q: QueueAsync[T]) {.raises: [].} =
   if q.putWaiter == nil:
     return
-  if q.putWaiter.finished:
-    return
-  proc wakeup =
-    q.wakingPut = false
-    if not q.putWaiter.finished:
-      q.putWaiter.complete()
-  if not q.wakingPut:
-    q.wakingPut = true
-    untrackExceptions:
-      callSoon wakeup
+  if not q.putWaiter.finished:
+    uncatch q.putWaiter.complete()
 
 proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
@@ -94,11 +75,8 @@ func isClosed*[T](q: QueueAsync[T]): bool {.raises: [].} =
 proc failSoon(f: Future[void]) {.raises: [].} =
   if f == nil:
     return
-  proc wakeup =
-    if not f.finished:
-      f.fail newQueueClosedError()
-  untrackExceptions:
-    callSoon wakeup
+  if not f.finished:
+    uncatch f.fail newQueueClosedError()
 
 proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   if q.isClosed:

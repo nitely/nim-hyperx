@@ -55,7 +55,7 @@ proc defaultSslContext(): SslContext {.raises: [HyperxConnError], definedSsl.} =
 when not defined(hyperxTest):
   proc newMySocketSsl: MyAsyncSocket {.raises: [HyperxConnError], definedSsl.} =
     result = newMySocket()
-    tryCatch wrapSocket(defaultSslContext(), result)
+    catch wrapSocket(defaultSslContext(), result)
 
 const isSslDefined = defined(ssl)
 

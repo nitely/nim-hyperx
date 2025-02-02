@@ -12,7 +12,6 @@ type LimiterAsync* = ref object
   ## Async concurrency limiter.
   used, size: int
   waiter: Future[void]
-  wakingUp: bool
   isClosed: bool
 
 func newLimiter*(size: int): LimiterAsync {.raises: [].} =
@@ -21,23 +20,14 @@ func newLimiter*(size: int): LimiterAsync {.raises: [].} =
     used: 0,
     size: size,
     waiter: nil,
-    wakingUp: false,
     isClosed: false
   )
 
 proc wakeup(lt: LimiterAsync) {.raises: [].} =
   if lt.waiter == nil:
     return
-  if lt.waiter.finished:
-    return
-  proc wakeup =
-    lt.wakingUp = false
-    if not lt.waiter.finished:
-      lt.waiter.complete()
-  if not lt.wakingUp:
-    lt.wakingUp = true
-    untrackExceptions:
-      callSoon wakeup
+  if not lt.waiter.finished:
+    uncatch lt.waiter.complete()
 
 proc inc*(lt: LimiterAsync) {.raises: [LimiterAsyncClosedError].} =
   doAssert lt.used < lt.size
@@ -67,16 +57,8 @@ proc wait*(lt: LimiterAsync): Future[void] {.raises: [LimiterAsyncClosedError].}
 proc failSoon(lt: LimiterAsync) {.raises: [].} =
   if lt.waiter == nil:
     return
-  if lt.waiter.finished:
-    return
-  proc wakeup =
-    lt.wakingUp = false
-    if not lt.waiter.finished:
-      lt.waiter.fail newLimiterAsyncClosedError()
-  if not lt.wakingUp:
-    lt.wakingUp = true
-    untrackExceptions:
-      callSoon wakeup
+  if not lt.waiter.finished:
+    uncatch lt.waiter.fail newLimiterAsyncClosedError()
 
 proc close*(lt: LimiterAsync) {.raises: [].} =
   if lt.isClosed:

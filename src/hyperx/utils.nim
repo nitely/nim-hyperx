@@ -70,7 +70,7 @@ template raisesAssertion*(exp: untyped): untyped =
         asserted = true
       doAssert asserted
 
-template untrackExceptions*(body: untyped): untyped =
+template uncatch*(body: untyped): untyped =
   ## workaround for API errors in Nim's stdlib
   try:
     body
@@ -80,11 +80,11 @@ template untrackExceptions*(body: untyped): untyped =
     debugErr err
     raise newException(Defect, err.msg, err)
 
-template tryCatch*(body: untyped): untyped =
+template catch*(body: untyped): untyped =
   try:
     body
   except Defect as err:
-    raise err
+    raise err  # raise original error
   except Exception as err:
     debugErr2 err
     raise newConnError(err.msg, err)
@@ -254,10 +254,10 @@ when isMainModule:
       raised = true
     doAssert raised
   block:
-    raisesAssertion(tryCatch(doAssert false))
+    raisesAssertion(catch(doAssert false))
   block:
     try:
-      tryCatch:
+      catch:
         raise newException(ValueError, "foo")
       doAssert false
     except HyperxConnError as err:

@@ -63,7 +63,7 @@ when not defined(hyperxTest):
     keyFile = ""
   ): MyAsyncSocket {.raises: [HyperxConnError], definedSsl.} =
     result = newMySocket()
-    tryCatch wrapSocket(defaultSslContext(certFile, keyFile), result)
+    catch wrapSocket(defaultSslContext(certFile, keyFile), result)
 
 type
   ServerContext* = ref object
@@ -99,10 +99,10 @@ proc close*(server: ServerContext) {.raises: [HyperxConnError].} =
   if not server.isConnected:
     return
   server.isConnected = false
-  tryCatch server.sock.close()
+  catch server.sock.close()
 
 proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
-  tryCatch:
+  catch:
     server.sock.setSockOpt(OptReuseAddr, true)
     server.sock.setSockOpt(OptReusePort, true)
     server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
@@ -113,7 +113,7 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
 
 # XXX limit number of active clients
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
-  tryCatch:
+  catch:
     # note OptNoDelay is inherited from server.sock
     let sock = await server.sock.accept()
     when defined(ssl):

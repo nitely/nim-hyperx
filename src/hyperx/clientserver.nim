@@ -75,7 +75,7 @@ proc defaultSslContext*(
   # protSSLv23 will disable all protocols
   # lower than the min protocol defined
   # in openssl.config, usually +TLSv1.2
-  result = tryCatch newContext(
+  result = catch newContext(
     protSSLv23,
     verifyMode = CVerifyPeer,
     certFile = certFile,
@@ -99,7 +99,7 @@ proc defaultSslContext*(
     )
   of ctClient:
     var openSslVersion = 0.culong
-    untrackExceptions:
+    uncatch:
       openSslVersion = getOpenSSLVersion()
     doAssert openSslVersion >= 0x10002000
     let ctxAlpnSet = SSL_CTX_set_alpn_protos(
@@ -114,7 +114,7 @@ else:
 
 when not defined(hyperxTest):
   proc newMySocket*: MyAsyncSocket {.raises: [HyperxConnError].} =
-    result = tryCatch newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
+    result = catch newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
     doAssert result != nil
 
 type
@@ -177,7 +177,7 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     return
   client.isConnected = false
   try:
-    tryCatch client.sock.close()
+    catch client.sock.close()
   finally:
     client.recvMsgs.close()
     client.streamOpenedMsgs.close()
@@ -721,7 +721,7 @@ proc windowUpdateTask(client: ClientContext) {.async.} =
     client.close()
 
 proc connect(client: ClientContext) {.async.} =
-  tryCatch await client.sock.connect(client.hostname, client.port)
+  catch await client.sock.connect(client.hostname, client.port)
 
 proc failSilently(f: Future[void]) {.async.} =
   ## Be careful when wrapping non {.async.} procs,
