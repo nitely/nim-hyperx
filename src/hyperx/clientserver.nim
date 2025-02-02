@@ -852,32 +852,25 @@ proc write(strm: ClientStream, frm: Frame): Future[void] =
   stream.doTransitionSend frm
   result = client.send frm
 
-proc read(stream: Stream): Future[Frame] {.async.} =
-  var frm: Frame
-  while true:
-    frm = await stream.msgs.get()
-    stream.msgs.getDone()
-    doAssert stream.id == frm.sid
-    doAssert frm.typ in frmStreamAllowed
-    # this can raise stream/conn error
-    stream.doTransitionRecv frm
-    if frm.typ == frmtRstStream:
-      stream.error = newStrmError(frm.errCode, hyxRemoteErr)
-      stream.close()
-      raise newStrmError(frm.errCode, hyxRemoteErr)
-    if frm.typ == frmtPushPromise:
-      raise newStrmError hyxProtocolError
-    if frm.typ == frmtWindowUpdate:
-      check frm.windowSizeInc > 0, newStrmError hyxProtocolError
-      check frm.windowSizeInc <= stgMaxWindowSize, newStrmError hyxProtocolError
-      check stream.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
-        newStrmError hyxFlowControlError
-      stream.peerWindow += frm.windowSizeInc.int32
-      if not stream.peerWindowUpdateSig.isClosed:
-        stream.peerWindowUpdateSig.trigger()
-    if frm.typ in {frmtHeaders, frmtData}:
-      break
-  return frm
+proc process(stream: Stream, frm: Frame) {.raises: [HyperxConnError, HyperxStrmError, QueueClosedError].} =
+  doAssert stream.id == frm.sid
+  doAssert frm.typ in frmStreamAllowed
+  # this can raise stream/conn error
+  stream.doTransitionRecv frm
+  if frm.typ == frmtRstStream:
+    stream.error = newStrmError(frm.errCode, hyxRemoteErr)
+    stream.close()
+    raise newStrmError(frm.errCode, hyxRemoteErr)
+  if frm.typ == frmtPushPromise:
+    raise newStrmError hyxProtocolError
+  if frm.typ == frmtWindowUpdate:
+    check frm.windowSizeInc > 0, newStrmError hyxProtocolError
+    check frm.windowSizeInc <= stgMaxWindowSize, newStrmError hyxProtocolError
+    check stream.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
+      newStrmError hyxFlowControlError
+    stream.peerWindow += frm.windowSizeInc.int32
+    if not stream.peerWindowUpdateSig.isClosed:
+      stream.peerWindowUpdateSig.trigger()
 
 # this needs to be {.async.} to fail-silently
 proc writeRst(strm: ClientStream, code: FrmErrCode) {.async.} =
@@ -888,12 +881,18 @@ proc writeRst(strm: ClientStream, code: FrmErrCode) {.async.} =
   await strm.write newRstStreamFrame(stream.id, code)
 
 proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
+  template stream: untyped = strm.stream
   doAssert strm.stateRecv == csStateOpened
   strm.stateRecv = csStateHeaders
   # https://httpwg.org/specs/rfc9113.html#HttpFraming
   var frm: Frame
   while true:
-    frm = await strm.stream.read()
+    while true:
+      frm = await stream.msgs.get()
+      stream.msgs.getDone()
+      stream.process(frm)
+      if frm.typ in {frmtHeaders, frmtData}:
+        break
     check frm.typ == frmtHeaders, newStrmError hyxProtocolError
     validateHeaders(frm.payload, strm.client.typ)
     if strm.client.typ == ctServer:
@@ -924,11 +923,17 @@ func contentLenCheck(strm: ClientStream) {.raises: [HyperxStrmError].} =
   )
 
 proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
+  template stream: untyped = strm.stream
   doAssert strm.stateRecv in {csStateHeaders, csStateData}
   strm.stateRecv = csStateData
   var frm: Frame
   while true:
-    frm = await strm.stream.read()
+    while true:
+      frm = await stream.msgs.get()
+      stream.msgs.getDone()
+      stream.process(frm)
+      if frm.typ in {frmtHeaders, frmtData}:
+        break
     # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
     if frm.typ == frmtHeaders:
       strm.trailersRecv.add frm.payload
@@ -953,6 +958,13 @@ proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
   strm.bodyRecvSig.trigger()
   strm.bodyRecvSig.close()
 
+proc process(stream: Stream) {.async.} =
+  var frm: Frame
+  while true:
+    frm = await stream.msgs.get()
+    stream.msgs.getDone()
+    stream.process(frm)
+
 proc recvTask(strm: ClientStream) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
@@ -960,8 +972,7 @@ proc recvTask(strm: ClientStream) {.async.} =
     await recvHeadersTaskNaked(strm)
     if strm.stateRecv != csStateEnded:
       await recvBodyTaskNaked(strm)
-    while true:
-      discard await stream.read()
+    await stream.process()
   except QueueClosedError:
     discard
   except HyperxConnError as err:
