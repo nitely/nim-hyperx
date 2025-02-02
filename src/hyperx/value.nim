@@ -49,6 +49,8 @@ proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
   doAssert vala.val != nil
   result = vala.val
   vala.val = nil
+
+proc getDone*[T](vala: ValueAsync[T]) {.raises: [].} =
   wakeupSoon vala.putWaiter
 
 proc failSoon(f: Future[void]) {.raises: [].} =
@@ -83,9 +85,13 @@ when isMainModule:
         doAssert q.val == nil
       let puts1 = puts()
       doAssert (await q.get())[] == 1
+      q.getDone()
       doAssert (await q.get())[] == 2
+      q.getDone()
       doAssert (await q.get())[] == 3
+      q.getDone()
       doAssert (await q.get())[] == 4
+      q.getDone()
       await puts1
     waitFor test()
     doAssert not hasPendingOperations()
@@ -94,9 +100,13 @@ when isMainModule:
       var q = newValueAsync[ref int]()
       proc gets {.async.} =
         doAssert (await q.get())[] == 1
+        q.getDone()
         doAssert (await q.get())[] == 2
+        q.getDone()
         doAssert (await q.get())[] == 3
+        q.getDone()
         doAssert (await q.get())[] == 4
+        q.getDone()
       let gets1 = gets()
       await q.put newIntRef(1)
       doAssert q.val == nil
@@ -114,6 +124,7 @@ when isMainModule:
       var q = newValueAsync[ref int]()
       proc gets {.async.} =
         doAssert (await q.get())[] == 1
+        q.getDone()
         q.close()
       let gets1 = gets()
       await q.put newIntRef(1)

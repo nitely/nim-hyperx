@@ -856,7 +856,7 @@ proc read(stream: Stream): Future[Frame] {.async.} =
   var frm: Frame
   while true:
     frm = await stream.msgs.get()
-    #stream.msgs.getDone()
+    stream.msgs.getDone()
     doAssert stream.id == frm.sid
     doAssert frm.typ in frmStreamAllowed
     # this can raise stream/conn error
