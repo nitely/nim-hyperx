@@ -160,7 +160,6 @@ proc newClient*(
     headersDec: initDynHeaders(stgHeaderTableSize.int),
     streams: initStreams(),
     currStreamId: 0.StreamId,
-    recvMsgs: newQueue[Frame](10),
     streamOpenedMsgs: newQueue[Stream](10),
     peerMaxConcurrentStreams: stgInitialMaxConcurrentStreams,
     peerWindow: stgInitialWindowSize.int32,
@@ -179,7 +178,6 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
   try:
     catch client.sock.close()
   finally:
-    client.recvMsgs.close()
     client.streamOpenedMsgs.close()
     client.streams.close()
     client.peerWindowUpdateSig.close()
@@ -208,7 +206,6 @@ when defined(hyperxStats):
 when defined(hyperxSanityCheck):
   func sanityCheckAfterClose(client: ClientContext) {.raises: [].} =
     doAssert not client.isConnected
-    doAssert client.recvMsgs.isClosed
     doAssert client.streamOpenedMsgs.isClosed
     doAssert client.peerWindowUpdateSig.isClosed
     doAssert client.windowUpdateSig.isClosed
@@ -708,13 +705,12 @@ proc failSilently(f: Future[void]) {.async.} =
 template with*(client: ClientContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
   doAssert not client.isConnected
-  var recvFut, dispFut, winupFut: Future[void] = nil
+  var dispFut, winupFut: Future[void] = nil
   try:
     client.isConnected = true
     if client.typ == ctClient:
       await client.connect()
     await client.handshake()
-    #recvFut = client.recvTask()
     dispFut = client.recvDispatcher()
     winupFut = client.windowUpdateTask()
     block:
@@ -727,7 +723,6 @@ template with*(client: ClientContext, body: untyped): untyped =
     client.close()
     # do not bother the user with hyperx errors
     # at this point body completed or errored out
-    #await failSilently(recvFut)
     await failSilently(dispFut)
     await failSilently(winupFut)
     when defined(hyperxSanityCheck):
@@ -1066,7 +1061,6 @@ proc sendHeadersImpl*(
   if strm.stream.state == strmIdle:
     strm.openStream()
   strm.stateSend = csStateHeaders
-  #var frm = newFrame()
   frm.clear()
   frm.add headers
   frm.setTyp frmtHeaders
@@ -1117,7 +1111,6 @@ proc sendBodyNaked(
         await client.peerWindowUpdateSig.waitFor()
     let peerWindow = min(client.peerWindow, stream.peerWindow)
     dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
-    #var frm = newFrame()
     frm.clear()
     frm.setTyp frmtData
     frm.setSid stream.id
