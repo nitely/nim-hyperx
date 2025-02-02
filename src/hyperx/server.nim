@@ -126,6 +126,7 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
     return newClient(ctServer, sock, server.hostname)
 
 template with*(server: ServerContext, body: untyped): untyped =
+  discard getGlobalDispatcher()  # setup event loop
   try:
     server.isConnected = true
     server.listen()

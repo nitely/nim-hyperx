@@ -86,6 +86,7 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   failSoon q.popWaiter
 
 when isMainModule:
+  discard getGlobalDispatcher()
   proc sleepCycle: Future[void] =
     let fut = newFuture[void]()
     proc wakeup = fut.complete()

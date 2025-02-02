@@ -57,6 +57,7 @@ proc close*(sig: SignalAsync) {.raises: [].}  =
     failSoon sig.waiters.popLast()
 
 when isMainModule:
+  discard getGlobalDispatcher()
   block:
     proc test() {.async.} =
       var sig = newSignal()

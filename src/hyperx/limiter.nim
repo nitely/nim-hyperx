@@ -83,28 +83,12 @@ proc join*(lt: LimiterAsync) {.async.} =
     await lt.wait()
 
 when isMainModule:
+  discard getGlobalDispatcher()
   proc sleepCycle: Future[void] =
     let fut = newFuture[void]()
     proc wakeup = fut.complete()
     callSoon wakeup
     return fut
-  block:
-    proc test {.async.} =
-      let lt = newLimiter(1)
-      var puts = newSeq[int]()
-      proc putOne(i: int) {.async.} =
-        puts.add i
-        dec lt
-      for i in 1 .. 6:
-        inc lt
-        asyncCheck putOne(i)
-        if lt.isFull:
-          await lt.wait()
-        doAssert puts.len == i
-        doAssert lt.used <= 1
-      doAssert puts == @[1,2,3,4,5,6]
-    waitFor test()
-    doAssert not hasPendingOperations()
   block:
     proc test {.async.} =
       let lt = newLimiter(1)

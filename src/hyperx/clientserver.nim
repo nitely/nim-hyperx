@@ -734,6 +734,7 @@ proc failSilently(f: Future[void]) {.async.} =
     debugErr getCurrentException()
 
 template with*(client: ClientContext, body: untyped): untyped =
+  discard getGlobalDispatcher()  # setup event loop
   doAssert not client.isConnected
   var recvFut, dispFut, winupFut: Future[void] = nil
   try:
