@@ -392,7 +392,10 @@ func doTransitionRecv(
   let nextState = toNextStateRecv(s.state, frm.toStreamEvent)
   if nextState == strmInvalid:
     if s.state == strmHalfClosedRemote:
-      raise newStrmError(hyxStreamClosed)
+      # This used to be a strmError, but it was raicy.
+      # Since we may send an END_STREAM before
+      # this propagates, and we cannot send the RST on a closed stream.
+      raise newConnError(hyxStreamClosed)
     if s.state == strmClosed:
       raise newConnError(hyxStreamClosed)
     raise newConnError(hyxProtocolError)
