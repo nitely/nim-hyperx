@@ -384,7 +384,7 @@ proc handshake(client: ClientContext) {.async.} =
 
 func doTransitionRecv(
   s: Stream, frm: Frame
-) {.raises: [HyperxConnError, HyperxStrmError].} =
+) {.raises: [HyperxConnError].} =
   doAssert frm.sid == s.id
   doAssert frm.sid != frmSidMain
   doAssert s.state != strmInvalid
