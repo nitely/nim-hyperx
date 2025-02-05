@@ -605,8 +605,6 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       client.windowPending += frm.payloadLen.int
     if frm.typ == frmtWindowUpdate:
       check frm.windowSizeInc > 0, newConnError(hyxProtocolError)
-    if frm.typ == frmtPushPromise:
-      check client.typ == ctClient, newConnError(hyxProtocolError)
     # Process headers even if the stream does not exist
     if frm.sid notin client.streams:
       if frm.typ == frmtData:
@@ -855,13 +853,12 @@ proc process(stream: Stream, frm: Frame) {.raises: [HyperxConnError, HyperxStrmE
   doAssert frm.typ in frmStreamAllowed
   # this can raise stream/conn error
   stream.doTransitionRecv frm
-  if frm.typ == frmtRstStream:
+  case frm.typ
+  of frmtRstStream:
     stream.error = newStrmError(frm.errCode, hyxRemoteErr)
     stream.close()
     raise newStrmError(frm.errCode, hyxRemoteErr)
-  if frm.typ == frmtPushPromise:
-    raise newStrmError hyxProtocolError
-  if frm.typ == frmtWindowUpdate:
+  of frmtWindowUpdate:
     check frm.windowSizeInc > 0, newStrmError hyxProtocolError
     check frm.windowSizeInc <= stgMaxWindowSize, newStrmError hyxProtocolError
     check stream.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
@@ -869,6 +866,8 @@ proc process(stream: Stream, frm: Frame) {.raises: [HyperxConnError, HyperxStrmE
     stream.peerWindow += frm.windowSizeInc.int32
     if not stream.peerWindowUpdateSig.isClosed:
       stream.peerWindowUpdateSig.trigger()
+  else:
+    doAssert frm.typ in {frmtData, frmtHeaders}
 
 # this needs to be {.async.} to fail-silently
 proc writeRst(strm: ClientStream, code: FrmErrCode) {.async.} =
