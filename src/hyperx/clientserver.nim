@@ -98,9 +98,7 @@ proc defaultSslContext*(
       result.context, sslContextAlpnSelect, nil
     )
   of ctClient:
-    var openSslVersion = 0.culong
-    uncatch:
-      openSslVersion = getOpenSSLVersion()
+    let openSslVersion = uncatch getOpenSSLVersion()
     doAssert openSslVersion >= 0x10002000
     let ctxAlpnSet = SSL_CTX_set_alpn_protos(
       result.context, "\x02h2", 3
@@ -851,7 +849,6 @@ proc write(strm: ClientStream, frm: Frame): Future[void] =
 proc process(stream: Stream, frm: Frame) {.raises: [HyperxConnError, HyperxStrmError, QueueClosedError].} =
   doAssert stream.id == frm.sid
   doAssert frm.typ in frmStreamAllowed
-  # this can raise stream/conn error
   stream.doTransitionRecv frm
   case frm.typ
   of frmtRstStream:
