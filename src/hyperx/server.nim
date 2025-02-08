@@ -109,9 +109,6 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
     server.sock.bindAddr server.port
     server.sock.listen()
 
-# XXX dont allow receive push promise
-
-# XXX limit number of active clients
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
   catch:
     # note OptNoDelay is inherited from server.sock
@@ -135,6 +132,7 @@ template with*(server: ServerContext, body: untyped): untyped =
   finally:
     server.close()
 
+# XXX remove
 proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
   try:
     let strm = await client.streamOpenedMsgs.pop()
@@ -188,8 +186,13 @@ proc processClientHandler(
   try:
     with client:
       while client.isConnected:
-        let strm = await client.recvStream()
-        asyncCheck processStreamHandler(strm, callback)
+        let strm = await client.streamOpenedMsgs.pop()
+        asyncCheck processStreamHandler(
+          newClientStream(client, strm), callback
+        )
+  except QueueClosedError:
+    debugErr2 getCurrentException()
+    doAssert not client.isConnected
   except HyperxError:
     debugErr2 getCurrentException()
     debugErr getCurrentException()

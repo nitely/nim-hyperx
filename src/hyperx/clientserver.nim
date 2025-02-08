@@ -318,11 +318,10 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
-  ## block that's already raising another exception.
-  ## The stream/client should be closed before/after,
-  ## no stream transition is made
+  ## block that's raising an exception.
   debugInfo "frm sent silently"
-  doAssert frm.typ in {frmtGoAway, frmtRstStream}
+  doAssert frm.sid == frmSidMain
+  doAssert frm.typ == frmtGoAway
   try:
     await client.sendNaked(frm)
   except HyperxError, OsError, SslError:
