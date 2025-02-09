@@ -8,7 +8,7 @@ when defined(ssl):
 
 import ./clientserver
 import ./stream
-import ./queue
+import ./value
 import ./limiter
 import ./errors
 import ./utils
