@@ -156,7 +156,7 @@ proc newClient*(
     headersDec: initDynHeaders(stgHeaderTableSize.int),
     streams: initStreams(),
     currStreamId: 0.StreamId,
-    streamOpenedMsgs: newValueAsync[Frame](),
+    streamOpenedMsgs: newValueAsync[Stream](),
     peerMaxConcurrentStreams: stgInitialMaxConcurrentStreams,
     peerWindow: stgInitialWindowSize.int32,
     peerWindowSize: stgInitialWindowSize,
