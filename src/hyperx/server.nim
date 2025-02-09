@@ -135,7 +135,8 @@ template with*(server: ServerContext, body: untyped): untyped =
 # XXX remove
 proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
   try:
-    let strm = await client.streamOpenedMsgs.pop()
+    let strm = await client.streamOpenedMsgs.get()
+    client.streamOpenedMsgs.getDone()
     result = newClientStream(client, strm)
   except QueueClosedError as err:
     debugErr2 err
@@ -186,7 +187,8 @@ proc processClientHandler(
   try:
     with client:
       while client.isConnected:
-        let strm = await client.streamOpenedMsgs.pop()
+        let strm = await client.streamOpenedMsgs.get()
+        client.streamOpenedMsgs.getDone()
         asyncCheck processStreamHandler(
           newClientStream(client, strm), callback
         )
