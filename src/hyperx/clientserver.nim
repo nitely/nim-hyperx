@@ -10,7 +10,6 @@ import pkg/hpack
 
 import ./frame
 import ./stream
-import ./queue
 import ./value
 import ./signal
 import ./errors
@@ -125,8 +124,7 @@ type
     isGracefulShutdown: bool
     headersEnc, headersDec: DynHeaders
     streams: Streams
-    recvMsgs: QueueAsync[Frame]
-    streamOpenedMsgs*: QueueAsync[Stream]
+    streamOpenedMsgs*: ValueAsync[Stream]
     currStreamId: StreamId
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
@@ -158,7 +156,7 @@ proc newClient*(
     headersDec: initDynHeaders(stgHeaderTableSize.int),
     streams: initStreams(),
     currStreamId: 0.StreamId,
-    streamOpenedMsgs: newQueue[Stream](10),
+    streamOpenedMsgs: newValueAsync[Stream](),
     peerMaxConcurrentStreams: stgInitialMaxConcurrentStreams,
     peerWindow: stgInitialWindowSize.int32,
     peerWindowSize: stgInitialWindowSize,

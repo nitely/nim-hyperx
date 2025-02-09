@@ -66,6 +66,9 @@ proc close*[T](vala: ValueAsync[T]) {.raises: [].} =
   failSoon vala.putWaiter
   failSoon vala.getWaiter
 
+func isClosed*[T](vala: ValueAsync[T]): bool {.raises: [].} =
+  vala.isClosed
+
 when isMainModule:
   discard getGlobalDispatcher()
   func newIntRef(n: int): ref int =
