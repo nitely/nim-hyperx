@@ -20,16 +20,18 @@ type
 
 func newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
   doAssert size > 0
+  {.cast(noSideEffect).}:
+    let putWaiter = newFutureVar[void]()
+    let popWaiter = newFutureVar[void]()
+    uncatch putWaiter.complete()
+    uncatch popWaiter.complete()
   result = QueueAsync[T](
     s: initDeque[T](size),
     size: size,
-    putWaiter: newFutureVar[void](),
-    popWaiter: newFutureVar[void](),
+    putWaiter: putWaiter,
+    popWaiter: popWaiter,
     isClosed: false
   )
-  {.cast(noSideEffect).}:
-    uncatch result.putWaiter.complete()
-    uncatch result.popWaiter.complete()
 
 iterator items*[T](q: QueueAsync[T]): T {.inline.} =
   for elm in items q.s:

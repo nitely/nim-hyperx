@@ -18,14 +18,15 @@ type LimiterAsync* = ref object
 
 func newLimiter*(size: int): LimiterAsync {.raises: [].} =
   doAssert size > 0
+  {.cast(noSideEffect).}:
+    let waiter = newFutureVar[void]()
+    uncatch waiter.complete()
   result = LimiterAsync(
     used: 0,
     size: size,
     waiter: newFutureVar[void](),
     isClosed: false
   )
-  {.cast(noSideEffect).}:
-    uncatch result.waiter.complete()
 
 proc wakeup(lt: LimiterAsync) {.raises: [].} =
   if not lt.waiter.finished:

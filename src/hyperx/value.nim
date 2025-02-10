@@ -18,15 +18,17 @@ type
     isClosed: bool
 
 func newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
+  {.cast(noSideEffect).}:
+    let putWaiter = newFutureVar[void]()
+    let getWaiter = newFutureVar[void]()
+    uncatch putWaiter.complete()
+    uncatch getWaiter.complete()
   result = ValueAsync[T](
-    putWaiter: newFutureVar[void](),
-    getWaiter: newFutureVar[void](),
+    putWaiter: putWaiter,
+    getWaiter: getWaiter,
     val: nil,
     isClosed: false
   )
-  {.cast(noSideEffect).}:
-    uncatch result.putWaiter.complete()
-    uncatch result.getWaiter.complete()
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
   if not f.finished:
