@@ -3,6 +3,8 @@ import std/deques
 import ./utils
 import ./errors
 
+template fut[T](f: FutureVar[T]): Future[T] = Future[T](f)
+
 func newQueueClosedError(): ref QueueClosedError {.raises: [].} =
   result = (ref QueueClosedError)(msg: "Queue is closed")
 
@@ -13,16 +15,21 @@ type
   QueueAsync*[T] = ref object
     s: Deque[T]
     size: int
-    putWaiter, popWaiter: Future[void]
+    putWaiter, popWaiter: FutureVar[void]
     isClosed: bool
 
 func newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
   doAssert size > 0
-  QueueAsync[T](
+  {.cast(noSideEffect).}:
+    let putWaiter = newFutureVar[void]()
+    let popWaiter = newFutureVar[void]()
+    uncatch putWaiter.complete()
+    uncatch popWaiter.complete()
+  result = QueueAsync[T](
     s: initDeque[T](size),
     size: size,
-    putWaiter: nil,
-    popWaiter: nil,
+    putWaiter: putWaiter,
+    popWaiter: popWaiter,
     isClosed: false
   )
 
@@ -33,48 +40,38 @@ iterator items*[T](q: QueueAsync[T]): T {.inline.} =
 func used[T](q: QueueAsync[T]): int {.raises: [].} =
   q.s.len
 
-proc wakeupPop[T](q: QueueAsync[T]) {.raises: [].} =
-  if q.popWaiter == nil:
-    return
-  if not q.popWaiter.finished:
-    uncatch q.popWaiter.complete()
+proc wakeupSoon(f: Future[void]) {.raises: [].} =
+  if not f.finished:
+    uncatch f.complete()
 
 proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   doAssert q.used <= q.size
   check not q.isClosed, newQueueClosedError()
-  doAssert q.putWaiter == nil or q.putWaiter.finished
+  doAssert q.putWaiter.finished
   if q.used == q.size:
-    q.putWaiter = newFuture[void]()
-    await q.putWaiter
+    q.putWaiter.clean()
+    await q.putWaiter.fut
     check not q.isClosed, newQueueClosedError()
   doAssert q.used < q.size
   q.s.addFirst v
-  q.wakeupPop()
-
-proc wakeupPut[T](q: QueueAsync[T]) {.raises: [].} =
-  if q.putWaiter == nil:
-    return
-  if not q.putWaiter.finished:
-    uncatch q.putWaiter.complete()
+  wakeupSoon q.popWaiter.fut
 
 proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
   check not q.isClosed, newQueueClosedError()
-  doAssert q.popWaiter == nil or q.popWaiter.finished
+  doAssert q.popWaiter.finished
   if q.used == 0:
-    q.popWaiter = newFuture[void]()
-    await q.popWaiter
+    q.popWaiter.clean()
+    await q.popWaiter.fut
     check not q.isClosed, newQueueClosedError()
   doAssert q.used > 0
   result = q.s.popLast()
-  q.wakeupPut()
+  wakeupSoon q.putWaiter.fut
 
 func isClosed*[T](q: QueueAsync[T]): bool {.raises: [].} =
   q.isClosed
 
 proc failSoon(f: Future[void]) {.raises: [].} =
-  if f == nil:
-    return
   if not f.finished:
     uncatch f.fail newQueueClosedError()
 
@@ -82,8 +79,8 @@ proc close*[T](q: QueueAsync[T]) {.raises: [].}  =
   if q.isClosed:
     return
   q.isClosed = true
-  failSoon q.putWaiter
-  failSoon q.popWaiter
+  failSoon q.putWaiter.fut
+  failSoon q.popWaiter.fut
 
 when isMainModule:
   discard getGlobalDispatcher()

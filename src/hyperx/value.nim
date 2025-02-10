@@ -3,6 +3,8 @@ import std/asyncdispatch
 import ./utils
 import ./errors
 
+template fut[T](f: FutureVar[T]): Future[T] = Future[T](f)
+
 type
   ValueAsyncClosedError* = QueueClosedError
 
@@ -11,21 +13,24 @@ func newValueAsyncClosedError(): ref ValueAsyncClosedError {.raises: [].} =
 
 type
   ValueAsync*[T] = ref object
-    putWaiter, getWaiter: Future[void]
+    putWaiter, getWaiter: FutureVar[void]
     val: T
     isClosed: bool
 
 func newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
-  ValueAsync[T](
-    putWaiter: nil,
-    getWaiter: nil,
+  {.cast(noSideEffect).}:
+    let putWaiter = newFutureVar[void]()
+    let getWaiter = newFutureVar[void]()
+    uncatch putWaiter.complete()
+    uncatch getWaiter.complete()
+  result = ValueAsync[T](
+    putWaiter: putWaiter,
+    getWaiter: getWaiter,
     val: nil,
     isClosed: false
   )
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
-  if f == nil:
-    return
   if not f.finished:
     uncatch f.complete()
 
@@ -34,28 +39,26 @@ proc put*[T](vala: ValueAsync[T], val: T) {.async.} =
   doAssert val != nil
   doAssert vala.val == nil
   vala.val = val
-  wakeupSoon vala.getWaiter
-  doAssert vala.putWaiter == nil or vala.putWaiter.finished
-  vala.putWaiter = newFuture[void]()
-  await vala.putWaiter
+  doAssert vala.putWaiter.finished
+  vala.putWaiter.clean()
+  wakeupSoon vala.getWaiter.fut
+  await vala.putWaiter.fut
   doAssert vala.val == nil
 
 proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
   check not vala.isClosed, newValueAsyncClosedError()
-  doAssert vala.getWaiter == nil or vala.getWaiter.finished
+  doAssert vala.getWaiter.finished
   if vala.val == nil:
-    vala.getWaiter = newFuture[void]()
-    await vala.getWaiter
+    vala.getWaiter.clean()
+    await vala.getWaiter.fut
   doAssert vala.val != nil
   result = vala.val
   vala.val = nil
 
 proc getDone*[T](vala: ValueAsync[T]) {.raises: [].} =
-  wakeupSoon vala.putWaiter
+  wakeupSoon vala.putWaiter.fut
 
 proc failSoon(f: Future[void]) {.raises: [].} =
-  if f == nil:
-    return
   if not f.finished:
     uncatch f.fail newValueAsyncClosedError()
 
@@ -63,8 +66,8 @@ proc close*[T](vala: ValueAsync[T]) {.raises: [].} =
   if vala.isClosed:
     return
   vala.isClosed = true
-  failSoon vala.putWaiter
-  failSoon vala.getWaiter
+  failSoon vala.putWaiter.fut
+  failSoon vala.getWaiter.fut
 
 func isClosed*[T](vala: ValueAsync[T]): bool {.raises: [].} =
   vala.isClosed
