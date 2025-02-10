@@ -40,9 +40,9 @@ iterator items*[T](q: QueueAsync[T]): T {.inline.} =
 func used[T](q: QueueAsync[T]): int {.raises: [].} =
   q.s.len
 
-proc wakeupPop[T](q: QueueAsync[T]) {.raises: [].} =
-  if not q.popWaiter.finished:
-    uncatch q.popWaiter.complete()
+proc wakeupSoon(f: Future[void]) {.raises: [].} =
+  if not f.finished:
+    uncatch f.complete()
 
 proc put*[T](q: QueueAsync[T], v: T) {.async.} =
   doAssert q.used <= q.size
@@ -54,11 +54,7 @@ proc put*[T](q: QueueAsync[T], v: T) {.async.} =
     check not q.isClosed, newQueueClosedError()
   doAssert q.used < q.size
   q.s.addFirst v
-  q.wakeupPop()
-
-proc wakeupPut[T](q: QueueAsync[T]) {.raises: [].} =
-  if not q.putWaiter.finished:
-    uncatch q.putWaiter.complete()
+  wakeupSoon q.popWaiter.fut
 
 proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
   doAssert q.used >= 0
@@ -70,7 +66,7 @@ proc pop*[T](q: QueueAsync[T]): Future[T] {.async.} =
     check not q.isClosed, newQueueClosedError()
   doAssert q.used > 0
   result = q.s.popLast()
-  q.wakeupPut()
+  wakeupSoon q.putWaiter.fut
 
 func isClosed*[T](q: QueueAsync[T]): bool {.raises: [].} =
   q.isClosed

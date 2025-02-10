@@ -39,9 +39,9 @@ proc put*[T](vala: ValueAsync[T], val: T) {.async.} =
   doAssert val != nil
   doAssert vala.val == nil
   vala.val = val
-  wakeupSoon vala.getWaiter.fut
   doAssert vala.putWaiter.finished
   vala.putWaiter.clean()
+  wakeupSoon vala.getWaiter.fut
   await vala.putWaiter.fut
   doAssert vala.val == nil
 
@@ -56,7 +56,7 @@ proc get*[T](vala: ValueAsync[T]): Future[T] {.async.} =
   vala.val = nil
 
 proc getDone*[T](vala: ValueAsync[T]) {.raises: [].} =
-  wakeupSoon vala.putWaiter
+  wakeupSoon vala.putWaiter.fut
 
 proc failSoon(f: Future[void]) {.raises: [].} =
   if not f.finished:

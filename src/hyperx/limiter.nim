@@ -28,9 +28,9 @@ func newLimiter*(size: int): LimiterAsync {.raises: [].} =
     isClosed: false
   )
 
-proc wakeup(lt: LimiterAsync) {.raises: [].} =
-  if not lt.waiter.finished:
-    uncatch lt.waiter.complete()
+proc wakeupSoon(f: Future[void]) {.raises: [].} =
+  if not f.finished:
+    uncatch f.complete()
 
 proc inc*(lt: LimiterAsync) {.raises: [LimiterAsyncClosedError].} =
   doAssert lt.used < lt.size
@@ -41,7 +41,7 @@ proc dec*(lt: LimiterAsync) {.raises: [LimiterAsyncClosedError].} =
   doAssert lt.used > 0
   check not lt.isClosed, newLimiterAsyncClosedError()
   dec lt.used
-  wakeup lt
+  wakeupSoon lt.waiter.fut
 
 proc isFull*(lt: LimiterAsync): bool {.raises: [].} =
   lt.used == lt.size
