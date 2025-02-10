@@ -24,7 +24,7 @@ func newLimiter*(size: int): LimiterAsync {.raises: [].} =
   result = LimiterAsync(
     used: 0,
     size: size,
-    waiter: newFutureVar[void](),
+    waiter: waiter,
     isClosed: false
   )
 
