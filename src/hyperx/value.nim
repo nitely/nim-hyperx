@@ -25,9 +25,8 @@ func newValueAsync*[T](): ValueAsync[T] {.raises: [].} =
     isClosed: false
   )
   {.cast(noSideEffect).}:
-    untrackExceptions:
-      result.putWaiter.complete()
-      result.getWaiter.complete()
+    uncatch result.putWaiter.complete()
+    uncatch result.getWaiter.complete()
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
   if not f.finished:

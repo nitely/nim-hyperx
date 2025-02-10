@@ -28,9 +28,8 @@ func newQueue*[T](size: int): QueueAsync[T] {.raises: [].} =
     isClosed: false
   )
   {.cast(noSideEffect).}:
-    untrackExceptions:
-      result.putWaiter.complete()
-      result.popWaiter.complete()
+    uncatch result.putWaiter.complete()
+    uncatch result.popWaiter.complete()
 
 iterator items*[T](q: QueueAsync[T]): T {.inline.} =
   for elm in items q.s:

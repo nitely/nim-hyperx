@@ -25,8 +25,7 @@ func newLimiter*(size: int): LimiterAsync {.raises: [].} =
     isClosed: false
   )
   {.cast(noSideEffect).}:
-    untrackExceptions:
-      result.waiter.complete()
+    uncatch result.waiter.complete()
 
 proc wakeup(lt: LimiterAsync) {.raises: [].} =
   if not lt.waiter.finished:
