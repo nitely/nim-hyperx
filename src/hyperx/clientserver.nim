@@ -352,8 +352,6 @@ const serverHandshakeBlob = handshakeBlob(ctServer)
 proc handshakeNaked(client: ClientContext) {.async.} =
   doAssert client.isConnected
   debugInfo "handshake"
-  let strm = client.openMainStream()
-  doAssert strm.id == frmSidMain
   check not client.sock.isClosed, newConnClosedError()
   case client.typ
   of ctClient: await client.sock.send(clientHandshakeBlob)
@@ -480,88 +478,111 @@ const connFrmAllowed = {
   frmtWindowUpdate
 }
 
-proc consumeMainStream(client: ClientContext, frm: Frame) {.async.} =
-  case frm.typ
-  of frmtWindowUpdate:
-    check frm.windowSizeInc > 0, newConnError(hyxProtocolError)
-    check frm.windowSizeInc <= stgMaxWindowSize, newConnError(hyxProtocolError)
-    check client.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
-      newConnError(hyxFlowControlError)
-    client.peerWindow += frm.windowSizeInc.int32
-    client.peerWindowUpdateSig.trigger()
-  of frmtSettings:
-    check frm.payloadLen.int <= stgMaxSettingsList * frmSettingsSize,
-      newConnError(hyxProtocolError)
-    for (setting, value) in frm.settings:
-      # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
-      case setting
-      of frmsHeaderTableSize:
-        # maybe max table size should be a setting instead of 4096
-        client.headersEnc.setSize min(value.int, stgHeaderTableSize.int)
-      of frmsEnablePush:
-        case client.typ
-        of ctClient:
-          check value == 0, newConnError(hyxProtocolError)
-        of ctServer:
-          check value == 0 or value == 1, newConnError(hyxProtocolError)
-      of frmsMaxConcurrentStreams:
-        client.peerMaxConcurrentStreams = value
-      of frmsInitialWindowSize:
-        check value <= stgMaxWindowSize, newConnError(hyxFlowControlError)
-        template subtBoundCheck(a, b: untyped): untyped =
-          if b < 0 and a > int32.high + b: raise newConnError(hyxFlowControlError)
-          if b > 0 and a < int32.low + b: raise newConnError(hyxFlowControlError)
-        for strm in values client.streams:
-          subtBoundCheck(client.peerWindowSize.int32, strm.peerWindow)
-          strm.peerWindow = client.peerWindowSize.int32 - strm.peerWindow
-          subtBoundCheck(value.int32, strm.peerWindow)
-          strm.peerWindow = value.int32 - strm.peerWindow
-          if not strm.peerWindowUpdateSig.isClosed:
-            strm.peerWindowUpdateSig.trigger()
-        client.peerWindowSize = value
-        if not client.peerWindowUpdateSig.isClosed:
-          client.peerWindowUpdateSig.trigger()
-      of frmsMaxFrameSize:
-        check value >= stgInitialMaxFrameSize, newConnError(hyxProtocolError)
-        check value <= stgMaxFrameSize, newConnError(hyxProtocolError)
-        client.peerMaxFrameSize = value
-      of frmsMaxHeaderListSize:
-        # this is only advisory, do nothing for now.
-        # server may reply a 431 status (request header fields too large)
-        discard
+proc mainStreamNaked(client: ClientContext, stream: Stream) {.async.} =
+  template flowControlBoundCheck(a, b: untyped): untyped =
+    if b < 0 and a > int32.high + b: raise newConnError(hyxFlowControlError)
+    if b > 0 and a < int32.low + b: raise newConnError(hyxFlowControlError)
+  doAssert stream.id == frmSidMain
+  var frm: Frame
+  while true:
+    frm = await stream.msgs.get()
+    stream.msgs.getDone()
+    case frm.typ
+    of frmtWindowUpdate:
+      check frm.windowSizeInc > 0, newConnError(hyxProtocolError)
+      check frm.windowSizeInc <= stgMaxWindowSize, newConnError(hyxProtocolError)
+      check client.peerWindow <= stgMaxWindowSize.int32 - frm.windowSizeInc.int32,
+        newConnError(hyxFlowControlError)
+      client.peerWindow += frm.windowSizeInc.int32
+      client.peerWindowUpdateSig.trigger()
+    of frmtSettings:
+      check frm.payloadLen.int <= stgMaxSettingsList * frmSettingsSize,
+        newConnError(hyxProtocolError)
+      for (setting, value) in frm.settings:
+        # https://www.rfc-editor.org/rfc/rfc7541.html#section-4.2
+        case setting
+        of frmsHeaderTableSize:
+          # maybe max table size should be a setting instead of 4096
+          client.headersEnc.setSize min(value.int, stgHeaderTableSize.int)
+        of frmsEnablePush:
+          case client.typ
+          of ctClient: check value == 0, newConnError(hyxProtocolError)
+          of ctServer: check value == 0 or value == 1, newConnError(hyxProtocolError)
+        of frmsMaxConcurrentStreams:
+          client.peerMaxConcurrentStreams = value
+        of frmsInitialWindowSize:
+          check value <= stgMaxWindowSize, newConnError(hyxFlowControlError)
+          for strm in values client.streams:
+            flowControlBoundCheck(client.peerWindowSize.int32, strm.peerWindow)
+            strm.peerWindow = client.peerWindowSize.int32 - strm.peerWindow
+            flowControlBoundCheck(value.int32, strm.peerWindow)
+            strm.peerWindow = value.int32 - strm.peerWindow
+            if not strm.peerWindowUpdateSig.isClosed:
+              strm.peerWindowUpdateSig.trigger()
+          client.peerWindowSize = value
+          if not client.peerWindowUpdateSig.isClosed:
+            client.peerWindowUpdateSig.trigger()
+        of frmsMaxFrameSize:
+          check value >= stgInitialMaxFrameSize, newConnError(hyxProtocolError)
+          check value <= stgMaxFrameSize, newConnError(hyxProtocolError)
+          client.peerMaxFrameSize = value
+        of frmsMaxHeaderListSize:
+          # this is only advisory, do nothing for now.
+          # server may reply a 431 status (request header fields too large)
+          discard
+        else:
+          # ignore unknown setting
+          debugInfo "unknown setting received"
+      if frmfAck notin frm.flags:
+        await client.send newSettingsFrame(ack = true)
+    of frmtPing:
+      if frmfAck notin frm.flags:
+        await client.send newPingFrame(ackPayload = frm.payload)
       else:
-        # ignore unknown setting
-        debugInfo "unknown setting received"
-    if frmfAck notin frm.flags:
-      await client.send newSettingsFrame(ack = true)
-  of frmtPing:
-    if frmfAck notin frm.flags:
-      await client.send newPingFrame(ackPayload = frm.payload)
+        let sid = frm.pingData().StreamId
+        if sid in client.streams:
+          let strm = client.streams.get sid
+          if not strm.pingSig.isClosed:
+            strm.pingSig.trigger()
+    of frmtGoAway:
+      client.isGracefulShutdown = true
+      client.error ?= newConnError(frm.errCode(), hyxRemoteErr)
+      # streams are never created by ctServer,
+      # so there are no streams to close
+      if client.typ == ctClient:
+        let sid = frm.lastStreamId()
+        for strm in values client.streams:
+          if strm.id.uint32 > sid:
+            strm.close()
     else:
-      let sid = frm.pingData().StreamId
-      if sid in client.streams:
-        let strm = client.streams.get sid
-        if not strm.pingSig.isClosed:
-          strm.pingSig.trigger()
-  of frmtGoAway:
-    client.isGracefulShutdown = true
-    client.error ?= newConnError(frm.errCode(), hyxRemoteErr)
-    # streams are never created by ctServer,
-    # so there are no streams to close
-    if client.typ == ctClient:
-      let sid = frm.lastStreamId()
-      for strm in values client.streams:
-        if strm.id.uint32 > sid:
-          strm.close()
-  else:
-    doAssert frm.typ notin connFrmAllowed
-    raise newConnError(hyxProtocolError)
+      doAssert frm.typ notin connFrmAllowed
+      raise newConnError(hyxProtocolError)
+
+proc mainStream(client: ClientContext, stream: Stream) {.async.} =
+  try:
+    await mainStreamNaked(client, stream)
+  except QueueClosedError:
+    doAssert not client.isConnected
+  except HyperxConnError as err:
+    debugErr2 err
+    client.error ?= newError err
+    await client.sendSilently newGoAwayFrame(
+      client.maxPeerStreamIdSeen, err.code
+    )
+    client.close()
+    raise err
+  except CatchableError as err:
+    debugErr2 err
+    raise err
+  finally:
+    client.close()
 
 proc recvDispatcherNaked(client: ClientContext) {.async.} =
   ## Dispatch messages to open streams.
   ## Note decoding headers must be done in message received order,
   ## so it needs to be done here. Same for processing the main
   ## stream messages.
+  let mainStrm = client.streams.get frmSidMain
   var headers = ""
   var frm = newFrame()
   while client.isConnected:
@@ -576,7 +597,7 @@ proc recvDispatcherNaked(client: ClientContext) {.async.} =
       continue
     if frm.sid == frmSidMain:
       # Settings need to be applied before consuming following messages
-      await consumeMainStream(client, frm)
+      await mainStrm.msgs.put frm
       continue
     check frm.typ in frmStreamAllowed, newConnError(hyxProtocolError)
     check frm.sid.int mod 2 != 0, newConnError(hyxProtocolError)
@@ -642,6 +663,7 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     await client.sendSilently newGoAwayFrame(
       client.maxPeerStreamIdSeen, err.code
     )
+    client.close()
     raise err
   except HyperxStrmError:
     debugErr getCurrentException()
@@ -701,14 +723,15 @@ proc failSilently(f: Future[void]) {.async.} =
 template with*(client: ClientContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
   doAssert not client.isConnected
-  var dispFut, winupFut: Future[void] = nil
+  var dispFut, winupFut, mainStreamFut: Future[void] = nil
   try:
     client.isConnected = true
     if client.typ == ctClient:
       await client.connect()
     await client.handshake()
-    dispFut = client.recvDispatcher()
+    mainStreamFut = client.mainStream(client.openMainStream())
     winupFut = client.windowUpdateTask()
+    dispFut = client.recvDispatcher()
     block:
       body
   # do not handle any error here
@@ -721,6 +744,7 @@ template with*(client: ClientContext, body: untyped): untyped =
     # at this point body completed or errored out
     await failSilently(dispFut)
     await failSilently(winupFut)
+    await failSilently(mainStreamFut)
     when defined(hyperxSanityCheck):
       client.sanityCheckAfterClose()
 
