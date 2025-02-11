@@ -566,6 +566,9 @@ proc mainStream(client: ClientContext, stream: Stream) {.async.} =
   except HyperxConnError as err:
     debugErr2 err
     client.error ?= newError err
+    await client.sendSilently newGoAwayFrame(
+      client.maxPeerStreamIdSeen, err.code
+    )
     client.close()
     raise err
   except CatchableError as err:
@@ -660,6 +663,7 @@ proc recvDispatcher(client: ClientContext) {.async.} =
     await client.sendSilently newGoAwayFrame(
       client.maxPeerStreamIdSeen, err.code
     )
+    client.close()
     raise err
   except HyperxStrmError:
     debugErr getCurrentException()
