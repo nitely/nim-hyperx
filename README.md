@@ -138,6 +138,7 @@ Also try:
 
 - release: `-d:release` always compile in release mode.
 - refc: `--mm:refc` use refc GC instead of ORC.
+- orc: use orc in Nim +2.2.2.
 - h2c: disable TLS `newServer(..., ssl = false)` and use h2load `-ph2c` parameter
 - localServer.nim: it will respond "hello world" or any data it receives. You may want to tweak it to not send any data.
 - start a server instance per CPU and use `taskset` to set the process CPU affinity.
@@ -148,7 +149,7 @@ Also try:
 
 Nim's stdlib async creates cycles, and the ORC cycle collector does not run often enough. If you want to use orc, you'll need to call `GC_runOrc()` at some point, for example on client close or stream close. Related [nim issue](https://github.com/nim-lang/Nim/issues/21631). `--mm:refc` does not have this issue.
 
-This has been fixed in devel, and next Nim 2.2.1 release.
+This has been fixed in Nim +2.2.2.
 
 ### Related libs
 
