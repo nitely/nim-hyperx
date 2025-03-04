@@ -1,9 +1,9 @@
 ## HTTP/2 client
 
 import std/net
+import std/asyncnet
 import std/asyncdispatch
 when defined(ssl):
-  import std/asyncnet
   import ./atexit
 
 import ./clientserver
@@ -71,8 +71,8 @@ proc newClient*(
       newMySocketSsl()
     else:
       newMySocket()
-  sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
-  newClient(ctClient, sock, hostname, port)
+  result = newClient(ctClient, sock, hostname, port)
+  #catch result.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
 
 type
   HttpMethod* = enum
