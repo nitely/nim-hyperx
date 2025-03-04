@@ -72,7 +72,7 @@ proc newClient*(
     else:
       newMySocket()
   result = newClient(ctClient, sock, hostname, port)
-  #catch result.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
+  catch result.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
 
 type
   HttpMethod* = enum
