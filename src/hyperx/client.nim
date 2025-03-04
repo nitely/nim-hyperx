@@ -71,6 +71,7 @@ proc newClient*(
       newMySocketSsl()
     else:
       newMySocket()
+  sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
   newClient(ctClient, sock, hostname, port)
 
 type
