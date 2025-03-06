@@ -134,7 +134,7 @@ type
     windowPending, windowProcessed: int
     windowUpdateSig: SignalAsync
     sendBuff: string
-    sendBuffSig: SignalAsync
+    sendBuffSig, sendBuffDoneSig: SignalAsync
     error*: ref HyperxConnError
     when defined(hyperxStats):
       frmsSent: int
@@ -168,7 +168,8 @@ proc newClient*(
     windowProcessed: 0,
     windowUpdateSig: newSignal(),
     sendBuff: "",
-    sendBuffSig: newSignal()
+    sendBuffSig: newSignal(),
+    sendBuffDoneSig: newSignal()
   )
 
 proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
@@ -183,6 +184,7 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.peerWindowUpdateSig.close()
     client.windowUpdateSig.close()
     client.sendBuffSig.close()
+    client.sendBuffDoneSig.close()
 
 func stream(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
   client.streams.get sid
@@ -314,6 +316,8 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
     client.sendBuff.setLen 0
     check not client.sock.isClosed, newConnClosedError()
     await client.sock.send(addr buff[0], buff.len)
+    check not client.sendBuffDoneSig.isClosed, newConnClosedError()
+    client.sendBuffDoneSig.trigger()
 
 proc sendTask(client: ClientContext) {.async.} =
   try:
@@ -336,6 +340,14 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
   client.sendBuff.add frm.s
   check not client.sendBuffSig.isClosed, newConnClosedError()
   client.sendBuffSig.trigger()
+  # XXX this is right if not currently sending a buff, need to wait again
+  #     if currently sending.
+  if frm.typ in {frmtRstStream, frmtGoAway}:
+    await client.sendBuffDoneSig.waitFor()
+  elif frm.typ in {frmtHeaders, frmtData} and frmfEndStream in frm.flags:
+    await client.sendBuffDoneSig.waitFor()
+  elif client.sendBuff.len > max(stgWindowSize, 64 * 1024):
+    await client.sendBuffDoneSig.waitFor()
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
