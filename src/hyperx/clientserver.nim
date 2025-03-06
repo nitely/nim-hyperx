@@ -342,12 +342,13 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
   client.sendBuffSig.trigger()
   # XXX this is right if not currently sending a buff, need to wait again
   #     if currently sending.
-  if frm.typ in {frmtRstStream, frmtGoAway}:
-    await client.sendBuffDoneSig.waitFor()
-  elif frm.typ in {frmtHeaders, frmtData} and frmfEndStream in frm.flags:
-    await client.sendBuffDoneSig.waitFor()
-  elif client.sendBuff.len > 8 * 1024:
-    await client.sendBuffDoneSig.waitFor()
+  #if frm.typ in {frmtRstStream, frmtGoAway}:
+  #  await client.sendBuffDoneSig.waitFor()
+  #elif frm.typ in {frmtHeaders, frmtData} and frmfEndStream in frm.flags:
+  #  await client.sendBuffDoneSig.waitFor()
+  #elif client.sendBuff.len > 8 * 1024:
+  #  await client.sendBuffDoneSig.waitFor()
+  await client.sendBuffDoneSig.waitFor()
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
