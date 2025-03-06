@@ -133,6 +133,8 @@ type
     peerWindowUpdateSig: SignalAsync
     windowPending, windowProcessed: int
     windowUpdateSig: SignalAsync
+    sendBuff: string
+    sendBuffSig: SignalAsync
     error*: ref HyperxConnError
     when defined(hyperxStats):
       frmsSent: int
@@ -164,7 +166,9 @@ proc newClient*(
     peerWindowUpdateSig: newSignal(),
     windowPending: 0,
     windowProcessed: 0,
-    windowUpdateSig: newSignal()
+    windowUpdateSig: newSignal(),
+    sendBuff: "",
+    sendBuffSig: newSignal()
   )
 
 proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
@@ -178,6 +182,7 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.streams.close()
     client.peerWindowUpdateSig.close()
     client.windowUpdateSig.close()
+    client.sendBuffSig.close()
 
 func stream(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
   client.streams.get sid
@@ -299,20 +304,38 @@ proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
     client.frmsSentTyp[frm.typ.int] += 1
     client.bytesSent += frm.len
 
-proc send(client: ClientContext, frm: Frame) {.async.} =
+proc sendTaskNaked(client: ClientContext) {.async.} =
+  var buff = ""
+  while true:
+    while client.sendBuff.len == 0:
+      await client.sendBuffSig.waitFor()
+    buff.setLen 0
+    buff.add client.sendBuff
+    client.sendBuff.setLen 0
+    check not client.sock.isClosed, newConnClosedError()
+    await client.sock.send(addr buff[0], buff.len)
+
+proc sendTask(client: ClientContext) {.async.} =
   try:
-    await client.sendNaked(frm)
-  except HyperxConnError as err:
-    debugErr2 err
-    client.error ?= newError err
-    client.close()
-    raise err
-  except OsError, SslError:
+    await client.sendTaskNaked()
+  except QueueClosedError:
+    discard
+  except HyperxError, OsError, SslError:
     let err = getCurrentException()
     debugErr2 err
     client.error ?= newConnError(err.msg)
     client.close()
     raise newConnError(err.msg, err)
+  finally:
+    client.close()
+
+proc send(client: ClientContext, frm: Frame) {.async.} =
+  doAssert frm.payloadLen.int == frm.payload.len
+  doAssert frm.payload.len <= client.peerMaxFrameSize.int
+  doAssert frm.sid <= StreamId maxStreamId
+  client.sendBuff.add frm.s
+  check not client.sendBuffSig.isClosed, newConnClosedError()
+  client.sendBuffSig.trigger()
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
@@ -723,12 +746,13 @@ proc failSilently(f: Future[void]) {.async.} =
 template with*(client: ClientContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
   doAssert not client.isConnected
-  var dispFut, winupFut, mainStreamFut: Future[void] = nil
+  var dispFut, winupFut, mainStreamFut, sendTaskFut: Future[void] = nil
   try:
     client.isConnected = true
     if client.typ == ctClient:
       await client.connect()
     await client.handshake()
+    sendTaskFut = client.sendTask()
     mainStreamFut = client.mainStream(client.openMainStream())
     winupFut = client.windowUpdateTask()
     dispFut = client.recvDispatcher()
@@ -745,6 +769,7 @@ template with*(client: ClientContext, body: untyped): untyped =
     await failSilently(dispFut)
     await failSilently(winupFut)
     await failSilently(mainStreamFut)
+    await failSilently(sendTaskFut)
     when defined(hyperxSanityCheck):
       client.sanityCheckAfterClose()
 
