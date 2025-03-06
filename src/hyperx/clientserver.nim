@@ -346,7 +346,7 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
     await client.sendBuffDoneSig.waitFor()
   elif frm.typ in {frmtHeaders, frmtData} and frmfEndStream in frm.flags:
     await client.sendBuffDoneSig.waitFor()
-  elif client.sendBuff.len > max(stgWindowSize, 64 * 1024):
+  elif client.sendBuff.len > 8 * 1024:
     await client.sendBuffDoneSig.waitFor()
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
