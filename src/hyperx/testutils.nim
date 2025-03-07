@@ -32,6 +32,12 @@ template testAsync*(name: string, body: untyped): untyped =
       doAssert stats.allocCount == stats.deallocCount
   )()
 
+proc sleepCycle*: Future[void] =
+  let fut = newFuture[void]()
+  proc wakeup = fut.complete()
+  callSoon wakeup
+  return fut
+
 func toString(bytes: openArray[byte]): string =
   result = ""
   for b in bytes:

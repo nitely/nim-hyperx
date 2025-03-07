@@ -11,7 +11,7 @@ from ../../src/hyperx/clientserver import stgWindowSize
 const strmsPerClient = 1123
 const clientsCount = 13
 const strmsInFlight = 100
-const dataFrameLen = 1
+const dataFrameLen = 1111
 #const dataFrameLen = stgWindowSize.int * 2 + 123
 
 proc send(strm: ClientStream) {.async.} =

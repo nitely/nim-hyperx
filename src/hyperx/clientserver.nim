@@ -133,6 +133,8 @@ type
     peerWindowUpdateSig: SignalAsync
     windowPending, windowProcessed: int
     windowUpdateSig: SignalAsync
+    sendBuf: string
+    sendBufSig, sendBufDrainSig: SignalAsync
     error*: ref HyperxConnError
     when defined(hyperxStats):
       frmsSent: int
@@ -164,7 +166,10 @@ proc newClient*(
     peerWindowUpdateSig: newSignal(),
     windowPending: 0,
     windowProcessed: 0,
-    windowUpdateSig: newSignal()
+    windowUpdateSig: newSignal(),
+    sendBuf: "",
+    sendBufSig: newSignal(),
+    sendBufDrainSig: newSignal()
   )
 
 proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
@@ -178,6 +183,8 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.streams.close()
     client.peerWindowUpdateSig.close()
     client.windowUpdateSig.close()
+    client.sendBufSig.close()
+    client.sendBufDrainSig.close()
 
 func stream(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
   client.streams.get sid
@@ -281,6 +288,32 @@ func hpackEncode*(
     debugErr2 err
     raise newConnError(err.msg, err)
 
+proc sendTaskNaked(client: ClientContext) {.async.} =
+  var buf = ""
+  while true:
+    while client.sendBuf.len == 0:
+      await client.sendBufSig.waitFor()
+    buf.setLen 0
+    buf.add client.sendBuf
+    client.sendBuf.setLen 0
+    client.sendBufDrainSig.trigger()
+    check not client.sock.isClosed, newConnClosedError()
+    await client.sock.send(addr buf[0], buf.len)
+
+proc sendTask(client: ClientContext) {.async.} =
+  try:
+    await client.sendTaskNaked()
+  except QueueClosedError:
+    doAssert not client.isConnected
+  except HyperxError, OsError, SslError:
+    let err = getCurrentException()
+    debugErr2 err
+    client.error ?= newConnError(err.msg)
+    client.close()
+    raise newConnError(err.msg, err)
+  finally:
+    client.close()
+
 proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
   debugInfo "===SENT==="
   debugInfo $frm
@@ -288,12 +321,20 @@ proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
   doAssert frm.sid <= StreamId maxStreamId
-  check not client.sock.isClosed, newConnClosedError()
-  GC_ref frm
-  try:
-    await client.sock.send(frm.rawBytesPtr, frm.len)
-  finally:
-    GC_unref frm
+  client.sendBuf.add frm.s
+  client.sendBufSig.trigger()
+  let waitDrain =
+    frm.typ in {frmtRstStream, frmtGoAway} or
+    (frm.typ in {frmtHeaders, frmtData} and frmfEndStream in frm.flags) or
+    client.sendBuf.len > 16 * 1024
+  if waitDrain:
+    await client.sendBufDrainSig.waitFor()
+  # XXX hack; need to wait for sock.send to complete
+  if frm.typ == frmtGoAway:
+    if client.sendBuf.len == 0:
+      client.sendBuf.add frm.s
+      client.sendBufSig.trigger()
+    await client.sendBufDrainSig.waitFor()
   when defined(hyperxStats):
     client.frmsSent += 1
     client.frmsSentTyp[frm.typ.int] += 1
@@ -302,17 +343,11 @@ proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
 proc send(client: ClientContext, frm: Frame) {.async.} =
   try:
     await client.sendNaked(frm)
-  except HyperxConnError as err:
-    debugErr2 err
-    client.error ?= newError err
-    client.close()
+  except QueueClosedError as err:
+    doAssert not client.isConnected
+    if client.error != nil:
+      raise newConnError(client.error.msg, err)
     raise err
-  except OsError, SslError:
-    let err = getCurrentException()
-    debugErr2 err
-    client.error ?= newConnError(err.msg)
-    client.close()
-    raise newConnError(err.msg, err)
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
@@ -321,8 +356,8 @@ proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.sid == frmSidMain
   doAssert frm.typ == frmtGoAway
   try:
-    await client.sendNaked(frm)
-  except HyperxError, OsError, SslError:
+    await client.send(frm)
+  except HyperxError:
     debugErr getCurrentException()
 
 func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
@@ -723,12 +758,13 @@ proc failSilently(f: Future[void]) {.async.} =
 template with*(client: ClientContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
   doAssert not client.isConnected
-  var dispFut, winupFut, mainStreamFut: Future[void] = nil
+  var dispFut, winupFut, mainStreamFut, sendTaskFut: Future[void] = nil
   try:
     client.isConnected = true
     if client.typ == ctClient:
       await client.connect()
     await client.handshake()
+    sendTaskFut = client.sendTask()
     mainStreamFut = client.mainStream(client.openMainStream())
     winupFut = client.windowUpdateTask()
     dispFut = client.recvDispatcher()
@@ -745,6 +781,7 @@ template with*(client: ClientContext, body: untyped): untyped =
     await failSilently(dispFut)
     await failSilently(winupFut)
     await failSilently(mainStreamFut)
+    await failSilently(sendTaskFut)
     when defined(hyperxSanityCheck):
       client.sanityCheckAfterClose()
 
