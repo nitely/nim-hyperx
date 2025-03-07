@@ -133,8 +133,8 @@ type
     peerWindowUpdateSig: SignalAsync
     windowPending, windowProcessed: int
     windowUpdateSig: SignalAsync
-    sendBuff: string
-    sendBuffSig, sendBuffDoneSig: SignalAsync
+    sendBuf: string
+    sendBufSig, sendBufDrainSig: SignalAsync
     error*: ref HyperxConnError
     when defined(hyperxStats):
       frmsSent: int
@@ -167,9 +167,9 @@ proc newClient*(
     windowPending: 0,
     windowProcessed: 0,
     windowUpdateSig: newSignal(),
-    sendBuff: "",
-    sendBuffSig: newSignal(),
-    sendBuffDoneSig: newSignal()
+    sendBuf: "",
+    sendBufSig: newSignal(),
+    sendBufDrainSig: newSignal()
   )
 
 proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
@@ -183,8 +183,8 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.streams.close()
     client.peerWindowUpdateSig.close()
     client.windowUpdateSig.close()
-    client.sendBuffSig.close()
-    client.sendBuffDoneSig.close()
+    client.sendBufSig.close()
+    client.sendBufDrainSig.close()
 
 func stream(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
   client.streams.get sid
@@ -288,36 +288,18 @@ func hpackEncode*(
     debugErr2 err
     raise newConnError(err.msg, err)
 
-proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
-  debugInfo "===SENT==="
-  debugInfo $frm
-  debugInfo debugPayload(frm)
-  doAssert frm.payloadLen.int == frm.payload.len
-  doAssert frm.payload.len <= client.peerMaxFrameSize.int
-  doAssert frm.sid <= StreamId maxStreamId
-  check not client.sock.isClosed, newConnClosedError()
-  GC_ref frm
-  try:
-    await client.sock.send(frm.rawBytesPtr, frm.len)
-  finally:
-    GC_unref frm
-  when defined(hyperxStats):
-    client.frmsSent += 1
-    client.frmsSentTyp[frm.typ.int] += 1
-    client.bytesSent += frm.len
-
 proc sendTaskNaked(client: ClientContext) {.async.} =
-  var buff = ""
+  var buf = ""
   while true:
-    while client.sendBuff.len == 0:
-      await client.sendBuffSig.waitFor()
-    buff.setLen 0
-    buff.add client.sendBuff
-    client.sendBuff.setLen 0
-    check not client.sendBuffDoneSig.isClosed, newConnClosedError()
-    client.sendBuffDoneSig.trigger()
+    while client.sendBuf.len == 0:
+      await client.sendBufSig.waitFor()
+    buf.setLen 0
+    buf.add client.sendBuf
+    client.sendBuf.setLen 0
+    check not client.sendBufDrainSig.isClosed, newConnClosedError()
+    client.sendBufDrainSig.trigger()
     check not client.sock.isClosed, newConnClosedError()
-    await client.sock.send(addr buff[0], buff.len)
+    await client.sock.send(addr buf[0], buf.len)
 
 proc sendTask(client: ClientContext) {.async.} =
   try:
@@ -334,18 +316,25 @@ proc sendTask(client: ClientContext) {.async.} =
     client.close()
 
 proc send(client: ClientContext, frm: Frame) {.async.} =
+  debugInfo "===SENT==="
+  debugInfo $frm
+  debugInfo debugPayload(frm)
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
   doAssert frm.sid <= StreamId maxStreamId
-  client.sendBuff.add frm.s
-  check not client.sendBuffSig.isClosed, newConnClosedError()
-  client.sendBuffSig.trigger()
-  let waitFlush =
+  client.sendBuf.add frm.s
+  check not client.sendBufSig.isClosed, newConnClosedError()
+  client.sendBufSig.trigger()
+  let waitDrain =
     frm.typ in {frmtRstStream, frmtGoAway} or
     (frm.typ in {frmtHeaders, frmtData} and frmfEndStream in frm.flags) or
-    client.sendBuff.len > 16 * 1024
-  if waitFlush:
-    await client.sendBuffDoneSig.waitFor()
+    client.sendBuf.len > 16 * 1024
+  if waitDrain:
+    await client.sendBufDrainSig.waitFor()
+  when defined(hyperxStats):
+    client.frmsSent += 1
+    client.frmsSentTyp[frm.typ.int] += 1
+    client.bytesSent += frm.len
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
@@ -354,8 +343,8 @@ proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.sid == frmSidMain
   doAssert frm.typ == frmtGoAway
   try:
-    await client.sendNaked(frm)
-  except HyperxError, OsError, SslError:
+    await client.send(frm)
+  except HyperxError:
     debugErr getCurrentException()
 
 func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
