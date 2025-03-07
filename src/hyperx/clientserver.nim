@@ -331,6 +331,8 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
     client.sendBuf.len > 16 * 1024
   if waitDrain:
     await client.sendBufDrainSig.waitFor()
+  #if frm.typ == frmtGoAway:
+  #  await client.sendBufDoneSig.waitFor()
   when defined(hyperxStats):
     client.frmsSent += 1
     client.frmsSentTyp[frm.typ.int] += 1

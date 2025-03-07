@@ -12,6 +12,7 @@ template testAsync(name: string, body: untyped): untyped =
     echo "test " & name
     proc test() {.async.} =
       body
+    discard getGlobalDispatcher()
     waitFor test()
     doAssert not hasPendingOperations()
     when false:

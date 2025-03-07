@@ -16,6 +16,7 @@ template testAsync(name: string, body: untyped): untyped =
     proc test {.async.} =
       body
       checked = true
+    discard getGlobalDispatcher()
     waitFor test()
     doAssert not hasPendingOperations()
     doAssert checked

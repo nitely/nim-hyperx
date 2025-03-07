@@ -460,7 +460,7 @@ testAsync "stream NO_ERROR before request completes":
         await tc.replyNoError(strm.stream.id)
         # wait for the rst
         while strm.stream.state != strmClosed:
-          await sleepAsync(1)
+          await sleepCycle()
         try:
           await strm.recv(dataIn)  # this should never raise
         except HyperxError:

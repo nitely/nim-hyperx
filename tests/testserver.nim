@@ -109,7 +109,7 @@ testAsync "exceed window size":
       sentCount += text.len
     var i = 0
     while tc.client.isConnected:
-      await sleepAsync(0)
+      await sleepCycle()
       inc i
       doAssert i < 1000
 
@@ -233,7 +233,6 @@ testAsync "exceed settings list":
       for _ in 0 .. stgMaxSettingsList.int+1:
         frmSetting.addSetting(0x09.FrmSetting, 1000.uint32)
       await tc1.recv frmSetting.s
-      await tc1.recv headers
       try:
         discard await client1.recvStream()
         doAssert false
