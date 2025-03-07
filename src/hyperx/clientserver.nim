@@ -314,10 +314,10 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
     buff.setLen 0
     buff.add client.sendBuff
     client.sendBuff.setLen 0
-    check not client.sock.isClosed, newConnClosedError()
-    await client.sock.send(addr buff[0], buff.len)
     check not client.sendBuffDoneSig.isClosed, newConnClosedError()
     client.sendBuffDoneSig.trigger()
+    check not client.sock.isClosed, newConnClosedError()
+    await client.sock.send(addr buff[0], buff.len)
 
 proc sendTask(client: ClientContext) {.async.} =
   try:
@@ -340,15 +340,11 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
   client.sendBuff.add frm.s
   check not client.sendBuffSig.isClosed, newConnClosedError()
   client.sendBuffSig.trigger()
-  # XXX this is right if not currently sending a buff, need to wait again
-  #     if currently sending.
-  if frm.typ in {frmtRstStream, frmtGoAway}:
-    await client.sendBuffDoneSig.waitFor()
-  elif frm.typ == frmtHeaders and frmfEndStream in frm.flags:
-    await client.sendBuffDoneSig.waitFor()
-  elif frm.typ == frmtData:
-    await client.sendBuffDoneSig.waitFor()
-  elif client.sendBuff.len > 16 * 1024:
+  let waitFlush =
+    frm.typ in {frmtRstStream, frmtGoAway} or
+    (frm.typ in {frmtHeaders, frmtData} and frmfEndStream in frm.flags) or
+    client.sendBuff.len > 16 * 1024
+  if waitFlush:
     await client.sendBuffDoneSig.waitFor()
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
