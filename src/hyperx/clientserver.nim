@@ -296,7 +296,6 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
     buf.setLen 0
     buf.add client.sendBuf
     client.sendBuf.setLen 0
-    check not client.sendBufDrainSig.isClosed, newConnClosedError()
     client.sendBufDrainSig.trigger()
     check not client.sock.isClosed, newConnClosedError()
     await client.sock.send(addr buf[0], buf.len)
@@ -305,7 +304,7 @@ proc sendTask(client: ClientContext) {.async.} =
   try:
     await client.sendTaskNaked()
   except QueueClosedError:
-    discard
+    doAssert not client.isConnected
   except HyperxError, OsError, SslError:
     let err = getCurrentException()
     debugErr2 err
@@ -315,7 +314,7 @@ proc sendTask(client: ClientContext) {.async.} =
   finally:
     client.close()
 
-proc send(client: ClientContext, frm: Frame) {.async.} =
+proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
   debugInfo "===SENT==="
   debugInfo $frm
   debugInfo debugPayload(frm)
@@ -323,7 +322,6 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
   doAssert frm.sid <= StreamId maxStreamId
   client.sendBuf.add frm.s
-  check not client.sendBufSig.isClosed, newConnClosedError()
   client.sendBufSig.trigger()
   let waitDrain =
     frm.typ in {frmtRstStream, frmtGoAway} or
@@ -331,16 +329,25 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
     client.sendBuf.len > 16 * 1024
   if waitDrain:
     await client.sendBufDrainSig.waitFor()
+  # XXX hack; need to wait for sock.send to complete
   if frm.typ == frmtGoAway:
-    if client.sendBuf == 0:  # XXX hack
+    if client.sendBuf.len == 0:
       client.sendBuf.add frm.s
-      check not client.sendBufSig.isClosed, newConnClosedError()
       client.sendBufSig.trigger()
     await client.sendBufDrainSig.waitFor()
   when defined(hyperxStats):
     client.frmsSent += 1
     client.frmsSentTyp[frm.typ.int] += 1
     client.bytesSent += frm.len
+
+proc send(client: ClientContext, frm: Frame) {.async.} =
+  try:
+    await client.sendNaked(frm)
+  except QueueClosedError as err:
+    doAssert not client.isConnected
+    if client.error != nil:
+      raise newConnError(client.error.msg, err)
+    raise err
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
