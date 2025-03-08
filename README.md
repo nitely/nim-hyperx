@@ -145,6 +145,10 @@ Also try:
 - make sure the bench tool is hitting all server instances, not just one.
 - using [yasync](https://github.com/yglukhov/yasync) shows higher throughput and lower latency.
 
+### Memory leaks
+
+Use `--mm:refc`. It only leaks under orc; one reason is [this](https://github.com/nim-lang/Nim/issues/23615), I did not investigate further.
+
 ### ORC
 
 Nim's stdlib async creates cycles, and the ORC cycle collector does not run often enough. If you want to use orc, you'll need to call `GC_runOrc()` at some point, for example on client close or stream close. Related [nim issue](https://github.com/nim-lang/Nim/issues/21631). `--mm:refc` does not have this issue.
