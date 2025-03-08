@@ -323,7 +323,7 @@ proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
   doAssert frm.sid <= StreamId maxStreamId
   client.sendBuf.add frm.s
   client.sendBufSig.trigger()
-  if frm.typ == frmtGoAway or client.sendBuf.len > 16 * 1024:
+  if frm.typ == frmtGoAway or client.sendBuf.len > 64 * 1024:
     await client.sendBufDrainSig.waitFor()
   # XXX hack; need to wait for sock.send to complete
   if frm.typ == frmtGoAway:
