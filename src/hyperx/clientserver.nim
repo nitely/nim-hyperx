@@ -292,6 +292,7 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   var buf = ""
   while true:
     while client.sendBuf.len == 0:
+      client.sendBufDrainSig.trigger()
       await client.sendBufSig.waitFor()
     buf.setLen 0
     buf.add client.sendBuf
@@ -325,11 +326,9 @@ proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
   client.sendBufSig.trigger()
   if frm.typ == frmtGoAway or client.sendBuf.len > 64 * 1024:
     await client.sendBufDrainSig.waitFor()
-  # XXX hack; need to wait for sock.send to complete
+  # need to wait for sock.send to complete
   if frm.typ == frmtGoAway:
-    if client.sendBuf.len == 0:
-      client.sendBuf.add frm.s
-      client.sendBufSig.trigger()
+    client.sendBufSig.trigger()
     await client.sendBufDrainSig.waitFor()
   when defined(hyperxStats):
     client.frmsSent += 1
