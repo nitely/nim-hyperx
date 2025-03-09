@@ -135,6 +135,7 @@ type
     windowUpdateSig: SignalAsync
     sendBuf: string
     sendBufSig, sendBufDrainSig: SignalAsync
+    sendFrm: Frame
     error*: ref HyperxConnError
     when defined(hyperxStats):
       frmsSent: int
@@ -169,7 +170,8 @@ proc newClient*(
     windowUpdateSig: newSignal(),
     sendBuf: "",
     sendBufSig: newSignal(),
-    sendBufDrainSig: newSignal()
+    sendBufDrainSig: newSignal(),
+    sendFrm: newEmptyFrame()
   )
 
 proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
@@ -795,7 +797,6 @@ type
     headersRecv, bodyRecv, trailersRecv: string
     headersRecvSig, bodyRecvSig: SignalAsync
     bodyRecvLen: int
-    frm: Frame
 
 func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
   ClientStream(
@@ -810,8 +811,7 @@ func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
     bodyRecvLen: 0,
     headersRecv: "",
     headersRecvSig: newSignal(),
-    trailersRecv: "",
-    frm: newEmptyFrame()
+    trailersRecv: ""
   )
 
 func newClientStream*(client: ClientContext): ClientStream =
@@ -1106,7 +1106,7 @@ proc sendHeadersImpl*(
 ): Future[void] =
   ## Headers must be HPACK encoded;
   ## headers may be trailers
-  template frm: untyped = strm.frm
+  template frm: untyped = strm.client.sendFrm
   doAssert strm.stream.state in strmStateHeaderSendAllowed
   doAssert strm.stateSend == csStateOpened or
     (strm.stateSend in {csStateHeaders, csStateData} and finish)
@@ -1145,7 +1145,7 @@ proc sendBodyNaked(
 ) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
-  template frm: untyped = strm.frm
+  template frm: untyped = strm.client.sendFrm
   check stream.state in strmStateDataSendAllowed,
     newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
   doAssert strm.stateSend in {csStateHeaders, csStateData}
