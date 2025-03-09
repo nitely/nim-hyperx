@@ -292,8 +292,8 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   var buf = ""
   while true:
     while client.sendBuf.len == 0:
-      await client.sendBufSig.waitFor()
       client.sendBufDrainSig.trigger()
+      await client.sendBufSig.waitFor()
     buf.setLen 0
     buf.add client.sendBuf
     client.sendBuf.setLen 0
