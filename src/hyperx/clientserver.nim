@@ -620,6 +620,8 @@ proc writeSilently(client: ClientContext, stream: Stream, frm: Frame) {.async.} 
   stream.stateSend = csStateEnded  # XXX ???
   doAssert frm.typ == frmtRstStream
   try:
+    check stream.state in strmStateRstSendAllowed,
+      newStrmError hyxStreamClosed
     await client.write(stream, frm)
   except HyperxError:
     debugErr getCurrentException()
@@ -789,7 +791,7 @@ proc recvDispatcherNaked(client: ClientContext, mainStream: Stream) {.async.} =
     except HyperxStrmError as err:
       debugErr2 err
       stream.error = newError err
-      if err.typ == hyxLocalErr:
+      if err.typ == hyxLocalErr and stream.state in strmStateRstSendAllowed:
         await client.writeSilently(stream, newRstStreamFrame(stream.id, err.code))
       stream.close()
 
@@ -1145,7 +1147,8 @@ proc cancel*(strm: ClientStream, code: HyperxErrCode) {.async.} =
   # fail silently because if it fails, it closes
   # the stream anyway
   try:
-    await client.writeSilently(stream, newRstStreamFrame(stream.id, code))
+    if stream.state in strmStateRstSendAllowed:
+      await client.writeSilently(stream, newRstStreamFrame(stream.id, code))
     if stream.state == strmClosedRst:
       await failSilently strm.ping()
   finally:
