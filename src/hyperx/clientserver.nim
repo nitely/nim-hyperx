@@ -783,36 +783,12 @@ template with*(client: ClientContext, body: untyped): untyped =
       client.sanityCheckAfterClose()
 
 type
-  ClientStreamState* = enum
-    csStateInitial,
-    csStateOpened,
-    csStateHeaders,
-    csStateData,
-    csStateEnded
   ClientStream* = ref object
     client*: ClientContext
     stream*: Stream
-    stateRecv, stateSend: ClientStreamState
-    contentLen, contentLenRecv: int64
-    headersRecv, bodyRecv, trailersRecv: string
-    headersRecvSig, bodyRecvSig: SignalAsync
-    bodyRecvLen: int
 
 func newClientStream*(client: ClientContext, stream: Stream): ClientStream =
-  ClientStream(
-    client: client,
-    stream: stream,
-    stateRecv: csStateInitial,
-    stateSend: csStateInitial,
-    contentLen: 0,
-    contentLenRecv: 0,
-    bodyRecv: "",
-    bodyRecvSig: newSignal(),
-    bodyRecvLen: 0,
-    headersRecv: "",
-    headersRecvSig: newSignal(),
-    trailersRecv: ""
-  )
+  ClientStream(client: client, stream: stream)
 
 func newClientStream*(client: ClientContext): ClientStream =
   doAssert client.typ == ctClient
@@ -823,8 +799,6 @@ func newClientStream*(client: ClientContext): ClientStream =
 proc close(strm: ClientStream) {.raises: [].} =
   strm.stream.close()
   strm.client.streams.close(strm.stream.id)
-  strm.bodyRecvSig.close()
-  strm.headersRecvSig.close()
   try:
     strm.client.peerWindowUpdateSig.trigger()
   except SignalClosedError:
@@ -842,18 +816,19 @@ func openStream(strm: ClientStream) {.raises: [StreamsClosedError, GracefulShutd
   client.currStreamId = sid
 
 func recvEnded*(strm: ClientStream): bool {.raises: [].} =
-  strm.stateRecv == csStateEnded and
-  strm.headersRecv.len == 0 and
-  strm.bodyRecv.len == 0
+  template stream: untyped = strm.stream
+  stream.stateRecv == csStateEnded and
+  stream.headersRecv.len == 0 and
+  stream.bodyRecv.len == 0
 
 func sendEnded*(strm: ClientStream): bool {.raises: [].} =
-  strm.stateSend == csStateEnded
+  strm.stream.stateSend == csStateEnded
 
 proc windowEnd(strm: ClientStream) {.raises: [].} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   # XXX strm.isClosed
-  doAssert strm.bodyRecvSig.isClosed
+  doAssert stream.bodyRecvSig.isClosed
   doAssert stream.windowPending >= stream.windowProcessed
   client.windowProcessed += stream.windowPending - stream.windowProcessed
   try:
@@ -899,7 +874,68 @@ proc write(strm: ClientStream, frm: Frame): Future[void] =
   stream.doTransitionSend frm
   result = client.send frm
 
-proc process(stream: Stream, frm: Frame) {.raises: [HyperxConnError, HyperxStrmError, QueueClosedError].} =
+proc processHeaders(client: ClientContext, strm: Stream, frm: Frame) {.raises: [HyperxError].} =
+  # https://httpwg.org/specs/rfc9113.html#HttpFraming
+  doAssert strm.stateRecv == csStateHeaders
+  check frm.typ == frmtHeaders, newStrmError hyxProtocolError
+  validateHeaders(frm.payload, client.typ)
+  if client.typ == ctClient:
+    check frm.payload.len >= statusLineLen, newStrmError hyxProtocolError
+    if frm.payload[9] == '1'.byte:
+      check frmfEndStream notin frm.flags, newStrmError(hyxProtocolError)
+      return
+  strm.headersRecv.add frm.payload
+  try:
+    strm.contentLen = contentLen(frm.payload)
+  except ValueError as err:
+    debugErr2 err
+    raise newStrmError(hyxProtocolError, parent=err)
+  if frmfEndStream in frm.flags:
+    # XXX dont do for no content status 1xx/204/304 and HEAD response
+    if client.typ == ctServer:
+      check strm.contentLen <= 0, newStrmError(hyxProtocolError)
+    strm.stateRecv = csStateEnded
+  else:
+    strm.stateRecv = csStateData
+  strm.headersRecvSig.trigger()
+  strm.headersRecvSig.close()
+
+func contentLenCheck(stream: Stream) {.raises: [HyperxStrmError].} =
+  check(
+    stream.contentLen == -1 or stream.contentLen == stream.contentLenRecv,
+    newStrmError(hyxProtocolError)
+  )
+
+proc processData(client: ClientContext, strm: Stream, frm: Frame) {.raises: [HyperxError].} =
+  # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
+  doAssert strm.stateRecv == csStateData
+  case frm.typ
+  of frmtHeaders:
+    strm.trailersRecv.add frm.payload
+    check frmfEndStream in frm.flags, newStrmError(hyxProtocolError)
+    if client.typ == ctServer:
+      strm.contentLenCheck()
+    validateTrailers(frm.payload)
+    strm.stateRecv = csStateEnded
+    strm.bodyRecvSig.trigger()
+    strm.bodyRecvSig.close()
+  of frmtData:
+    strm.bodyRecv.add frm.payload
+    strm.bodyRecvLen += frm.payloadLen.int
+    strm.contentLenRecv += frm.payload.len
+    strm.bodyRecvSig.trigger()
+    if frmfEndStream in frm.flags:
+      # XXX dont do for no content status 1xx/204/304 and HEAD response
+      #     they could send empty data to close the stream so this is called
+      if client.typ == ctServer:
+        strm.contentLenCheck()
+      strm.stateRecv = csStateEnded
+      strm.bodyRecvSig.trigger()
+      strm.bodyRecvSig.close()
+  else:
+    doAssert false
+
+proc process(client: ClientContext, stream: Stream, frm: Frame) =
   doAssert stream.id == frm.sid
   doAssert frm.typ in frmStreamAllowed
   stream.doTransitionRecv frm
@@ -918,108 +954,37 @@ proc process(stream: Stream, frm: Frame) {.raises: [HyperxConnError, HyperxStrmE
       stream.peerWindowUpdateSig.trigger()
   else:
     doAssert frm.typ in {frmtData, frmtHeaders}
+    case stream.stateRecv
+    of csStateOpened, csStateHeaders:
+      stream.stateRecv = csStateHeaders
+      processHeaders(client, stream, frm)
+    of csStateData:
+      processData(client, stream, frm)
+    else:
+      doAssert false
 
 # this needs to be {.async.} to fail-silently
 proc writeRst(strm: ClientStream, code: FrmErrCode) {.async.} =
   template stream: untyped = strm.stream
   check stream.state in strmStateRstSendAllowed,
     newStrmError hyxStreamClosed
-  strm.stateSend = csStateEnded
+  stream.stateSend = csStateEnded
   await strm.write newRstStreamFrame(stream.id, code)
 
-proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
-  template stream: untyped = strm.stream
-  doAssert strm.stateRecv == csStateOpened
-  strm.stateRecv = csStateHeaders
-  # https://httpwg.org/specs/rfc9113.html#HttpFraming
-  var frm: Frame
-  while true:
-    while true:
-      frm = await stream.msgs.get()
-      stream.msgs.getDone()
-      stream.process(frm)
-      if frm.typ in {frmtHeaders, frmtData}:
-        break
-    check frm.typ == frmtHeaders, newStrmError hyxProtocolError
-    validateHeaders(frm.payload, strm.client.typ)
-    if strm.client.typ == ctServer:
-      break
-    check frm.payload.len >= statusLineLen, newStrmError hyxProtocolError
-    if frm.payload[9] == '1'.byte:
-      check frmfEndStream notin frm.flags, newStrmError(hyxProtocolError)
-    else:
-      break
-  strm.headersRecv.add frm.payload
-  try:
-    strm.contentLen = contentLen(frm.payload)
-  except ValueError as err:
-    debugErr2 err
-    raise newStrmError(hyxProtocolError, parent=err)
-  if frmfEndStream in frm.flags:
-    # XXX dont do for no content status 1xx/204/304 and HEAD response
-    if strm.client.typ == ctServer:
-      check strm.contentLen <= 0, newStrmError(hyxProtocolError)
-    strm.stateRecv = csStateEnded
-  strm.headersRecvSig.trigger()
-  strm.headersRecvSig.close()
-
-func contentLenCheck(strm: ClientStream) {.raises: [HyperxStrmError].} =
-  check(
-    strm.contentLen == -1 or strm.contentLen == strm.contentLenRecv,
-    newStrmError(hyxProtocolError)
-  )
-
-proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
-  template stream: untyped = strm.stream
-  doAssert strm.stateRecv in {csStateHeaders, csStateData}
-  strm.stateRecv = csStateData
-  var frm: Frame
-  while true:
-    while true:
-      frm = await stream.msgs.get()
-      stream.msgs.getDone()
-      stream.process(frm)
-      if frm.typ in {frmtHeaders, frmtData}:
-        break
-    # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
-    if frm.typ == frmtHeaders:
-      strm.trailersRecv.add frm.payload
-      check frmfEndStream in frm.flags, newStrmError(hyxProtocolError)
-      if strm.client.typ == ctServer:
-        strm.contentLenCheck()
-      validateTrailers(frm.payload)
-      strm.stateRecv = csStateEnded
-      break
-    check frm.typ == frmtData, newStrmError(hyxProtocolError)
-    strm.bodyRecv.add frm.payload
-    strm.bodyRecvLen += frm.payloadLen.int
-    strm.contentLenRecv += frm.payload.len
-    if frmfEndStream in frm.flags:
-      # XXX dont do for no content status 1xx/204/304 and HEAD response
-      #     they could send empty data to close the stream so this is called
-      if strm.client.typ == ctServer:
-        strm.contentLenCheck()
-      strm.stateRecv = csStateEnded
-      break
-    strm.bodyRecvSig.trigger()
-  strm.bodyRecvSig.trigger()
-  strm.bodyRecvSig.close()
-
-proc process(stream: Stream) {.async.} =
+# XXX remove
+proc process(client: ClientContext, stream: Stream) {.async.} =
   var frm: Frame
   while true:
     frm = await stream.msgs.get()
     stream.msgs.getDone()
-    stream.process(frm)
+    process(client, stream, frm)
 
+# XXX remove
 proc recvTask(strm: ClientStream) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   try:
-    await recvHeadersTaskNaked(strm)
-    if strm.stateRecv != csStateEnded:
-      await recvBodyTaskNaked(strm)
-    await stream.process()
+    await process(client, stream)
   except QueueClosedError:
     discard
   except HyperxConnError as err:
@@ -1043,10 +1008,11 @@ proc recvTask(strm: ClientStream) {.async.} =
     strm.close()
 
 proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
-  if strm.stateRecv != csStateEnded and strm.headersRecv.len == 0:
-    await strm.headersRecvSig.waitFor()
-  data[].add strm.headersRecv
-  strm.headersRecv.setLen 0
+  template stream: untyped = strm.stream
+  if stream.stateRecv != csStateEnded and stream.headersRecv.len == 0:
+    await stream.headersRecvSig.waitFor()
+  data[].add stream.headersRecv
+  stream.headersRecv.setLen 0
 
 proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   try:
@@ -1062,12 +1028,12 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
 proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
-  if strm.stateRecv != csStateEnded and strm.bodyRecv.len == 0:
-    await strm.bodyRecvSig.waitFor()
-  let bodyL = strm.bodyRecvLen
-  data[].add strm.bodyRecv
-  strm.bodyRecv.setLen 0
-  strm.bodyRecvLen = 0
+  if stream.stateRecv != csStateEnded and stream.bodyRecv.len == 0:
+    await stream.bodyRecvSig.waitFor()
+  let bodyL = stream.bodyRecvLen
+  data[].add stream.bodyRecv
+  stream.bodyRecv.setLen 0
+  stream.bodyRecvLen = 0
   #if not client.isConnected:
   #  # this avoids raising when sending a window update
   #  # if the conn is closed. Unsure if it's useful
@@ -1097,7 +1063,7 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
     raise err
 
 func recvTrailers*(strm: ClientStream): string =
-  result = strm.trailersRecv
+  result = strm.stream.trailersRecv
 
 proc sendHeadersImpl*(
   strm: ClientStream,
@@ -1106,22 +1072,23 @@ proc sendHeadersImpl*(
 ): Future[void] =
   ## Headers must be HPACK encoded;
   ## headers may be trailers
+  template stream: untyped = strm.stream
   template frm: untyped = strm.client.sendFrm
-  doAssert strm.stream.state in strmStateHeaderSendAllowed
-  doAssert strm.stateSend == csStateOpened or
-    (strm.stateSend in {csStateHeaders, csStateData} and finish)
-  if strm.stream.state == strmIdle:
+  doAssert stream.state in strmStateHeaderSendAllowed
+  doAssert stream.stateSend == csStateOpened or
+    (stream.stateSend in {csStateHeaders, csStateData} and finish)
+  if stream.state == strmIdle:
     strm.openStream()
-  strm.stateSend = csStateHeaders
+  stream.stateSend = csStateHeaders
   frm.clear()
   frm.add headers
   frm.setTyp frmtHeaders
-  frm.setSid strm.stream.id
+  frm.setSid stream.id
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
   frm.flags.incl frmfEndHeaders
   if finish:
     frm.flags.incl frmfEndStream
-    strm.stateSend = csStateEnded
+    stream.stateSend = csStateEnded
   result = strm.write frm
 
 proc sendHeaders*(
@@ -1148,8 +1115,8 @@ proc sendBodyNaked(
   template frm: untyped = strm.client.sendFrm
   check stream.state in strmStateDataSendAllowed,
     newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
-  doAssert strm.stateSend in {csStateHeaders, csStateData}
-  strm.stateSend = csStateData
+  doAssert stream.stateSend in {csStateHeaders, csStateData}
+  stream.stateSend = csStateData
   var dataIdxA = 0
   var dataIdxB = 0
   let L = data[].len
@@ -1169,7 +1136,7 @@ proc sendBodyNaked(
     frm.setPayloadLen (dataIdxB-dataIdxA).FrmPayloadLen
     if finish and dataIdxB == L:
       frm.flags.incl frmfEndStream
-      strm.stateSend = csStateEnded
+      stream.stateSend = csStateEnded
     frm.s.add toOpenArray(data[], dataIdxA, dataIdxB-1)
     stream.peerWindow -= frm.payloadLen.int32
     client.peerWindow -= frm.payloadLen.int32
@@ -1197,10 +1164,10 @@ proc sendBody*(
     raise err
 
 template with*(strm: ClientStream, body: untyped): untyped =
-  doAssert strm.stateRecv == csStateInitial
-  doAssert strm.stateSend == csStateInitial
-  strm.stateRecv = csStateOpened
-  strm.stateSend = csStateOpened
+  doAssert strm.stream.stateRecv == csStateInitial
+  doAssert strm.stream.stateSend == csStateInitial
+  strm.stream.stateRecv = csStateOpened
+  strm.stream.stateSend = csStateOpened
   var recvFut: Future[void] = nil
   try:
     recvFut = recvTask(strm)
@@ -1208,8 +1175,8 @@ template with*(strm: ClientStream, body: untyped): untyped =
       body
     doAssert strm.stream.state == strmClosed
     when defined(hyperxSanityCheck):
-      doAssert strm.stateRecv == csStateEnded
-      doAssert strm.stateSend == csStateEnded
+      doAssert strm.stream.stateRecv == csStateEnded
+      doAssert strm.stream.stateSend == csStateEnded
   finally:
     strm.close()
     strm.windowEnd()

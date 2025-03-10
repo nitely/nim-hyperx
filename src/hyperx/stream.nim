@@ -162,6 +162,12 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
     strmInvalid
 
 type
+  StreamCtxState* = enum
+    csStateInitial,
+    csStateOpened,
+    csStateHeaders,
+    csStateData,
+    csStateEnded
   StreamId* = FrmSid
   Stream* = ref object
     id*: StreamId
@@ -173,6 +179,11 @@ type
     windowProcessed*: int
     pingSig*: SignalAsync
     error*: ref HyperxStrmError
+    stateRecv*, stateSend*: StreamCtxState
+    contentLen*, contentLenRecv*: int64
+    headersRecv*, bodyRecv*, trailersRecv*: string
+    headersRecvSig*, bodyRecvSig*: SignalAsync
+    bodyRecvLen*: int
 
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
   doAssert peerWindow >= 0
@@ -184,7 +195,17 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
     peerWindowUpdateSig: newSignal(),
     windowPending: 0,
     windowProcessed: 0,
-    pingSig: newSignal()
+    pingSig: newSignal(),
+    stateRecv: csStateInitial,
+    stateSend: csStateInitial,
+    contentLen: 0,
+    contentLenRecv: 0,
+    bodyRecv: "",
+    bodyRecvSig: newSignal(),
+    bodyRecvLen: 0,
+    headersRecv: "",
+    headersRecvSig: newSignal(),
+    trailersRecv: ""
   )
 
 proc close*(stream: Stream) {.raises: [].} =
@@ -192,6 +213,8 @@ proc close*(stream: Stream) {.raises: [].} =
   stream.msgs.close()
   stream.peerWindowUpdateSig.close()
   stream.pingSig.close()
+  stream.bodyRecvSig.close()
+  stream.headersRecvSig.close()
 
 type StreamsClosedError* = object of QueueClosedError
 
