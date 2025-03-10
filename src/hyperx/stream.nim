@@ -1,7 +1,6 @@
 import std/tables
 
 import ./frame
-import ./value
 import ./signal
 import ./errors
 import ./utils
@@ -172,25 +171,23 @@ type
   Stream* = ref object
     id*: StreamId
     state*: StreamState
-    msgs*: ValueAsync[Frame]
     peerWindow*: int32
     peerWindowUpdateSig*: SignalAsync
     windowPending*: int
     windowProcessed*: int
     pingSig*: SignalAsync
-    error*: ref HyperxStrmError
     stateRecv*, stateSend*: StreamCtxState
     contentLen*, contentLenRecv*: int64
     headersRecv*, bodyRecv*, trailersRecv*: string
     headersRecvSig*, bodyRecvSig*: SignalAsync
     bodyRecvLen*: int
+    error*: ref HyperxStrmError
 
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
   doAssert peerWindow >= 0
   Stream(
     id: id,
     state: strmIdle,
-    msgs: newValueAsync[Frame](),
     peerWindow: peerWindow,
     peerWindowUpdateSig: newSignal(),
     windowPending: 0,
@@ -210,7 +207,6 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
 
 proc close*(stream: Stream) {.raises: [].} =
   stream.state = strmClosed
-  stream.msgs.close()
   stream.peerWindowUpdateSig.close()
   stream.pingSig.close()
   stream.bodyRecvSig.close()
