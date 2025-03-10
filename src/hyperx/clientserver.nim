@@ -795,9 +795,7 @@ proc recvDispatcherNaked(client: ClientContext, mainStream: Stream) {.async.} =
           stream.state in strmStateRstSendAllowed:
         await client.writeSilently(stream, newRstStreamFrame(stream.id, err.code))
       stream.close()
-      #client.streams.close(stream.id)
-      if not client.peerWindowUpdateSig.isClosed:
-        client.peerWindowUpdateSig.trigger()
+      client.peerWindowUpdateSig.trigger()
 
 proc recvDispatcher(client: ClientContext, mainStream: Stream) {.async.} =
   # XXX always store error for all errors
