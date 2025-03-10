@@ -791,9 +791,13 @@ proc recvDispatcherNaked(client: ClientContext, mainStream: Stream) {.async.} =
     except HyperxStrmError as err:
       debugErr2 err
       stream.error = newError err
-      if err.typ == hyxLocalErr and stream.state in strmStateRstSendAllowed:
+      if err.typ == hyxLocalErr and
+          stream.state in strmStateRstSendAllowed:
         await client.writeSilently(stream, newRstStreamFrame(stream.id, err.code))
       stream.close()
+      #client.streams.close(stream.id)
+      if not client.peerWindowUpdateSig.isClosed:
+        client.peerWindowUpdateSig.trigger()
 
 proc recvDispatcher(client: ClientContext, mainStream: Stream) {.async.} =
   # XXX always store error for all errors
