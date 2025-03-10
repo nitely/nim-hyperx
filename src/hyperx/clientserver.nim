@@ -881,7 +881,7 @@ func doTransitionSend(s: Stream, frm: Frame) {.raises: [].} =
   doAssert nextState != strmInvalid  #, $frm
   s.state = nextState
 
-proc write(strm: ClientStream, frm: Frame): Future[void] =
+proc write(strm: ClientStream, frm: Frame): Future[void] {.raises: [HyperxError].} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   # This is done in the next headers after settings ACK put
@@ -899,7 +899,68 @@ proc write(strm: ClientStream, frm: Frame): Future[void] =
   stream.doTransitionSend frm
   result = client.send frm
 
-proc process(stream: Stream, frm: Frame) {.raises: [HyperxConnError, HyperxStrmError, QueueClosedError].} =
+proc processHeaders(client: ClientContext, strm: Stream, frm: Frame) {.raises: [HyperxError].} =
+  # https://httpwg.org/specs/rfc9113.html#HttpFraming
+  doAssert strm.stateRecv == csStateHeaders
+  check frm.typ == frmtHeaders, newStrmError hyxProtocolError
+  validateHeaders(frm.payload, client.typ)
+  if client.typ == ctClient:
+    check frm.payload.len >= statusLineLen, newStrmError hyxProtocolError
+    if frm.payload[9] == '1'.byte:
+      check frmfEndStream notin frm.flags, newStrmError(hyxProtocolError)
+      return
+  strm.headersRecv.add frm.payload
+  try:
+    strm.contentLen = contentLen(frm.payload)
+  except ValueError as err:
+    debugErr2 err
+    raise newStrmError(hyxProtocolError, parent=err)
+  if frmfEndStream in frm.flags:
+    # XXX dont do for no content status 1xx/204/304 and HEAD response
+    if client.typ == ctServer:
+      check strm.contentLen <= 0, newStrmError(hyxProtocolError)
+    strm.stateRecv = csStateEnded
+  else:
+    strm.stateRecv = sStateData
+  strm.headersRecvSig.trigger()
+  strm.headersRecvSig.close()
+
+func contentLenCheck(stream: Stream) {.raises: [HyperxStrmError].} =
+  check(
+    stream.contentLen == -1 or stream.contentLen == stream.contentLenRecv,
+    newStrmError(hyxProtocolError)
+  )
+
+proc processData(client: ClientContext, strm: Stream, frm: Frame) {.raises: [HyperxError].} =
+  # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
+  doAssert strm.stateRecv == csStateData
+  case frm.typ
+  of frmtHeaders:
+    strm.trailersRecv.add frm.payload
+    check frmfEndStream in frm.flags, newStrmError(hyxProtocolError)
+    if client.typ == ctServer:
+      strm.contentLenCheck()
+    validateTrailers(frm.payload)
+    strm.stateRecv = csStateEnded
+    strm.bodyRecvSig.trigger()
+    strm.bodyRecvSig.close()
+  of frmtData:
+    strm.bodyRecv.add frm.payload
+    strm.bodyRecvLen += frm.payloadLen.int
+    strm.contentLenRecv += frm.payload.len
+    strm.bodyRecvSig.trigger()
+    if frmfEndStream in frm.flags:
+      # XXX dont do for no content status 1xx/204/304 and HEAD response
+      #     they could send empty data to close the stream so this is called
+      if client.typ == ctServer:
+        strm.contentLenCheck()
+      strm.stateRecv = csStateEnded
+      strm.bodyRecvSig.trigger()
+      strm.bodyRecvSig.close()
+  else:
+    doAssert false
+
+proc process(client: ClientContext, stream: Stream, frm: Frame) =
   doAssert stream.id == frm.sid
   doAssert frm.typ in frmStreamAllowed
   stream.doTransitionRecv frm
@@ -918,6 +979,16 @@ proc process(stream: Stream, frm: Frame) {.raises: [HyperxConnError, HyperxStrmE
       stream.peerWindowUpdateSig.trigger()
   else:
     doAssert frm.typ in {frmtData, frmtHeaders}
+    case stream.stateRecv
+    of csStateOpened:
+      stream.stateRecv = csStateHeaders
+      processHeaders(client, stream, frm)
+    of csStateHeaders:
+      processHeaders(client, stream, frm)
+    of sStateData:
+      processData(client, stream, frm)
+    else:
+      doAssert false
 
 # this needs to be {.async.} to fail-silently
 proc writeRst(strm: ClientStream, code: FrmErrCode) {.async.} =
@@ -927,99 +998,20 @@ proc writeRst(strm: ClientStream, code: FrmErrCode) {.async.} =
   strm.stateSend = csStateEnded
   await strm.write newRstStreamFrame(stream.id, code)
 
-proc recvHeadersTaskNaked(strm: ClientStream) {.async.} =
-  template stream: untyped = strm.stream
-  doAssert strm.stateRecv == csStateOpened
-  strm.stateRecv = csStateHeaders
-  # https://httpwg.org/specs/rfc9113.html#HttpFraming
-  var frm: Frame
-  while true:
-    while true:
-      frm = await stream.msgs.get()
-      stream.msgs.getDone()
-      stream.process(frm)
-      if frm.typ in {frmtHeaders, frmtData}:
-        break
-    check frm.typ == frmtHeaders, newStrmError hyxProtocolError
-    validateHeaders(frm.payload, strm.client.typ)
-    if strm.client.typ == ctServer:
-      break
-    check frm.payload.len >= statusLineLen, newStrmError hyxProtocolError
-    if frm.payload[9] == '1'.byte:
-      check frmfEndStream notin frm.flags, newStrmError(hyxProtocolError)
-    else:
-      break
-  strm.headersRecv.add frm.payload
-  try:
-    strm.contentLen = contentLen(frm.payload)
-  except ValueError as err:
-    debugErr2 err
-    raise newStrmError(hyxProtocolError, parent=err)
-  if frmfEndStream in frm.flags:
-    # XXX dont do for no content status 1xx/204/304 and HEAD response
-    if strm.client.typ == ctServer:
-      check strm.contentLen <= 0, newStrmError(hyxProtocolError)
-    strm.stateRecv = csStateEnded
-  strm.headersRecvSig.trigger()
-  strm.headersRecvSig.close()
-
-func contentLenCheck(strm: ClientStream) {.raises: [HyperxStrmError].} =
-  check(
-    strm.contentLen == -1 or strm.contentLen == strm.contentLenRecv,
-    newStrmError(hyxProtocolError)
-  )
-
-proc recvBodyTaskNaked(strm: ClientStream) {.async.} =
-  template stream: untyped = strm.stream
-  doAssert strm.stateRecv in {csStateHeaders, csStateData}
-  strm.stateRecv = csStateData
-  var frm: Frame
-  while true:
-    while true:
-      frm = await stream.msgs.get()
-      stream.msgs.getDone()
-      stream.process(frm)
-      if frm.typ in {frmtHeaders, frmtData}:
-        break
-    # https://www.rfc-editor.org/rfc/rfc9110.html#section-6.5
-    if frm.typ == frmtHeaders:
-      strm.trailersRecv.add frm.payload
-      check frmfEndStream in frm.flags, newStrmError(hyxProtocolError)
-      if strm.client.typ == ctServer:
-        strm.contentLenCheck()
-      validateTrailers(frm.payload)
-      strm.stateRecv = csStateEnded
-      break
-    check frm.typ == frmtData, newStrmError(hyxProtocolError)
-    strm.bodyRecv.add frm.payload
-    strm.bodyRecvLen += frm.payloadLen.int
-    strm.contentLenRecv += frm.payload.len
-    if frmfEndStream in frm.flags:
-      # XXX dont do for no content status 1xx/204/304 and HEAD response
-      #     they could send empty data to close the stream so this is called
-      if strm.client.typ == ctServer:
-        strm.contentLenCheck()
-      strm.stateRecv = csStateEnded
-      break
-    strm.bodyRecvSig.trigger()
-  strm.bodyRecvSig.trigger()
-  strm.bodyRecvSig.close()
-
-proc process(stream: Stream) {.async.} =
+# XXX remove
+proc process(client: ClientContext, stream: Stream) {.async.} =
   var frm: Frame
   while true:
     frm = await stream.msgs.get()
     stream.msgs.getDone()
-    stream.process(frm)
+    process(client, stream, frm)
 
+# XXX remove
 proc recvTask(strm: ClientStream) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   try:
-    await recvHeadersTaskNaked(strm)
-    if strm.stateRecv != csStateEnded:
-      await recvBodyTaskNaked(strm)
-    await stream.process()
+    await process(client, stream)
   except QueueClosedError:
     discard
   except HyperxConnError as err:
