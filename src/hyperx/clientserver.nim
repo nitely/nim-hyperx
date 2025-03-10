@@ -696,8 +696,6 @@ proc process(client: ClientContext, stream: Stream, frm: Frame) =
   stream.doTransitionRecv frm
   case frm.typ
   of frmtRstStream:
-    stream.error = newStrmError(frm.errCode, hyxRemoteErr)
-    stream.close()
     raise newStrmError(frm.errCode, hyxRemoteErr)
   of frmtWindowUpdate:
     check frm.windowSizeInc > 0, newStrmError hyxProtocolError
@@ -779,7 +777,7 @@ proc recvDispatcherNaked(client: ClientContext, mainStream: Stream) {.async.} =
           newConnError hyxStreamClosed
       debugInfo "stream not found " & $frm.sid.int
       continue
-    var stream = client.streams.get frm.sid
+    let stream = client.streams.get frm.sid
     if frm.typ == frmtData:
       check stream.windowPending <= stgWindowSize.int - frm.payloadLen.int,
         newConnError(hyxFlowControlError)

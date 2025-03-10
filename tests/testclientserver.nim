@@ -82,10 +82,10 @@ testAsync "multiplex req/resp":
   var serverRecv = newSeq[ref string]()
   proc processStream(strm: ClientStream) {.async.} =
     var dataIn = newStringref()
+    serverRecv.add dataIn
     await strm.recvHeaders(dataIn)
     while not strm.recvEnded:
       await strm.recvBody(dataIn)
-    serverRecv.add dataIn
     var dataOut = newStringref("foo")
     await strm.sendHeaders(
       status = 200,
