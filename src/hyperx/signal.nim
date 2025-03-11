@@ -1,5 +1,4 @@
 import std/asyncdispatch
-import std/deques
 
 import ./utils
 import ./errors
@@ -13,13 +12,13 @@ func newSignalClosedError(): ref SignalClosedError {.raises: [].} =
 type
   SignalAsync* = ref object
     ## Wait for a signal. When triggers wakes everyone up
-    waiters: Deque[Future[void]]
+    waiters: seq[Future[void]]
     isClosed: bool
 
 proc newSignal*(): SignalAsync {.raises: [].} =
   new result
   result = SignalAsync(
-    waiters: initDeque[Future[void]](0),
+    waiters: newSeq[Future[void]](),
     isClosed: false
   )
 
@@ -30,7 +29,7 @@ proc waitFor*(sig: SignalAsync): Future[void] {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
   result = newFuture[void]()
-  sig.waiters.addFirst result
+  sig.waiters.add result
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
   if not f.finished:
@@ -39,8 +38,9 @@ proc wakeupSoon(f: Future[void]) {.raises: [].} =
 proc trigger*(sig: SignalAsync) {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
-  while sig.waiters.len > 0:
-    wakeupSoon sig.waiters.popLast()
+  for fut in sig.waiters:
+    wakeupSoon fut
+  sig.waiters.setLen 0
 
 func isClosed*(sig: SignalAsync): bool {.raises: [].} =
   sig.isClosed
@@ -53,8 +53,9 @@ proc close*(sig: SignalAsync) {.raises: [].}  =
   if sig.isClosed:
     return
   sig.isClosed = true
-  while sig.waiters.len > 0:
-    failSoon sig.waiters.popLast()
+  for fut in sig.waiters:
+    failSoon fut
+  sig.waiters.setLen 0
 
 when isMainModule:
   discard getGlobalDispatcher()
