@@ -617,11 +617,11 @@ proc write(client: ClientContext, stream: Stream, frm: Frame): Future[void] =
   result = client.send frm
 
 proc writeSilently(client: ClientContext, stream: Stream, frm: Frame) {.async.} =
-  stream.stateSend = csStateEnded  # XXX ???
   doAssert frm.typ == frmtRstStream
   try:
     check stream.state in strmStateRstSendAllowed,
       newStrmError hyxStreamClosed
+    stream.stateSend = csStateEnded
     await client.write(stream, frm)
   except HyperxError:
     debugErr getCurrentException()
