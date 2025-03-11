@@ -711,8 +711,7 @@ proc process(client: ClientContext, stream: Stream, frm: Frame) =
   else:
     doAssert frm.typ in {frmtData, frmtHeaders}
     case stream.stateRecv
-    of csStateInitial, csStateOpened, csStateHeaders:
-      stream.stateRecv = csStateHeaders
+    of csStateHeaders:
       processHeaders(client, stream, frm)
     of csStateData:
       processData(client, stream, frm)
@@ -1024,11 +1023,10 @@ proc sendHeadersImpl*(
   template stream: untyped = strm.stream
   template frm: untyped = strm.client.sendFrm
   doAssert stream.state in strmStateHeaderSendAllowed
-  doAssert stream.stateSend == csStateOpened or
-    (stream.stateSend in {csStateHeaders, csStateData} and finish)
+  doAssert stream.stateSend == csStateHeaders or
+    (stream.stateSend == csStateData and finish)
   if stream.state == strmIdle:
     strm.openStream()
-  stream.stateSend = csStateHeaders
   frm.clear()
   frm.add headers
   frm.setTyp frmtHeaders
@@ -1113,10 +1111,6 @@ proc sendBody*(
     raise err
 
 template with*(strm: ClientStream, body: untyped): untyped =
-  #doAssert strm.stream.stateRecv == csStateInitial
-  doAssert strm.stream.stateSend == csStateInitial
-  #strm.stream.stateRecv = csStateOpened
-  strm.stream.stateSend = csStateOpened
   try:
     block:
       body

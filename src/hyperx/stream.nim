@@ -162,8 +162,6 @@ func toNextStateSend*(s: StreamState, e: StreamEvent): StreamState {.raises: [].
 
 type
   StreamCtxState* = enum
-    csStateInitial,
-    csStateOpened,
     csStateHeaders,
     csStateData,
     csStateEnded
@@ -193,8 +191,8 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
     windowPending: 0,
     windowProcessed: 0,
     pingSig: newSignal(),
-    stateRecv: csStateInitial,
-    stateSend: csStateInitial,
+    stateRecv: csStateHeaders,
+    stateSend: csStateHeaders,
     contentLen: 0,
     contentLenRecv: 0,
     bodyRecv: "",
