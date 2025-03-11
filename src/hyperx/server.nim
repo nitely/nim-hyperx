@@ -8,7 +8,7 @@ when defined(ssl):
 
 import ./clientserver
 import ./stream
-import ./value
+import ./signal
 import ./limiter
 import ./errors
 import ./utils
@@ -135,8 +135,9 @@ template with*(server: ServerContext, body: untyped): untyped =
 # XXX remove
 proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
   try:
-    let strm = await client.streamOpenedMsgs.get()
-    client.streamOpenedMsgs.getDone()
+    while client.streamsRecv.len == 0:
+      await client.streamsRecvSig.waitFor()
+    let strm = client.streamsRecv.pop()
     result = newClientStream(client, strm)
   except QueueClosedError as err:
     debugErr2 err
@@ -187,11 +188,13 @@ proc processClientHandler(
   try:
     with client:
       while client.isConnected:
-        let strm = await client.streamOpenedMsgs.get()
-        client.streamOpenedMsgs.getDone()
-        asyncCheck processStreamHandler(
-          newClientStream(client, strm), callback
-        )
+        while client.streamsRecv.len == 0:
+          await client.streamsRecvSig.waitFor()
+        for strm in client.streamsRecv:
+          asyncCheck processStreamHandler(
+            newClientStream(client, strm), callback
+          )
+        client.streamsRecv.setLen 0
   except QueueClosedError:
     debugErr2 getCurrentException()
     doAssert not client.isConnected

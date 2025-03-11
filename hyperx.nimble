@@ -87,7 +87,7 @@ task h2load, "h2load test":
   exec "h2load -n100000 -c100 -m10 https://127.0.0.1:8783 | grep \"100000 2xx\""
 
 task h2load2, "h2load test":
-  exec "h2load -n100000 -c10 -m1000 -t2 https://127.0.0.1:8783"
+  exec "h2load -n500000 -c10 -m100 https://127.0.0.1:8783"
 
 task docs, "Docs":
   exec "nim doc2 -o:./docs --project ./src/hyperx.nim"

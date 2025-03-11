@@ -10,7 +10,6 @@ import pkg/hpack
 
 import ./frame
 import ./stream
-import ./value
 import ./signal
 import ./errors
 import ./utils
@@ -124,7 +123,8 @@ type
     isGracefulShutdown: bool
     headersEnc, headersDec: DynHeaders
     streams: Streams
-    streamOpenedMsgs*: ValueAsync[Stream]
+    streamsRecv*: seq[Stream]
+    streamsRecvSig*: SignalAsync
     currStreamId: StreamId
     peerMaxConcurrentStreams: uint32
     peerWindowSize: uint32
@@ -159,7 +159,8 @@ proc newClient*(
     headersDec: initDynHeaders(stgHeaderTableSize.int),
     streams: initStreams(),
     currStreamId: 0.StreamId,
-    streamOpenedMsgs: newValueAsync[Stream](),
+    streamsRecv: newSeq[Stream](),
+    streamsRecvSig: newSignal(),
     peerMaxConcurrentStreams: stgInitialMaxConcurrentStreams,
     peerWindow: stgInitialWindowSize.int32,
     peerWindowSize: stgInitialWindowSize,
@@ -181,7 +182,7 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
   try:
     catch client.sock.close()
   finally:
-    client.streamOpenedMsgs.close()
+    client.streamsRecvSig.close()
     client.streams.close()
     client.peerWindowUpdateSig.close()
     client.windowUpdateSig.close()
@@ -211,7 +212,7 @@ when defined(hyperxStats):
 when defined(hyperxSanityCheck):
   func sanityCheckAfterClose(client: ClientContext) {.raises: [].} =
     doAssert not client.isConnected
-    doAssert client.streamOpenedMsgs.isClosed
+    doAssert client.streamsRecvSig.isClosed
     doAssert client.peerWindowUpdateSig.isClosed
     doAssert client.windowUpdateSig.isClosed
     doAssert client.windowProcessed >= 0
@@ -710,8 +711,7 @@ proc process(client: ClientContext, stream: Stream, frm: Frame) =
   else:
     doAssert frm.typ in {frmtData, frmtHeaders}
     case stream.stateRecv
-    of csStateOpened, csStateHeaders:
-      stream.stateRecv = csStateHeaders
+    of csStateHeaders:
       processHeaders(client, stream, frm)
     of csStateData:
       processData(client, stream, frm)
@@ -750,7 +750,8 @@ proc recvDispatcherNaked(client: ClientContext, mainStream: Stream) {.async.} =
       client.currStreamId = frm.sid
       # we do not store idle streams, so no need to close them
       let strm = client.streams.open(frm.sid, client.peerWindowSize.int32)
-      await client.streamOpenedMsgs.put strm
+      client.streamsRecv.add strm
+      client.streamsRecvSig.trigger()
     if frm.typ == frmtHeaders:
       headers.setLen 0
       client.hpackDecode(headers, frm.payload)
@@ -1022,11 +1023,10 @@ proc sendHeadersImpl*(
   template stream: untyped = strm.stream
   template frm: untyped = strm.client.sendFrm
   doAssert stream.state in strmStateHeaderSendAllowed
-  doAssert stream.stateSend == csStateOpened or
-    (stream.stateSend in {csStateHeaders, csStateData} and finish)
+  doAssert stream.stateSend == csStateHeaders or
+    (stream.stateSend == csStateData and finish)
   if stream.state == strmIdle:
     strm.openStream()
-  stream.stateSend = csStateHeaders
   frm.clear()
   frm.add headers
   frm.setTyp frmtHeaders
@@ -1111,10 +1111,6 @@ proc sendBody*(
     raise err
 
 template with*(strm: ClientStream, body: untyped): untyped =
-  doAssert strm.stream.stateRecv == csStateInitial
-  doAssert strm.stream.stateSend == csStateInitial
-  strm.stream.stateRecv = csStateOpened
-  strm.stream.stateSend = csStateOpened
   try:
     block:
       body
