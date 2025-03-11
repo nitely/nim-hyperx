@@ -898,7 +898,7 @@ template with*(client: ClientContext, body: untyped): untyped =
       client.sanityCheckAfterClose()
 
 type
-  ClientStream* = ref object
+  ClientStream* = object
     client*: ClientContext
     stream*: Stream
 
