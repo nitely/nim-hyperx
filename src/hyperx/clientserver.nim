@@ -359,6 +359,8 @@ proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
 
 func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
   result = ""
+  if typ == ctClient:
+    result.add preface
   var frmStg = newSettingsFrame()
   case typ
   of ctClient:
@@ -369,8 +371,6 @@ func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
     )
   doAssert stgWindowSize <= stgMaxWindowSize
   frmStg.addSetting frmsInitialWindowSize, stgWindowSize
-  if typ == ctClient:
-    result.add preface
   result.add frmStg.s
   if stgWindowSize > stgInitialWindowSize:
     let frmWu = newWindowUpdateFrame(
@@ -386,8 +386,9 @@ proc handshakeNaked(client: ClientContext) {.async.} =
   debugInfo "handshake"
   check not client.sock.isClosed, newConnClosedError()
   case client.typ
-  of ctClient: await client.sock.send(clientHandshakeBlob)
-  of ctServer: await client.sock.send(serverHandshakeBlob)
+  of ctClient: client.sendBuf.add clientHandshakeBlob
+  of ctServer: client.sendBuf.add serverHandshakeBlob
+  client.sendBufSig.trigger()
   if client.typ == ctServer:
     var blob = newString(preface.len)
     check not client.sock.isClosed, newConnClosedError()
@@ -876,8 +877,8 @@ template with*(client: ClientContext, body: untyped): untyped =
     client.isConnected = true
     if client.typ == ctClient:
       await client.connect()
-    await client.handshake()
     sendTaskFut = client.sendTask()
+    await client.handshake()
     winupFut = client.windowUpdateTask()
     dispFut = client.recvDispatcher(client.openMainStream())
     block:
