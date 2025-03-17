@@ -933,7 +933,7 @@ func openStream(strm: ClientStream) {.raises: [StreamsClosedError, GracefulShutd
 func recvEnded*(strm: ClientStream): bool {.raises: [].} =
   template stream: untyped = strm.stream
   stream.stateRecv == csStateEnded and
-  #stream.headersRecv.len == 0 and
+  stream.headersRecv.len == 0 and
   stream.bodyRecv.len == 0
 
 func sendEnded*(strm: ClientStream): bool {.raises: [].} =
