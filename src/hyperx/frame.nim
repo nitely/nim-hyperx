@@ -109,6 +109,7 @@ const
     frmsMaxHeaderListSize,
     frmsNoPriority
   }
+  maxSettingCode = 9
 
 type
   FrmSid* = distinct uint32  #range[0 .. 31.ones.int]
@@ -310,7 +311,7 @@ iterator settings*(frm: Frame): (FrmSetting, uint32) {.inline, raises: [].} =
   var i = frmHeaderSize
   var id = 0'u16
   # need to return last value for each ID
-  var skip = default(array[7, int32])
+  var skip = default(array[maxSettingCode, int32])
   while i < frm.len:
     id = 0'u16
     id += frm.s[i].uint16 shl 8
