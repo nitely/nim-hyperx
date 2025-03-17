@@ -211,7 +211,7 @@ testAsync "do not exceed settings list":
       await tc1.checkHandshake()
       var frmSetting = frame(frmtSettings, frmSidMain)
       for _ in 0 .. stgMaxSettingsList.int-1:
-        frmSetting.addSetting(0x09.FrmSetting, 1000.uint32)
+        frmSetting.addSetting(0x16.FrmSetting, 1000.uint32)
       await tc1.recv frmSetting.s
       await tc1.recv headers
       discard await client1.recvStream()
