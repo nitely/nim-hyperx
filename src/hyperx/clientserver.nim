@@ -297,8 +297,7 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
     while client.sendBuf.len == 0:
       client.sendBufDrainSig.trigger()
       await client.sendBufSig.waitFor()
-    buf.setLen 0
-    buf.add client.sendBuf
+    swap buf, client.sendBuf
     client.sendBuf.setLen 0
     client.sendBufDrainSig.trigger()
     check not client.sock.isClosed, newConnClosedError()
