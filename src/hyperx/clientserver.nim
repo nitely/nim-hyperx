@@ -37,6 +37,7 @@ const
   stgInitialMaxFrameSize* = 1'u32 shl 14
   stgMaxFrameSize* = (1'u32 shl 24) - 1'u32
   stgDisablePush* = 0'u32
+  stgDisablePriority* = 1'u32
 const
   stgWindowSize* {.intdefine: "hyperxWindowSize".} = 262_144
   stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
@@ -369,6 +370,7 @@ func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
     frmStg.addSetting(
       frmsMaxConcurrentStreams, stgServerMaxConcurrentStreams.uint32
     )
+  frmStg.addSetting frmsNoPriority, stgDisablePriority
   doAssert stgWindowSize <= stgMaxWindowSize
   frmStg.addSetting frmsInitialWindowSize, stgWindowSize
   result.add frmStg.s
@@ -537,6 +539,8 @@ proc processMainStream(client: ClientContext, stream: Stream, frm: Frame) {.asyn
         case client.typ
         of ctClient: check value == 0, newConnError(hyxProtocolError)
         of ctServer: check value == 0 or value == 1, newConnError(hyxProtocolError)
+      of frmsNoPriority:
+        check value == 0 or value == 1, newConnError(hyxProtocolError)
       of frmsMaxConcurrentStreams:
         client.peerMaxConcurrentStreams = value
       of frmsInitialWindowSize:
@@ -1189,5 +1193,6 @@ when isMainModule:
     doAssert stgInitialMaxFrameSize == 16_384'u32
     doAssert stgMaxFrameSize == 16_777_215'u32
     doAssert stgDisablePush == 0'u32
+    doAssert stgDisablePriority == 1'u32
 
   echo "ok"

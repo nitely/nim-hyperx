@@ -99,13 +99,15 @@ const
   frmsInitialWindowSize* = 0x04'u8.FrmSetting
   frmsMaxFrameSize* = 0x05'u8.FrmSetting
   frmsMaxHeaderListSize* = 0x06'u8.FrmSetting
+  frmsNoPriority* = 0x09'u8.FrmSetting
   frmsAllSettings = {
     frmsHeaderTableSize,
     frmsEnablePush,
     frmsMaxConcurrentStreams,
     frmsInitialWindowSize,
     frmsMaxFrameSize,
-    frmsMaxHeaderListSize
+    frmsMaxHeaderListSize,
+    frmsNoPriority
   }
 
 type
