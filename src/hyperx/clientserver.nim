@@ -876,12 +876,12 @@ proc failSilently(f: Future[void]) {.async.} =
 template with*(client: ClientContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
   doAssert not client.isConnected
-  var dispFut, winupFut, sendTaskFut: Future[void] = nil
+  var dispFut, winupFut, sendFut: Future[void] = nil
   try:
     client.isConnected = true
     if client.typ == ctClient:
       await client.connect()
-    sendTaskFut = client.sendTask()
+    sendFut = client.sendTask()
     await client.handshake()
     winupFut = client.windowUpdateTask()
     dispFut = client.recvDispatcher(client.openMainStream())
@@ -897,7 +897,7 @@ template with*(client: ClientContext, body: untyped): untyped =
     # at this point body completed or errored out
     await failSilently(dispFut)
     await failSilently(winupFut)
-    await failSilently(sendTaskFut)
+    await failSilently(sendFut)
     when defined(hyperxSanityCheck):
       client.sanityCheckAfterClose()
 
@@ -937,7 +937,7 @@ func openStream(strm: ClientStream) {.raises: [StreamsClosedError, GracefulShutd
 func recvEnded*(strm: ClientStream): bool {.raises: [].} =
   template stream: untyped = strm.stream
   stream.stateRecv == csStateEnded and
-  stream.headersRecv.len == 0 and
+  #stream.headersRecv.len == 0 and
   stream.bodyRecv.len == 0
 
 func sendEnded*(strm: ClientStream): bool {.raises: [].} =
@@ -958,6 +958,10 @@ proc windowEnd(strm: ClientStream) {.raises: [].} =
       client.windowUpdateSig.trigger()
   except SignalClosedError:
     doAssert not client.isConnected
+
+proc headersRecv*(strm: ClientStream): lent string {.raises: [].} =
+  doAssert strm.client.typ == ctServer
+  return strm.stream.headersRecv
 
 proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
   template stream: untyped = strm.stream
