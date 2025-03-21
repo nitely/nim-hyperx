@@ -381,7 +381,6 @@ const clientHandshakeBlob = handshakeBlob(ctClient)
 const serverHandshakeBlob = handshakeBlob(ctServer)
 
 proc handshake(client: ClientContext) {.async.} =
-  doAssert client.isConnected
   debugInfo "handshake"
   try:
     check not client.sock.isClosed, newConnClosedError()
@@ -395,6 +394,12 @@ proc handshake(client: ClientContext) {.async.} =
       let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
       check blobRln == blob.len, newConnClosedError()
       check blob == preface, newConnError(hyxProtocolError)
+  except QueueClosedError as err:
+    doAssert not client.isConnected
+    debugErr2 err
+    if client.error != nil:
+      raise newError(client.error, err)
+    raise err
   except OsError, SslError:
     let err = getCurrentException()
     debugErr2 err
