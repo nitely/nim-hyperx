@@ -697,7 +697,7 @@ proc processData(client: ClientContext, strm: Stream, frm: Frame) {.raises: [Hyp
   else:
     doAssert false
 
-proc process(client: ClientContext, stream: Stream, frm: Frame) =
+proc process(client: ClientContext, stream: Stream, frm: Frame) {.raises: [HyperxError].} =
   doAssert stream.id == frm.sid
   doAssert frm.typ in frmStreamAllowed
   stream.doTransitionRecv frm
