@@ -395,7 +395,7 @@ proc handshake(client: ClientContext) {.async.} =
       let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
       check blobRln == blob.len, newConnClosedError()
       check blob == preface, newConnError(hyxProtocolError)
-  except HyperxConnError, OsError, SslError:
+  except OsError, SslError:
     let err = getCurrentException()
     debugErr2 err
     # XXX err.msg includes a traceback for SslError but it should not
