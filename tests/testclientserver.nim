@@ -33,10 +33,8 @@ testAsync "simple req/resp":
   var serverRecvHeaders = ""
   var serverRecvBody = ""
   proc processStream(strm: ClientStream) {.async.} =
+    serverRecvHeaders = strm.headersRecv()
     let data = newStringref()
-    await strm.recvHeaders(data)
-    serverRecvHeaders = data[]
-    data[] = ""
     while not strm.recvEnded:
       await strm.recvBody(data)
     serverRecvBody = data[]
@@ -83,7 +81,8 @@ testAsync "multiplex req/resp":
   proc processStream(strm: ClientStream) {.async.} =
     var dataIn = newStringref()
     serverRecv.add dataIn
-    await strm.recvHeaders(dataIn)
+    let headers = strm.headersRecv()
+    dataIn.add headers
     while not strm.recvEnded:
       await strm.recvBody(dataIn)
     var dataOut = newStringref("foo")

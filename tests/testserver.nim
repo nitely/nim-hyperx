@@ -60,9 +60,7 @@ testAsync "simple request":
       await tc1.recv(headers)
       let strm = await client1.recvStream()
       with strm:
-        var data = newStringRef()
-        await strm.recvHeaders(data)
-        doAssert data[] == headers
+        doAssert strm.headersRecv() == headers
         doAssert strm.recvEnded
         await strm.sendHeaders(
           status = 200,
@@ -124,8 +122,8 @@ testAsync "exceed window size":
       try:
         with strm:
           await senderFut
+          #strm.headersRecv()
           var data = newStringRef()
-          await strm.recvHeaders(data)
           var consumed = 0
           try:
             while not strm.recvEnded:
@@ -182,8 +180,8 @@ testAsync "consume window size":
       let strm = await client1.recvStream()
       with strm:
         await senderFut
+        #strm.headersRecv()
         var data = newStringRef()
-        await strm.recvHeaders(data)
         var consumed = 0
         while not strm.recvEnded:
           data[].setLen 0

@@ -13,8 +13,9 @@ const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
 proc processStream(strm: ClientStream) {.async.} =
   ## Full-duplex echo stream
+  let headers = strm.headersRecv()
+  doAssert headers.len > 0
   let data = new string
-  await strm.recvHeaders(data)
   await strm.sendHeaders(
     @[(":status", "200")], finish = false
   )

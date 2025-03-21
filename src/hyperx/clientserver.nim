@@ -653,7 +653,6 @@ proc processHeaders(client: ClientContext, strm: Stream, frm: Frame) {.raises: [
     debugErr2 err
     raise newStrmError(hyxProtocolError, parent=err)
   if frmfEndStream in frm.flags:
-    # XXX dont do for no content status 1xx/204/304 and HEAD response
     if client.typ == ctServer:
       check strm.contentLen <= 0, newStrmError(hyxProtocolError)
     strm.stateRecv = csStateEnded
@@ -959,9 +958,16 @@ proc windowEnd(strm: ClientStream) {.raises: [].} =
   except SignalClosedError:
     doAssert not client.isConnected
 
-proc headersRecv*(strm: ClientStream): lent string {.raises: [].} =
-  doAssert strm.client.typ == ctServer
-  return strm.stream.headersRecv
+func headersRecv*(strm: ClientStream): lent string {.raises: [HyperxConnError, HyperxStrmError].} =
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  doAssert client.typ == ctServer
+  check client.error == nil, newError client.error
+  check stream.error == nil, newError stream.error
+  # XXX what if a conn error is raised after opening the stream,
+  #     but before setting the headers?
+  #doAssert stream.headersRecv.len > 0
+  return stream.headersRecv
 
 proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
   template stream: untyped = strm.stream

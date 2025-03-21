@@ -12,24 +12,24 @@ const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
 proc processStream*(strm: ClientStream) {.async.} =
-  let data = new string
-  await strm.recvHeaders(data)
-  if "x-flow-control-check" in data[]:
+  let headers = strm.headersRecv()
+  let data = newStringRef headers
+  if "x-flow-control-check" in headers:
     # let recv buff for a bit
     #debugEcho "sleeping"
     await sleepAsync(10_000)
   await strm.sendHeaders(
     @[(":status", "200")], finish = false
   )
-  if "x-cancel-remote" in data[]:
+  if "x-cancel-remote" in headers:
     # do not return here, let it raise when sendBody is called
     await strm.sendHeaders(
       @[("x-trailer", "bye")], finish = true
     )
     await strm.cancel(hyxCancel)
-  if "x-graceful-close-remote" in data[]:
+  if "x-graceful-close-remote" in headers:
     await strm.client.gracefulClose()
-  if "x-no-echo-headers" notin data[]:
+  if "x-no-echo-headers" notin headers:
     await strm.sendBody(data, finish = strm.recvEnded)
   while not strm.recvEnded:
     data[].setLen 0
