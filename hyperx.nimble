@@ -54,6 +54,7 @@ task serve2, "Serve":
   exec "nim c -r -d:release examples/localServer.nim"
 
 task funcserve, "Func Serve":
+  #--stackTrace:on --lineTrace:on
   exec "nim c -r -d:release -d:hyperxMaxConcurrentStrms=1000000 tests/functional/tserver.nim"
 
 task functest, "Func test":

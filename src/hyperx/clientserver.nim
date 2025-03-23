@@ -318,34 +318,31 @@ proc sendTask(client: ClientContext) {.async.} =
   finally:
     client.close()
 
-proc sendNaked(client: ClientContext, frm: Frame) {.async.} =
+proc send(client: ClientContext, frm: Frame) {.async.} =
   debugInfo "===SENT==="
   debugInfo $frm
   debugInfo debugPayload(frm)
   doAssert frm.payloadLen.int == frm.payload.len
   doAssert frm.payload.len <= client.peerMaxFrameSize.int
   doAssert frm.sid <= StreamId maxStreamId
-  client.sendBuf.add frm.s
-  client.sendBufSig.trigger()
-  if frm.typ == frmtGoAway or client.sendBuf.len > 64 * 1024:
-    await client.sendBufDrainSig.waitFor()
-  # need to wait for sock.send to complete
-  if frm.typ == frmtGoAway:
-    client.sendBufSig.trigger()
-    await client.sendBufDrainSig.waitFor()
-  when defined(hyperxStats):
-    client.frmsSent += 1
-    client.frmsSentTyp[frm.typ.int] += 1
-    client.bytesSent += frm.len
-
-proc send(client: ClientContext, frm: Frame) {.async.} =
   try:
-    await client.sendNaked(frm)
+    client.sendBuf.add frm.s
+    client.sendBufSig.trigger()
+    if frm.typ == frmtGoAway or client.sendBuf.len > 64 * 1024:
+      await client.sendBufDrainSig.waitFor()
+    # need to wait for sock.send to complete
+    if frm.typ == frmtGoAway:
+      client.sendBufSig.trigger()
+      await client.sendBufDrainSig.waitFor()
   except QueueClosedError as err:
     doAssert not client.isConnected
     if client.error != nil:
       raise newConnError(client.error.msg, err)
     raise err
+  when defined(hyperxStats):
+    client.frmsSent += 1
+    client.frmsSentTyp[frm.typ.int] += 1
+    client.bytesSent += frm.len
 
 proc sendSilently(client: ClientContext, frm: Frame) {.async.} =
   ## Call this to send within an except
@@ -383,28 +380,29 @@ func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
 const clientHandshakeBlob = handshakeBlob(ctClient)
 const serverHandshakeBlob = handshakeBlob(ctServer)
 
-proc handshakeNaked(client: ClientContext) {.async.} =
-  doAssert client.isConnected
-  debugInfo "handshake"
-  check not client.sock.isClosed, newConnClosedError()
-  case client.typ
-  of ctClient: client.sendBuf.add clientHandshakeBlob
-  of ctServer: client.sendBuf.add serverHandshakeBlob
-  client.sendBufSig.trigger()
-  if client.typ == ctServer:
-    var blob = newString(preface.len)
-    check not client.sock.isClosed, newConnClosedError()
-    let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
-    check blobRln == blob.len, newConnClosedError()
-    check blob == preface, newConnError(hyxProtocolError)
-
 proc handshake(client: ClientContext) {.async.} =
+  debugInfo "handshake"
   try:
-    await client.handshakeNaked()
+    check not client.sock.isClosed, newConnClosedError()
+    case client.typ
+    of ctClient: client.sendBuf.add clientHandshakeBlob
+    of ctServer: client.sendBuf.add serverHandshakeBlob
+    client.sendBufSig.trigger()
+    if client.typ == ctServer:
+      var blob = newString(preface.len)
+      check not client.sock.isClosed, newConnClosedError()
+      let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
+      check blobRln == blob.len, newConnClosedError()
+      check blob == preface, newConnError(hyxProtocolError)
+  except QueueClosedError as err:
+    doAssert not client.isConnected
+    debugErr2 err
+    if client.error != nil:
+      raise newError(client.error, err)
+    raise err
   except OsError, SslError:
     let err = getCurrentException()
     debugErr2 err
-    doAssert client.isConnected
     # XXX err.msg includes a traceback for SslError but it should not
     client.error ?= newConnError(err.msg)
     client.close()
@@ -959,59 +957,54 @@ proc windowEnd(strm: ClientStream) {.raises: [].} =
   except SignalClosedError:
     doAssert not client.isConnected
 
-proc recvHeadersNaked(strm: ClientStream, data: ref string) {.async.} =
-  template stream: untyped = strm.stream
-  if stream.stateRecv != csStateEnded and stream.headersRecv.len == 0:
-    await stream.headersRecvSig.waitFor()
-  data[].add stream.headersRecv
-  stream.headersRecv.setLen 0
-
 proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
-  try:
-    await recvHeadersNaked(strm, data)
-  except QueueClosedError as err:
-    debugErr2 err
-    if strm.client.error != nil:
-      raise newError(strm.client.error, err)
-    if strm.stream.error != nil:
-      raise newError(strm.stream.error, err)
-    raise err
-
-proc recvBodyNaked(strm: ClientStream, data: ref string) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
-  if stream.stateRecv != csStateEnded and stream.bodyRecv.len == 0:
-    await stream.bodyRecvSig.waitFor()
-  let bodyL = stream.bodyRecvLen
-  data[].add stream.bodyRecv
-  stream.bodyRecv.setLen 0
-  stream.bodyRecvLen = 0
-  #if not client.isConnected:
-  #  # this avoids raising when sending a window update
-  #  # if the conn is closed. Unsure if it's useful
-  #  return
-  client.windowProcessed += bodyL
-  stream.windowProcessed += bodyL
-  doAssert stream.windowPending >= stream.windowProcessed
-  doAssert client.windowPending >= client.windowProcessed
-  if client.windowProcessed > stgWindowSize.int div 2:
-    client.windowUpdateSig.trigger()
-  if stream.state in strmStateWindowSendAllowed and
-      stream.windowProcessed > stgWindowSize.int div 2:
-    stream.windowPending -= stream.windowProcessed
-    let oldWindow = stream.windowProcessed
-    stream.windowProcessed = 0
-    await strm.write newWindowUpdateFrame(stream.id, oldWindow)
-
-proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   try:
-    await recvBodyNaked(strm, data)
+    if stream.stateRecv != csStateEnded and stream.headersRecv.len == 0:
+      await stream.headersRecvSig.waitFor()
+    data[].add stream.headersRecv
+    stream.headersRecv.setLen 0
   except QueueClosedError as err:
     debugErr2 err
-    if strm.client.error != nil:
-      raise newError(strm.client.error, err)
-    if strm.stream.error != nil:
-      raise newError(strm.stream.error, err)
+    if client.error != nil:
+      raise newError(client.error, err)
+    if stream.error != nil:
+      raise newError(stream.error, err)
+    raise err
+
+proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  try:
+    if stream.stateRecv != csStateEnded and stream.bodyRecv.len == 0:
+      await stream.bodyRecvSig.waitFor()
+    let bodyL = stream.bodyRecvLen
+    data[].add stream.bodyRecv
+    stream.bodyRecv.setLen 0
+    stream.bodyRecvLen = 0
+    #if not client.isConnected:
+    #  # this avoids raising when sending a window update
+    #  # if the conn is closed. Unsure if it's useful
+    #  return
+    client.windowProcessed += bodyL
+    stream.windowProcessed += bodyL
+    doAssert stream.windowPending >= stream.windowProcessed
+    doAssert client.windowPending >= client.windowProcessed
+    if client.windowProcessed > stgWindowSize.int div 2:
+      client.windowUpdateSig.trigger()
+    if stream.state in strmStateWindowSendAllowed and
+        stream.windowProcessed > stgWindowSize.int div 2:
+      stream.windowPending -= stream.windowProcessed
+      let oldWindow = stream.windowProcessed
+      stream.windowProcessed = 0
+      await strm.write newWindowUpdateFrame(stream.id, oldWindow)
+  except QueueClosedError as err:
+    debugErr2 err
+    if client.error != nil:
+      raise newError(client.error, err)
+    if stream.error != nil:
+      raise newError(stream.error, err)
     raise err
 
 func recvTrailers*(strm: ClientStream): string =
@@ -1056,7 +1049,7 @@ proc sendHeaders*(
     client.hpackEncode(henc, n, v)
   result = strm.sendHeadersImpl(henc, finish)
 
-proc sendBodyNaked(
+proc sendBody*(
   strm: ClientStream,
   data: ref string,
   finish = false
@@ -1064,48 +1057,41 @@ proc sendBodyNaked(
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   template frm: untyped = strm.client.sendFrm
-  check stream.state in strmStateDataSendAllowed,
-    newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
-  doAssert stream.stateSend in {csStateHeaders, csStateData}
-  stream.stateSend = csStateData
-  var dataIdxA = 0
-  var dataIdxB = 0
-  let L = data[].len
-  while dataIdxA <= L:
-    while stream.peerWindow <= 0 or client.peerWindow <= 0:
-      while stream.peerWindow <= 0:
-        await stream.peerWindowUpdateSig.waitFor()
-      while client.peerWindow <= 0:
-        check stream.state in strmStateDataSendAllowed,
-          newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
-        await client.peerWindowUpdateSig.waitFor()
-    let peerWindow = min(client.peerWindow, stream.peerWindow)
-    dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
-    frm.clear()
-    frm.setTyp frmtData
-    frm.setSid stream.id
-    frm.setPayloadLen (dataIdxB-dataIdxA).FrmPayloadLen
-    if finish and dataIdxB == L:
-      frm.flags.incl frmfEndStream
-      stream.stateSend = csStateEnded
-    frm.s.add toOpenArray(data[], dataIdxA, dataIdxB-1)
-    stream.peerWindow -= frm.payloadLen.int32
-    client.peerWindow -= frm.payloadLen.int32
+  try:
     check stream.state in strmStateDataSendAllowed,
       newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
-    await strm.write frm
-    dataIdxA = dataIdxB
-    # allow sending empty data frame
-    if dataIdxA == L:
-      break
-
-proc sendBody*(
-  strm: ClientStream,
-  data: ref string,
-  finish = false
-) {.async.} =
-  try:
-    await sendBodyNaked(strm, data, finish)
+    doAssert stream.stateSend in {csStateHeaders, csStateData}
+    stream.stateSend = csStateData
+    var dataIdxA = 0
+    var dataIdxB = 0
+    let L = data[].len
+    while dataIdxA <= L:
+      while stream.peerWindow <= 0 or client.peerWindow <= 0:
+        while stream.peerWindow <= 0:
+          await stream.peerWindowUpdateSig.waitFor()
+        while client.peerWindow <= 0:
+          check stream.state in strmStateDataSendAllowed,
+            newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
+          await client.peerWindowUpdateSig.waitFor()
+      let peerWindow = min(client.peerWindow, stream.peerWindow)
+      dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
+      frm.clear()
+      frm.setTyp frmtData
+      frm.setSid stream.id
+      frm.setPayloadLen (dataIdxB-dataIdxA).FrmPayloadLen
+      if finish and dataIdxB == L:
+        frm.flags.incl frmfEndStream
+        stream.stateSend = csStateEnded
+      frm.s.add toOpenArray(data[], dataIdxA, dataIdxB-1)
+      stream.peerWindow -= frm.payloadLen.int32
+      client.peerWindow -= frm.payloadLen.int32
+      check stream.state in strmStateDataSendAllowed,
+        newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
+      await strm.write frm
+      dataIdxA = dataIdxB
+      # allow sending empty data frame
+      if dataIdxA == L:
+        break
   except QueueClosedError as err:
     debugErr2 err
     if strm.client.error != nil:
