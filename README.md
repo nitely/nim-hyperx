@@ -118,11 +118,7 @@ Both server and client support data streaming. The [data stream example](https:/
 
 ### Backpressure
 
-Backpressure is based on the http2 spec flow-control. The amount of data a connection can process at a time is bounded by the flow-control window size. The initial window size is set to 256KB. Not calling recv in time will buffer up to window size of data.
-
-The window size can be set using the `hyperxWindowSize` define. For example `-d:hyperxWindowSize:65536` will set the size to the http/2 spec default of 64KB. Setting a window smaller than 64KB is not well supported.
-
-There is built-in backpressure based on bounded queues for the rest of non-data frames.
+Backpressure is based on the http2 spec flow-control. The amount of data a connection can process at a time is bounded by the flow-control window size. The initial window size is set to 256KB. Not calling recv in time will buffer up to window size of data. Use `-d:hyperxWindowSize:65536` to set the size to the http/2 spec default of 64KB. Setting a window smaller than 64KB is not well supported.
 
 ### Using http/2 in place of WebSockets
 
@@ -151,9 +147,7 @@ Use `--mm:refc`. It only leaks under orc; one reason is [this](https://github.co
 
 ### ORC
 
-Nim's stdlib async creates cycles, and the ORC cycle collector does not run often enough. If you want to use orc, you'll need to call `GC_runOrc()` at some point, for example on client close or stream close. Related [nim issue](https://github.com/nim-lang/Nim/issues/21631). `--mm:refc` does not have this issue.
-
-This has been fixed in Nim +2.2.2.
+Nim's stdlib async creates cycles, and the ORC cycle collector does not run often enough. Related [nim issue](https://github.com/nim-lang/Nim/issues/21631). This has been fixed in Nim +2.2.2, however orc has other memory issues as mentioned above. You may want to use `--mm:refc` instead of orc.
 
 ### Related libs
 
