@@ -18,6 +18,7 @@ jobs:
     - uses: jiro4989/setup-nim-action@v2
       with:
         nim-version: ${{ matrix.nim }}
+        use-nightlies: true
         repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Setup
       run: |
