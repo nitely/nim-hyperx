@@ -42,21 +42,14 @@ jobs:
         nimble functest
     - name: Run Functional Insecure Tests
       run: |
-        (nimble funcserveinsec &) && \
-        sleep 10s && \
+        (nimble funcserveinsec &)
+        sleep 10s
         nimble functestinsec
-    #- name: Run Functional Multi-Thread Tests
-    #  run: |
-    #    docker pull nimlang/nim:${{ matrix.nim }}
-    #    docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
-    #    /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
-    #      apt update && \
-    #      apt install -y make && \ 
-    #      make install_mkcert && \
-    #      nimble install -y --depsOnly && \
-    #      (nimble funcservemultithread &) && \
-    #      sleep 10s && \
-    #      nimble functestmultithread"
+    - name: Run Functional Multi-Thread Tests
+      run: |
+        (nimble funcservemultithread &)
+        sleep 10s
+        nimble functestmultithread
     #- name: Run Examples
     #  run: |
     #    docker pull nimlang/nim:${{ matrix.nim }}
