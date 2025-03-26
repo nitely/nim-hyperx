@@ -21,9 +21,9 @@ jobs:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: Run Tests
       run: |
-          apt update
-          apt install -y make 
-          make install_mkcert
+          sudo apt update
+          sudo apt install -y make 
+          sudo make install_mkcert
           nimble install -y --depsOnly
           nimble test
     #- name: Run Functional Tests
