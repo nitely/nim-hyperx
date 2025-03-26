@@ -24,6 +24,8 @@ jobs:
         sudo apt update
         sudo apt install -y make 
         sudo make install_mkcert
+        mkcert -install
+        mkcert example.com "*.example.com" example.test localhost 127.0.0.1 ::1
         nimble install -y --depsOnly
         cat .env >> $GITHUB_ENV
         cat ./example.com+5.pem
