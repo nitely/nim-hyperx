@@ -26,6 +26,10 @@ jobs:
         sudo make install_mkcert
         nimble install -y --depsOnly
         cat .env >> $GITHUB_ENV
+        cat ./example.com+5.pem
+        cat ./example.com+5-key.pem
+        echo $HYPERX_TEST_CERTFILE
+        echo $HYPERX_TEST_KEYFILE
     - name: Run Tests
       run: |
         nimble test
