@@ -28,18 +28,18 @@ jobs:
         mkcert example.com "*.example.com" example.test localhost 127.0.0.1 ::1
         nimble install -y --depsOnly
         cat .env >> $GITHUB_ENV
-        cat ./example.com+5.pem
-        cat ./example.com+5-key.pem
-        echo $HYPERX_TEST_CERTFILE
-        echo $HYPERX_TEST_KEYFILE
+      #  cat ./example.com+5.pem
+      #  cat ./example.com+5-key.pem
+      #  echo $HYPERX_TEST_CERTFILE
+      #  echo $HYPERX_TEST_KEYFILE
     - name: Run Tests
       run: |
         nimble test
-    #- name: Run Functional Tests
-    #  run: |
-    #    (nimble funcserve &)
-    #    sleep 10s
-    #    nimble functest
+    - name: Run Functional Tests
+      run: |
+        (nimble funcserve &)
+        sleep 10s
+        nimble functest
     #- name: Run Functional Insecure Tests
     #  run: |
     #    docker pull nimlang/nim:${{ matrix.nim }}
