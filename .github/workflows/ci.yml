@@ -50,45 +50,20 @@ jobs:
         (nimble funcservemultithread &)
         sleep 10s
         nimble functestmultithread
-    #- name: Run Examples
-    #  run: |
-    #    docker pull nimlang/nim:${{ matrix.nim }}
-    #    docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
-    #    /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
-    #      apt update && \
-    #      apt install -y make && \ 
-    #      make install_mkcert && \
-    #      nimble install -y --depsOnly && \
-    #      (nimble serve2 &) && \
-    #      sleep 10s && \
-    #      nimble testexamples"
-    #- name: Run h2spec
-    #  run: |
-    #    docker pull nimlang/nim:${{ matrix.nim }}
-    #    docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
-    #    /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
-    #      apt update && \
-    #      apt install -y make && \ 
-    #      make install_mkcert && \
-    #      nimble install -y --depsOnly && \
-    #      (nimble serve2 &) && \
-    #      sleep 10s && \
-    #      curl -JLO \"https://github.com/nitely/nim-hyperx/releases/download/v0.1.20/h2spec\" && \
-    #      chmod +x ./h2spec && \
-    #      nimble h2spec && \
-    #      nimble h2spec && \
-    #      nimble h2spec"
-    #- name: Run h2load
-    #  run: |
-    #    docker pull nimlang/nim:${{ matrix.nim }}
-    #    docker run --env-file .env  --rm -v `pwd`:/usr/src/app -w /usr/src/app nimlang/nim:${{ matrix.nim }} \
-    #    /bin/bash -c "git config --global --add safe.directory /usr/src/app && \
-    #      apt update && \
-    #      apt install -y make && \ 
-    #      make install_mkcert && \
-    #      nimble install -y --depsOnly && \
-    #      (nimble serve2 &) && \
-    #      sleep 10s && \
-    #      apt install -y nghttp2-client && \
-    #      nimble h2load && \
-    #      nimble h2load2"
+    - name: Run Examples
+      run: |
+        (nimble serve2 &)
+        sleep 10s
+        nimble testexamples
+    - name: Run h2spec
+      run: |
+        curl -JLO \"https://github.com/nitely/nim-hyperx/releases/download/v0.1.20/h2spec\"
+        chmod +x ./h2spec
+        nimble h2spec
+        nimble h2spec
+        nimble h2spec
+    - name: Run h2load
+      run: |
+        sudo apt install -y nghttp2-client
+        nimble h2load
+        nimble h2load2
