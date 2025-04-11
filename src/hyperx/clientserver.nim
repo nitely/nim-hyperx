@@ -137,6 +137,7 @@ type
     sendBuf: string
     sendBufSig, sendBufDrainSig: SignalAsync
     sendFrm: Frame
+    dispFut, winupFut, sendFut: Future[void]
     error*: ref HyperxConnError
     when defined(hyperxStats):
       frmsSent: int
@@ -173,7 +174,10 @@ proc newClient*(
     sendBuf: "",
     sendBufSig: newSignal(),
     sendBufDrainSig: newSignal(),
-    sendFrm: newEmptyFrame()
+    sendFrm: newEmptyFrame(),
+    dispFut: nil,
+    winupFut: nil,
+    sendFut: nil
   )
 
 proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
@@ -858,10 +862,7 @@ proc windowUpdateTask(client: ClientContext) {.async.} =
     debugInfo "windowUpdateTask exited"
     client.close()
 
-proc connect(client: ClientContext) {.async.} =
-  catch await client.sock.connect(client.hostname, client.port)
-
-proc failSilently(f: Future[void]) {.async.} =
+proc silent(f: Future[void]) {.async.} =
   ## Be careful when wrapping non {.async.} procs,
   ## as they may raise before the wrap
   if f == nil:
@@ -871,31 +872,37 @@ proc failSilently(f: Future[void]) {.async.} =
   except HyperxError:
     debugErr getCurrentException()
 
+proc connect*(client: ClientContext) {.async.} =
+  discard getGlobalDispatcher()
+  doAssert not client.isConnected
+  client.isConnected = true
+  if client.typ == ctClient:
+    catch await client.sock.connect(client.hostname, client.port)
+  client.sendFut = client.sendTask()
+  await client.handshake()
+  client.winupFut = client.windowUpdateTask()
+  client.dispFut = client.recvDispatcher(client.openMainStream())
+
+proc shutdown*(client: ClientContext) {.async.} =
+  # XXX do gracefull shutdown with timeout,
+  #     wait for send/recv to drain the queue
+  #     before closing
+  client.close()
+  # do not bother the user with hyperx errors
+  # at this point body completed or errored out
+  await silent client.dispFut
+  await silent client.winupFut
+  await silent client.sendFut
+
 template with*(client: ClientContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
-  doAssert not client.isConnected
-  var dispFut, winupFut, sendTaskFut: Future[void] = nil
   try:
-    client.isConnected = true
-    if client.typ == ctClient:
-      await client.connect()
-    sendTaskFut = client.sendTask()
-    await client.handshake()
-    winupFut = client.windowUpdateTask()
-    dispFut = client.recvDispatcher(client.openMainStream())
+    await client.connect()
     block:
       body
   # do not handle any error here
   finally:
-    # XXX do gracefull shutdown with timeout,
-    #     wait for send/recv to drain the queue
-    #     before closing
-    client.close()
-    # do not bother the user with hyperx errors
-    # at this point body completed or errored out
-    await failSilently(dispFut)
-    await failSilently(winupFut)
-    await failSilently(sendTaskFut)
+    await client.shutdown()
     when defined(hyperxSanityCheck):
       client.sanityCheckAfterClose()
 
@@ -1138,7 +1145,7 @@ proc cancel*(strm: ClientStream, code: HyperxErrCode) {.async.} =
     if stream.state in strmStateRstSendAllowed:
       await client.writeSilently(stream, newRstStreamFrame(stream.id, code))
     if stream.state == strmClosedRst:
-      await failSilently strm.ping()
+      await silent strm.ping()
   finally:
     stream.error ?= newStrmError(hyxStreamClosed)
     strm.close()
@@ -1149,12 +1156,12 @@ proc gracefulClose*(client: ClientContext) {.async.} =
     return
   # fail silently because it's best effort,
   # setting isGracefulShutdown is the only important thing
-  await failSilently client.send newGoAwayFrame(
+  await silent client.send newGoAwayFrame(
     int32.high.FrmSid, frmeNoError
   )
-  await failSilently client.ping client.streams.get(StreamId 0)
+  await silent client.ping client.streams.get(StreamId 0)
   client.isGracefulShutdown = true
-  await failSilently client.send newGoAwayFrame(
+  await silent client.send newGoAwayFrame(
     client.maxPeerStreamIdSeen, frmeNoError
   )
 
