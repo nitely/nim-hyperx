@@ -172,7 +172,7 @@ type SafeStreamCallback* =
 type ClientCallback* =
   proc (client: ClientContext): StreamCallback {.closure, gcsafe.}
 type ServerCallback* =
-  proc (client: ClientContext): ClientCallback {.closure, gcsafe.}
+  proc (server: ServerContext): ClientCallback {.closure, gcsafe.}
 
 proc processStreamHandler(
   strm: ClientStream,
