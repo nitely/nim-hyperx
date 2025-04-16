@@ -139,6 +139,7 @@ type
     sendFrm: Frame
     dispFut, winupFut, sendFut: Future[void]
     error*: ref HyperxConnError
+    onClose: proc () {.closure, gcsafe, raises: [].}
     when defined(hyperxStats):
       frmsSent: int
       frmsSentTyp: array[10, int]
@@ -174,10 +175,7 @@ proc newClient*(
     sendBuf: "",
     sendBufSig: newSignal(),
     sendBufDrainSig: newSignal(),
-    sendFrm: newEmptyFrame(),
-    dispFut: nil,
-    winupFut: nil,
-    sendFut: nil
+    sendFrm: newEmptyFrame()
   )
 
 proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
@@ -193,6 +191,10 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.windowUpdateSig.close()
     client.sendBufSig.close()
     client.sendBufDrainSig.close()
+
+func onClose*(client: ClientContext, cb: proc () {.closure, gcsafe, raises: [].}) =
+  doAssert client.onClose == nil
+  client.onClose = cb
 
 func stream(client: ClientContext, sid: StreamId): Stream {.raises: [].} =
   client.streams.get sid
@@ -893,6 +895,8 @@ proc shutdown*(client: ClientContext) {.async.} =
   await silent client.dispFut
   await silent client.winupFut
   await silent client.sendFut
+  if client.onClose != nil:
+    client.onClose()
 
 template with*(client: ClientContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop

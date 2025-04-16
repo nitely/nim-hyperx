@@ -36,7 +36,8 @@ export
   HyperxError,
   gracefulClose,
   isGracefulClose,
-  trace
+  trace,
+  onClose
 
 var sslContext {.threadvar, definedSsl.}: SslContext
 
