@@ -169,6 +169,10 @@ type StreamCallback* =
   proc (stream: ClientStream): Future[void] {.closure, gcsafe.}
 type SafeStreamCallback* =
   proc (stream: ClientStream): Future[void] {.nimcall, gcsafe.}
+type ClientCallback* =
+  proc (client: ClientContext): StreamCallback {.closure, gcsafe.}
+type ServerCallback* =
+  proc (client: ClientContext): ClientCallback {.closure, gcsafe.}
 
 proc processStreamHandler(
   strm: ClientStream,
@@ -217,6 +221,22 @@ proc serve*(
       while server.isConnected:
         let client = await server.recvClient()
         await lt.spawn processClientHandler(client, callback)
+  finally:
+    await lt.join()
+
+proc serve*(
+  server: ServerContext,
+  serverCallback: ServerCallback,
+  maxConnections = defaultMaxConns
+) {.async.} =
+  let lt = newLimiter maxConnections
+  try:
+    with server:
+      let clientCallback = serverCallback server
+      while server.isConnected:
+        let client = await server.recvClient()
+        let streamCallback = clientCallback client
+        await lt.spawn processClientHandler(client, streamCallback)
   finally:
     await lt.join()
 
