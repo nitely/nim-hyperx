@@ -191,6 +191,8 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.windowUpdateSig.close()
     client.sendBufSig.close()
     client.sendBufDrainSig.close()
+    if client.onClose != nil:
+      client.onClose()
 
 func onClose*(client: ClientContext, cb: proc () {.closure, gcsafe, raises: [].}) =
   doAssert client.onClose == nil
@@ -895,8 +897,6 @@ proc shutdown*(client: ClientContext) {.async.} =
   await silent client.dispFut
   await silent client.winupFut
   await silent client.sendFut
-  if client.onClose != nil:
-    client.onClose()
 
 template with*(client: ClientContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
