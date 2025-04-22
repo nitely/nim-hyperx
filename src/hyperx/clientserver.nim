@@ -193,8 +193,12 @@ proc close*(client: ClientContext) {.raises: [HyperxConnError].} =
     client.sendBufDrainSig.close()
     if client.onClose != nil:
       client.onClose()
+      client.onClose = nil  # break possible cycle
 
 func onClose*(client: ClientContext, cb: proc () {.closure, gcsafe, raises: [].}) =
+  # XXX onClose can only be called onNewClient (before isConnected);
+  #     after we do not know if the client is closed or not connected yet
+  doAssert not client.isConnected
   doAssert client.onClose == nil
   client.onClose = cb
 

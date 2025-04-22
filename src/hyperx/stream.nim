@@ -212,10 +212,14 @@ proc close*(stream: Stream) {.raises: [].} =
   stream.headersRecvSig.close()
   if stream.onClose != nil:
     stream.onClose()
+    stream.onClose = nil  # break possible cycle
 
-func onClose*(stream: Stream, cb: proc () {.closure, gcsafe, raises: [].}) =
-  doAssert stream.onClose == nil
-  stream.onClose = cb
+proc onClose*(stream: Stream, cb: proc () {.closure, gcsafe, raises: [].}) =
+  if stream.state == strmClosed:
+    cb()
+  else:
+    doAssert stream.onClose == nil
+    stream.onClose = cb
 
 type StreamsClosedError* = object of QueueClosedError
 
