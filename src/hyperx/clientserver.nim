@@ -990,10 +990,9 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
     data[].add stream.bodyRecv
     stream.bodyRecv.setLen 0
     stream.bodyRecvLen = 0
-    #if not client.isConnected:
-    #  # this avoids raising when sending a window update
-    #  # if the conn is closed. Unsure if it's useful
-    #  return
+    if stream.bodyRecvSig.isClosed:
+      # avoid repeating windowEnd work
+      return
     client.windowProcessed += bodyL
     stream.windowProcessed += bodyL
     doAssert stream.windowPending >= stream.windowProcessed
@@ -1080,6 +1079,9 @@ proc sendBody*(
           check stream.state in strmStateDataSendAllowed,
             newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
           await client.peerWindowUpdateSig.waitFor()
+      # avoid window update if cannot write
+      check stream.state in strmStateDataSendAllowed,
+        newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
       let peerWindow = min(client.peerWindow, stream.peerWindow)
       dataIdxB = min(dataIdxA+min(peerWindow, stgInitialMaxFrameSize.int), L)
       frm.clear()
@@ -1092,8 +1094,6 @@ proc sendBody*(
       frm.s.add toOpenArray(data[], dataIdxA, dataIdxB-1)
       stream.peerWindow -= frm.payloadLen.int32
       client.peerWindow -= frm.payloadLen.int32
-      check stream.state in strmStateDataSendAllowed,
-        newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
       await strm.write frm
       dataIdxA = dataIdxB
       # allow sending empty data frame
