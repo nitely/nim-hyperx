@@ -124,7 +124,7 @@ Backpressure is based on the http2 spec flow-control. The amount of data a conne
 
 Http/2 allows full-duplex data communication over a single stream. If you plan to only ever use this client and server, you won't need websockets.
 
-However, web-browsers do not support full-duplex streaming. So http/2 cannot be used in place of websockets there.
+However, web-browsers do not support full-duplex streaming. So http/2 cannot be used in place of websockets there. If you only need unidirectional communication from server to client, consider using SSE (server-sent events) instead.
 
 ### Benchmarks
 
@@ -148,6 +148,10 @@ Use `--mm:refc`. It only leaks under orc; one reason is [this](https://github.co
 ### ORC
 
 Nim's stdlib async creates cycles, and the ORC cycle collector does not run often enough. Related [nim issue](https://github.com/nim-lang/Nim/issues/21631). This has been fixed in Nim +2.2.2, however orc has other memory issues as mentioned above. You may want to use `--mm:refc` instead of orc.
+
+### SSL
+
+Do not use SSL until [this](https://github.com/nim-lang/Nim/pull/24896) gets merged and released. Also, Nim 2.2.2 and older may raise a SIGSEGV because of [this](https://github.com/nim-lang/Nim/pull/24795) (ex: if there is a protocol error, or under some other condition hyperx may close the connection while in use), this one has been fixed in Nim +2.2.4.
 
 ### Related libs
 
