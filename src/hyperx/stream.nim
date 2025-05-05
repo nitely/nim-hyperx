@@ -180,6 +180,7 @@ type
     headersRecvSig*, bodyRecvSig*: SignalAsync
     bodyRecvLen*: int
     error*: ref HyperxStrmError
+    onClose: proc () {.closure, gcsafe, raises: [].}
 
 proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
   doAssert peerWindow >= 0
@@ -209,6 +210,16 @@ proc close*(stream: Stream) {.raises: [].} =
   stream.pingSig.close()
   stream.bodyRecvSig.close()
   stream.headersRecvSig.close()
+  if stream.onClose != nil:
+    stream.onClose()
+    stream.onClose = nil  # break possible cycle
+
+proc onClose*(stream: Stream, cb: proc () {.closure, gcsafe, raises: [].}) =
+  if stream.state == strmClosed:
+    cb()
+  else:
+    doAssert stream.onClose == nil
+    stream.onClose = cb
 
 type StreamsClosedError* = object of QueueClosedError
 

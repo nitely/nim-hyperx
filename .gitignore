@@ -39,6 +39,7 @@ examples/streamClient
 examples/localServer
 examples/dataStream
 examples/tlsServer
+h2spec
 config.nims
 out
 patches

@@ -167,3 +167,38 @@ testAsync "multiplex req/resp":
     "content-type: application/json\r\n" &
     "content-length: 6\r\n" &
     "bazqux"
+
+testAsync "server callback":
+  var servCheck = 0
+  var clntCheck = 0
+  var strmCheck = 0
+  let server = newServer(
+    localHost, localPort, ssl = false
+  )
+  let serveFut = server.serve(proc (svr: ServerContext): ClientCallback =
+    inc servCheck
+    proc (clt: ClientContext): StreamCallback =
+      inc clntCheck
+      proc (strm: ClientStream) {.async.} =
+        inc strmCheck
+        var data = new string
+        await strm.recvHeaders(data)
+        doAssert strm.recvEnded
+        await strm.sendHeaders(
+          @[(":status", "200")], finish = true
+        )
+  )
+  let client = newClient(localHost, localPort, ssl = false)
+  with client:
+    let r1 = await client.get("/")
+    doAssert r1.headers == ":status: 200\r\n"
+    let r2 = await client.get("/")
+    doAssert r2.headers == ":status: 200\r\n"
+  doAssert servCheck == 1
+  doAssert clntCheck == 1
+  doAssert strmCheck == 2
+  server.close()
+  try:
+    await serveFut
+  except HyperxConnError:
+    discard
