@@ -235,3 +235,62 @@ testAsync "cancel lazy stream":
       inc checked
     inc checked
   doAssert checked == 2
+
+testAsync "stream onClose":
+  var closed = 0
+  var checked = 0
+  var client = newClient(localHost, localPort)
+  with client:
+    let strm = client.newClientStream()
+    strm.stream.onClose proc = inc closed
+    doAssert closed == 0
+    with strm:
+      await strm.sendHeaders(defaultHeaders, finish = true)
+      var data = new string
+      await strm.recvHeaders(data)
+      doAssert data[] == ":status: 200\r\n"
+      doAssert closed == 0
+      inc checked
+    doAssert closed == 1
+    inc checked
+  doAssert closed == 1
+  doAssert checked == 2
+
+testAsync "stream onClose when closed":
+  var closed = 0
+  var checked = 0
+  var client = newClient(localHost, localPort)
+  with client:
+    let strm = client.newClientStream()
+    with strm:
+      await strm.sendHeaders(defaultHeaders, finish = true)
+      var data = new string
+      await strm.recvHeaders(data)
+      doAssert data[] == ":status: 200\r\n"
+      inc checked
+    doAssert closed == 0
+    strm.stream.onClose proc = inc closed
+    doAssert closed == 1
+    inc checked
+  doAssert closed == 1
+  doAssert checked == 2
+
+testAsync "client onClose":
+  var closed = 0
+  var checked = 0
+  var client = newClient(localHost, localPort)
+  client.onClose proc = inc closed
+  with client:
+    doAssert closed == 0
+    let strm = client.newClientStream()
+    with strm:
+      await strm.sendHeaders(defaultHeaders, finish = true)
+      var data = new string
+      await strm.recvHeaders(data)
+      doAssert data[] == ":status: 200\r\n"
+      doAssert closed == 0
+      inc checked
+    doAssert closed == 0
+    inc checked
+  doAssert closed == 1
+  doAssert checked == 2
