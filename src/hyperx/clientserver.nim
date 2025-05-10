@@ -42,6 +42,7 @@ const
   stgWindowSize* {.intdefine: "hyperxWindowSize".} = 262_144
   stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
   stgMaxSettingsList* {.intdefine: "hyperxMaxSettingsList".} = 100
+  stgMaxHeaderListSize* {.intdefine: "hyperxMaxHeaderListSize".} = 16_384
 
 type
   ClientTyp* = enum
@@ -270,6 +271,7 @@ func hpackDecode(
   var i2 = -1
   let L = payload.len
   var canResize = true
+  var headerListSize = 0
   try:
     while i < L:
       doAssert i > i2; i2 = i
@@ -282,6 +284,8 @@ func hpackDecode(
         check dhSize <= stgHeaderTableSize.int, newConnError(hyxCompressionError)
         client.headersDec.setSize dhSize
       else:
+        headerListSize += nn.len+vv.len+32
+        check headerListSize <= stgMaxHeaderListSize, newConnError(hyxProtocolError)
         # note this validate headers and trailers
         validateHeader(ss, nn, vv)
         # can resize multiple times before a header, but not after
@@ -382,6 +386,7 @@ func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
   frmStg.addSetting frmsNoPriority, stgDisablePriority
   doAssert stgWindowSize <= stgMaxWindowSize
   frmStg.addSetting frmsInitialWindowSize, stgWindowSize
+  frmStg.addSetting frmsMaxHeaderListSize, stgMaxHeaderListSize.uint32
   result.add frmStg.s
   if stgWindowSize > stgInitialWindowSize:
     let frmWu = newWindowUpdateFrame(
@@ -1195,5 +1200,6 @@ when isMainModule:
     doAssert stgMaxFrameSize == 16_777_215'u32
     doAssert stgDisablePush == 0'u32
     doAssert stgDisablePriority == 1'u32
+    doAssert stgMaxHeaderListSize == 16_384'u32
 
   echo "ok"
