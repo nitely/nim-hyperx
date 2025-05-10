@@ -575,8 +575,7 @@ proc processMainStream(client: ClientContext, stream: Stream, frm: Frame) {.asyn
         check value <= stgMaxFrameSize, newConnError(hyxProtocolError)
         client.peerMaxFrameSize = value
       of frmsMaxHeaderListSize:
-        # this is only advisory, do nothing for now.
-        # server may reply a 431 status (request header fields too large)
+        # XXX set client.peerMaxHeaderListSize; initial is infinite
         discard
       else:
         # ignore unknown setting
