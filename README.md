@@ -118,7 +118,7 @@ Both server and client support data streaming. The [data stream example](https:/
 
 ### Backpressure
 
-Backpressure is based on the http2 spec flow-control. The amount of data a connection can process at a time is bounded by the flow-control window size. The initial window size is set to 256KB. Not calling recv in time will buffer up to window size of data. Use `-d:hyperxWindowSize:65536` to set the size to the http/2 spec default of 64KB. Setting a window smaller than 64KB is not well supported.
+Backpressure is based on the http2 spec flow-control. The amount of data a connection can process at a time is bounded by the flow-control window size. Not calling recv in time will buffer up to window size of data. Setting a window smaller than 64KB is not well supported.
 
 ### Using http/2 in place of WebSockets
 
