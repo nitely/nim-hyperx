@@ -39,7 +39,7 @@ const
   stgDisablePush* = 0'u32
   stgDisablePriority* = 1'u32
 const
-  stgWindowSize* {.intdefine: "hyperxWindowSize".} = 262_144
+  stgWindowSize* {.intdefine: "hyperxWindowSize".} = 65_535
   stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
   stgMaxSettingsList* {.intdefine: "hyperxMaxSettingsList".} = 100
   stgMaxHeaderListSize* {.intdefine: "hyperxMaxHeaderListSize".} = 16_384
@@ -1199,6 +1199,7 @@ when isMainModule:
     doAssert stgMaxFrameSize == 16_777_215'u32
     doAssert stgDisablePush == 0'u32
     doAssert stgDisablePriority == 1'u32
-    doAssert stgMaxHeaderListSize == 16_384'u32
+    doAssert stgMaxHeaderListSize == 16_384
+    doAssert stgWindowSize == 65_535
 
   echo "ok"
