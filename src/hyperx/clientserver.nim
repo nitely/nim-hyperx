@@ -39,7 +39,7 @@ const
   stgDisablePush* = 0'u32
   stgDisablePriority* = 1'u32
 const
-  stgWindowSize* {.intdefine: "hyperxWindowSize".} = stgInitialWindowSize.int
+  stgWindowSize* {.intdefine: "hyperxWindowSize".} = 65_535
   stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
   stgMaxSettingsList* {.intdefine: "hyperxMaxSettingsList".} = 100
   stgMaxHeaderListSize* {.intdefine: "hyperxMaxHeaderListSize".} = 16_384
