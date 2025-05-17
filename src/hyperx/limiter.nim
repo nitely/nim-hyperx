@@ -15,6 +15,7 @@ type LimiterAsync* = ref object
   used, size: int
   waiter: FutureVar[void]
   isClosed: bool
+  error*: ref Exception
 
 func newLimiter*(size: int): LimiterAsync {.raises: [].} =
   doAssert size > 0
@@ -32,14 +33,12 @@ proc wakeupSoon(f: Future[void]) {.raises: [].} =
   if not f.finished:
     uncatch f.complete()
 
-proc inc*(lt: LimiterAsync) {.raises: [LimiterAsyncClosedError].} =
+proc inc*(lt: LimiterAsync) {.raises: [].} =
   doAssert lt.used < lt.size
-  check not lt.isClosed, newLimiterAsyncClosedError()
   inc lt.used
 
-proc dec*(lt: LimiterAsync) {.raises: [LimiterAsyncClosedError].} =
+proc dec*(lt: LimiterAsync) {.raises: [].} =
   doAssert lt.used > 0
-  check not lt.isClosed, newLimiterAsyncClosedError()
   dec lt.used
   wakeupSoon lt.waiter.fut
 
@@ -67,21 +66,24 @@ proc close*(lt: LimiterAsync) {.raises: [].} =
   lt.isClosed = true
   failSoon lt.waiter.fut
 
-proc limiterWrap(lt: LimiterAsync, f: Future[void]) {.async.} =
-  try:
-    await f
-  finally:
+proc spawnCheck*(lt: LimiterAsync, f: Future[void]) {.raises: [LimiterAsyncClosedError].} =
+  check not lt.isClosed, newLimiterAsyncClosedError()
+  inc lt
+  uncatch f.addCallback(proc () {.raises: [].} =
     dec lt
+    if f.failed:
+      lt.error ?= f.error
+  )
 
 proc spawn*(lt: LimiterAsync, f: Future[void]) {.async.} =
-  inc lt
-  asyncCheck limiterWrap(lt, f)
+  lt.spawnCheck f
   if lt.isFull:
     await lt.wait()
 
 proc join*(lt: LimiterAsync) {.async.} =
   while not lt.isEmpty:
     await lt.wait()
+  check lt.error == nil, lt.error
 
 when isMainModule:
   discard getGlobalDispatcher()
@@ -90,6 +92,7 @@ when isMainModule:
     proc wakeup = fut.complete()
     callSoon wakeup
     return fut
+  type MyError = object of CatchableError
   block:
     proc test {.async.} =
       let lt = newLimiter(1)
@@ -125,6 +128,24 @@ when isMainModule:
           await lt.wait()
         doAssert lt.used <= 2
       doAssert puts == @[1,2,3,4,5,6]
+    waitFor test()
+    doAssert not hasPendingOperations()
+  block:
+    proc test {.async.} =
+      proc noop {.async.} =
+        for _ in 0 .. 10:
+          await sleepCycle()
+      proc err {.async.} =
+        raise (ref MyError)()
+      let lt = newLimiter int.high
+      for i in 0 ..< 5:
+        lt.spawnCheck noop()
+      lt.spawnCheck err()
+      try:
+        await lt.join()
+        doAssert false
+      except MyError:
+        discard
     waitFor test()
     doAssert not hasPendingOperations()
   echo "ok"
