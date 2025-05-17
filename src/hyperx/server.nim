@@ -182,7 +182,7 @@ proc processStreamHandler(
   try:
     with strm:
       await callback(strm)
-  except HyperxError:
+  except CatchableError:
     debugErr2 getCurrentException()
     debugErr getCurrentException()
 
