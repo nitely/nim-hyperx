@@ -6,6 +6,7 @@ tests/testclient
 tests/testclientserver
 tests/testserver
 tests/testssloff
+tests/testservercatch
 tests/functional/tserial
 tests/functional/tserialinsecure
 tests/functional/tserver

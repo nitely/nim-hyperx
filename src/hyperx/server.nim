@@ -182,9 +182,14 @@ proc processStreamHandler(
   try:
     with strm:
       await callback(strm)
+  except HyperxError:
+    debugErr2 getCurrentException()
+    debugErr getCurrentException()
   except CatchableError:
     debugErr2 getCurrentException()
     debugErr getCurrentException()
+    when defined(hyperxLetItCrash):
+      raise getCurrentException()
 
 proc processClientHandler(
   client: ClientContext,
@@ -222,6 +227,7 @@ proc serve*(
       while server.isConnected:
         let client = await server.recvClient()
         await lt.spawn processClientHandler(client, callback)
+        check lt.error == nil, lt.error
   finally:
     await lt.join()
 
@@ -238,6 +244,7 @@ proc serve*(
         let client = await server.recvClient()
         let streamCallback = clientCallback client
         await lt.spawn processClientHandler(client, streamCallback)
+        check lt.error == nil, lt.error
   finally:
     await lt.join()
 

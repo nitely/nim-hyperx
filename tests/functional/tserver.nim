@@ -1,5 +1,6 @@
 {.define: ssl.}
 {.define: hyperxSanityCheck.}
+{.define: hyperxLetItCrash.}
 
 from std/os import getEnv
 from std/strutils import contains
