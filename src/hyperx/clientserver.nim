@@ -420,7 +420,6 @@ proc handshake(client: ClientContext) {.async.} =
   except OsError, SslError:
     let err = getCurrentException()
     debugErr2 err
-    # XXX err.msg includes a traceback for SslError but it should not
     client.error ?= newConnError(err.msg)
     client.close()
     raise newConnError(err.msg, err)
