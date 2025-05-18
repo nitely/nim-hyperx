@@ -352,8 +352,7 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
       await client.sendBufDrainSig.waitFor()
   except QueueClosedError as err:
     doAssert not client.isConnected
-    if client.error != nil:
-      raise newConnError(client.error.msg, err)
+    check client.error == nil, newError(client.error, err)
     raise err
   when defined(hyperxStats):
     client.frmsSent += 1
@@ -414,8 +413,7 @@ proc handshake(client: ClientContext) {.async.} =
   except QueueClosedError as err:
     doAssert not client.isConnected
     debugErr2 err
-    if client.error != nil:
-      raise newError(client.error, err)
+    check client.error == nil, newError(client.error, err)
     raise err
   except OsError, SslError:
     let err = getCurrentException()
@@ -985,10 +983,8 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
     stream.headersRecv.setLen 0
   except QueueClosedError as err:
     debugErr2 err
-    if client.error != nil:
-      raise newError(client.error, err)
-    if stream.error != nil:
-      raise newError(stream.error, err)
+    check client.error == nil, newError(client.error, err)
+    check stream.error == nil, newError(stream.error, err)
     raise err
 
 proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
@@ -1018,10 +1014,8 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
       await strm.write newWindowUpdateFrame(stream.id, oldWindow)
   except QueueClosedError as err:
     debugErr2 err
-    if client.error != nil:
-      raise newError(client.error, err)
-    if stream.error != nil:
-      raise newError(stream.error, err)
+    check client.error == nil, newError(client.error, err)
+    check stream.error == nil, newError(stream.error, err)
     raise err
 
 func recvTrailers*(strm: ClientStream): string =
@@ -1112,10 +1106,8 @@ proc sendBody*(
         break
   except QueueClosedError as err:
     debugErr2 err
-    if strm.client.error != nil:
-      raise newError(strm.client.error, err)
-    if strm.stream.error != nil:
-      raise newError(strm.stream.error, err)
+    check client.error == nil, newError(client.error, err)
+    check stream.error == nil, newError(stream.error, err)
     raise err
 
 template with*(strm: ClientStream, body: untyped): untyped =
