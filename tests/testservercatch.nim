@@ -7,7 +7,7 @@ import ../src/hyperx/client
 import ../src/hyperx/server
 from ../src/hyperx/errors import hyxCancel
 
-const localPort = Port 8773
+const localPort = Port 8774
 const localHost = "127.0.0.1"
 
 type MyError = object of CatchableError
