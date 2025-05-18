@@ -1,5 +1,6 @@
 {.define: ssl.}
 {.define: hyperxSanityCheck.}
+{.define: hyperxLetItCrash.}
 
 import std/asyncdispatch
 import ../../src/hyperx/server

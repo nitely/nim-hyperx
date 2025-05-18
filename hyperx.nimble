@@ -27,6 +27,7 @@ task test, "Test":
   exec "nim c -f tests/testssloff.nim"
   # integration tests
   exec "nim c -r -f tests/testclientserver.nim"
+  exec "nim c -r -f tests/testservercatch.nim"
 
 task testexamples, "Test examples":
   exec "nim c -r -f -d:hyperxSanityCheck examples/streamClient.nim"

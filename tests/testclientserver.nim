@@ -1,11 +1,12 @@
 {.define: ssl.}
 {.define: hyperxSanityCheck.}
+{.define: hyperxLetItCrash.}
 
 from os import getEnv
 import std/asyncdispatch
 import ../src/hyperx/client
 import ../src/hyperx/server
-import ../src/hyperx/queue
+from ../src/hyperx/errors import hyxCancel
 
 template testAsync(name: string, body: untyped): untyped =
   (proc () = 
@@ -19,6 +20,8 @@ template testAsync(name: string, body: untyped): untyped =
       setGlobalDispatcher(nil)
       GC_fullCollect()
   )()
+
+type MyError = object of CatchableError
 
 func newStringRef(s = ""): ref string =
   new result
@@ -201,4 +204,29 @@ testAsync "server callback":
   try:
     await serveFut
   except HyperxConnError:
+    discard
+
+#testAsync "let it crash define":
+when false:
+  let server = newServer(
+    localHost, localPort, ssl = false
+  )
+  let serveFut = server.serve(proc (strm: ClientStream) {.async.} =
+    try:
+      raise (ref MyError)()
+    finally:
+      await strm.cancel(hyxCancel)
+  )
+  let client = newClient(localHost, localPort, ssl = false)
+  with client:
+    try:
+      discard await client.get("/")
+      doAssert false
+    except HyperxStrmError as err:
+      doAssert err.code.int == hyxCancel.int
+  #server.close()
+  try:
+    await serveFut
+    doAssert false
+  except MyError:
     discard
