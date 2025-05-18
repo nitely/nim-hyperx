@@ -211,6 +211,11 @@ proc processClientHandler(
   except HyperxError:
     debugErr2 getCurrentException()
     debugErr getCurrentException()
+  except CatchableError:
+    debugErr2 getCurrentException()
+    debugErr getCurrentException()
+    when defined(hyperxLetItCrash):
+      raise getCurrentException()
   when defined(hyperxStats):
     echoStats client
 
