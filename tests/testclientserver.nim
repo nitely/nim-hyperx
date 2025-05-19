@@ -6,7 +6,7 @@ from os import getEnv
 import std/asyncdispatch
 import ../src/hyperx/client
 import ../src/hyperx/server
-from ../src/hyperx/errors import hyxCancel
+from ../src/hyperx/errors import hyxCancel, hyxInternalError
 
 template testAsync(name: string, body: untyped): untyped =
   (proc () = 
@@ -206,8 +206,7 @@ testAsync "server callback":
   except HyperxConnError:
     discard
 
-#testAsync "let it crash define":
-when false:
+testAsync "let it crash define":
   let server = newServer(
     localHost, localPort, ssl = false
   )
@@ -217,13 +216,22 @@ when false:
     finally:
       await strm.cancel(hyxCancel)
   )
-  let client = newClient(localHost, localPort, ssl = false)
-  with client:
+  proc oneGet {.async.} =
+    let client = newClient(localHost, localPort, ssl = false)
+    with client:
+      try:
+        discard await client.get("/")
+        doAssert false
+      except HyperxStrmError as err:
+        doAssert err.code.int == hyxCancel.int
+  # the server should crash eventually; error propagation is async
+  var alive = true
+  while alive:
     try:
-      discard await client.get("/")
-      doAssert false
-    except HyperxStrmError as err:
-      doAssert err.code.int == hyxCancel.int
+      await oneGet()
+    except HyperxConnError as err:
+      doAssert err.code.int == hyxInternalError.int
+      alive = false
   #server.close()
   try:
     await serveFut
