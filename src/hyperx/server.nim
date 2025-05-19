@@ -239,15 +239,15 @@ proc serve*(
   maxConnections = defaultMaxConns
 ) {.async.} =
   let lt = newLimiter maxConnections
-  with server:
-    try:
+  try:
+    with server:
       while server.isConnected:
         let client = await server.recvClient()
         await lt.spawn clientHandler(client, callback)
         check lt.error == nil, lt.error
-    finally:
-      # XXX close all clients somehow
-      await lt.join()
+  finally:
+    # XXX close all clients somehow
+    await lt.join()
 
 proc serve*(
   server: ServerContext,
