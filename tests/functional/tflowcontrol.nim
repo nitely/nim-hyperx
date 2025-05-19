@@ -68,10 +68,10 @@ proc spawnStream(
     await sendFut
     inc checked[]
 
-const strmsPerClient = 110
+const strmsPerClient = 161
 const clientsCount = 11
 const strmsInFlight = 100
-const dataPayloadLen = stgWindowSize.int * 2 + 123
+const dataPayloadLen = stgWindowSize.int * 2 + 61
 
 proc spawnClient(
   reqsCtx: ReqsCtx,

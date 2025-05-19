@@ -16,7 +16,7 @@ from ../../src/hyperx/clientserver import stgWindowSize
 # created in between server receiving the posion pill
 # and client ACK'ing the ping
 
-const clientsCount = 50
+const clientsCount = 61
 const strmsInFlight = 100
 const dataFrameLen = 123
 #const dataFrameLen = stgWindowSize.int * 2 + 123
