@@ -191,22 +191,32 @@ proc streamHandler(
     when defined(hyperxLetItCrash):
       raise getCurrentException()
 
-proc clientHandler(
+proc processStreams(
   client: ClientContext,
   callback: StreamCallback
 ) {.async.} =
   let lt = newLimiter int.high
   try:
+    while client.isConnected:
+      while client.streamsRecv.len == 0:
+        await client.streamsRecvSig.waitFor()
+      for strm in client.streamsRecv:
+        lt.spawnCheck streamHandler(
+          newClientStream(client, strm), callback
+        )
+      client.streamsRecv.setLen 0
+      check lt.error == nil, lt.error
+  finally:
+    client.close()
+    await lt.join()
+
+proc clientHandler(
+  client: ClientContext,
+  callback: StreamCallback
+) {.async.} =
+  try:
     with client:
-      while client.isConnected:
-        while client.streamsRecv.len == 0:
-          await client.streamsRecvSig.waitFor()
-        for strm in client.streamsRecv:
-          lt.spawnCheck streamHandler(
-            newClientStream(client, strm), callback
-          )
-        client.streamsRecv.setLen 0
-        check lt.error == nil, lt.error
+      await processStreams(client, callback)
   except QueueClosedError:
     debugErr2 getCurrentException()
     doAssert not client.isConnected
@@ -218,8 +228,6 @@ proc clientHandler(
     debugErr getCurrentException()
     when defined(hyperxLetItCrash):
       raise getCurrentException()
-  finally:
-    await lt.join()
   when defined(hyperxStats):
     echoStats client
 
@@ -238,6 +246,7 @@ proc serve*(
         await lt.spawn clientHandler(client, callback)
         check lt.error == nil, lt.error
   finally:
+    # XXX close all clients somehow
     await lt.join()
 
 proc serve*(

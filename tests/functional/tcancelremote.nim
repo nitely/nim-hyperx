@@ -73,8 +73,6 @@ proc spawnClient(
         return
       await lt.spawn spawnStream(client, checked)
     await lt.join()
-    # XXX make server wait for all streams to end before exit conn
-    await sleepAsync(5_000)
 
 proc main() {.async.} =
   let checked = new(int)
