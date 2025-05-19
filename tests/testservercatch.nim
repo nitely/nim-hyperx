@@ -24,19 +24,21 @@ proc test {.async.} =
       await strm.cancel(hyxCancel)
       inc checked
   )
-  let client = newClient(localHost, localPort, ssl = false)
-  with client:
-    try:
-      discard await client.get("/")
-      doAssert false
-    except HyperxStrmError as err:
-      doAssert err.code.int == hyxCancel.int
+  for _ in 0 ..< 10:
+    let client = newClient(localHost, localPort, ssl = false)
+    with client:
+      for _ in 0 ..< 2:
+        try:
+          discard await client.get("/")
+          doAssert false
+        except HyperxStrmError as err:
+          doAssert err.code.int == hyxCancel.int
   server.close()
   try:
     await serveFut
   except HyperxConnError:
     discard
-  doAssert checked == 1
+  doAssert checked == 20
 
 discard getGlobalDispatcher()
 waitFor test()

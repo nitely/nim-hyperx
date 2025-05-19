@@ -175,7 +175,7 @@ type ClientCallback* =
 type ServerCallback* =
   proc (server: ServerContext): ClientCallback {.closure, gcsafe.}
 
-proc processStreamHandler(
+proc streamHandler(
   strm: ClientStream,
   callback: StreamCallback
 ) {.async.} =
@@ -191,20 +191,22 @@ proc processStreamHandler(
     when defined(hyperxLetItCrash):
       raise getCurrentException()
 
-proc processClientHandler(
+proc clientHandler(
   client: ClientContext,
   callback: StreamCallback
 ) {.async.} =
+  let lt = newLimiter int.high
   try:
     with client:
       while client.isConnected:
         while client.streamsRecv.len == 0:
           await client.streamsRecvSig.waitFor()
         for strm in client.streamsRecv:
-          asyncCheck processStreamHandler(
+          lt.spawnCheck streamHandler(
             newClientStream(client, strm), callback
           )
         client.streamsRecv.setLen 0
+        check lt.error == nil, lt.error
   except QueueClosedError:
     debugErr2 getCurrentException()
     doAssert not client.isConnected
@@ -216,6 +218,8 @@ proc processClientHandler(
     debugErr getCurrentException()
     when defined(hyperxLetItCrash):
       raise getCurrentException()
+  finally:
+    await lt.join()
   when defined(hyperxStats):
     echoStats client
 
@@ -231,7 +235,7 @@ proc serve*(
     with server:
       while server.isConnected:
         let client = await server.recvClient()
-        await lt.spawn processClientHandler(client, callback)
+        await lt.spawn clientHandler(client, callback)
         check lt.error == nil, lt.error
   finally:
     await lt.join()
@@ -247,8 +251,7 @@ proc serve*(
       let clientCallback = serverCallback server
       while server.isConnected:
         let client = await server.recvClient()
-        let streamCallback = clientCallback client
-        await lt.spawn processClientHandler(client, streamCallback)
+        await lt.spawn clientHandler(client, clientCallback(client))
         check lt.error == nil, lt.error
   finally:
     await lt.join()
