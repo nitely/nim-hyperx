@@ -191,7 +191,7 @@ proc streamHandler(
     when defined(hyperxLetItCrash):
       raise getCurrentException()
 
-proc clientHandler2(
+proc processStreams(
   client: ClientContext,
   callback: StreamCallback
 ) {.async.} =
@@ -216,7 +216,7 @@ proc clientHandler(
 ) {.async.} =
   try:
     with client:
-      await clientHandler2(client, callback)
+      await processStreams(client, callback)
   except QueueClosedError:
     debugErr2 getCurrentException()
     doAssert not client.isConnected
@@ -239,14 +239,15 @@ proc serve*(
   maxConnections = defaultMaxConns
 ) {.async.} =
   let lt = newLimiter maxConnections
-  try:
-    with server:
+  with server:
+    try:
       while server.isConnected:
         let client = await server.recvClient()
         await lt.spawn clientHandler(client, callback)
         check lt.error == nil, lt.error
-  finally:
-    await lt.join()
+    finally:
+      # XXX close all clients somehow
+      await lt.join()
 
 proc serve*(
   server: ServerContext,
