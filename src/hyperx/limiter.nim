@@ -25,7 +25,7 @@ func newLimiter*(size: int): LimiterAsync {.raises: [].} =
   )
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
-  if not f.finished:
+  if f != nil and not f.finished:
     uncatch f.complete()
 
 proc inc*(lt: LimiterAsync) {.raises: [].} =
@@ -52,7 +52,7 @@ proc wait*(lt: LimiterAsync): Future[void] {.raises: [LimiterAsyncClosedError].}
   return lt.waiter
 
 proc failSoon(f: Future[void]) {.raises: [].} =
-  if not f.finished:
+  if f != nil and not f.finished:
     uncatch f.fail newLimiterAsyncClosedError()
 
 proc close*(lt: LimiterAsync) {.raises: [].} =
