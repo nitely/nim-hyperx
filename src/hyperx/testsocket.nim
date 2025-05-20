@@ -96,12 +96,8 @@ proc connect*(s: TestSocket, hostname: string, port: Port) {.async.} =
 
 proc close*(s: TestSocket) =
   s.isConnected = false
-  #XXX SIGSEGV in orc
-  #s.recvData.close()
-  proc terminate() =
-    s.recvSig.trigger()
-    s.sentSig.close()
-  callSoon terminate
+  s.recvSig.trigger()
+  s.sentSig.close()
 
 # XXX untested server funcs
 
