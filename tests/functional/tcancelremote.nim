@@ -8,11 +8,11 @@ import ../../src/hyperx/errors
 import ./tutils.nim
 from ../../src/hyperx/clientserver import stgWindowSize
 
-const strmsPerClient = 1123
-const clientsCount = 13
+const strmsPerClient = 1061
+const clientsCount = 61
 const strmsInFlight = 100
 #const dataFrameLen = 1
-const dataFrameLen = stgWindowSize.int * 2 + 123
+const dataFrameLen = stgWindowSize.int * 2 + 61
 
 proc send(strm: ClientStream) {.async.} =
   await strm.sendHeaders(
