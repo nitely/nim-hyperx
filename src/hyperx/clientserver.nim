@@ -344,7 +344,7 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
   try:
     client.sendBuf.add frm.s
     client.sendBufSig.trigger()
-    if frm.typ == frmtGoAway or client.sendBuf.len > 64 * 1024:
+    if frm.typ == frmtGoAway or client.sendBuf.len > 72 * 1024:
       await client.sendBufDrainSig.waitFor()
     # need to wait for sock.send to complete
     if frm.typ == frmtGoAway:
