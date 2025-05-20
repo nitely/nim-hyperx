@@ -3,8 +3,6 @@ import std/asyncdispatch
 import ./utils
 import ./errors
 
-template fut[T](f: FutureVar[T]): Future[T] = Future[T](f)
-
 type LimiterAsyncClosedError* = QueueClosedError
 
 func newLimiterAsyncClosedError(): ref LimiterAsyncClosedError {.raises: [].} =
@@ -13,24 +11,21 @@ func newLimiterAsyncClosedError(): ref LimiterAsyncClosedError {.raises: [].} =
 type LimiterAsync* = ref object
   ## Async concurrency limiter.
   used, size: int
-  waiter: FutureVar[void]
+  waiter: Future[void]
   isClosed: bool
   error*: ref Exception
 
 func newLimiter*(size: int): LimiterAsync {.raises: [].} =
   doAssert size > 0
-  {.cast(noSideEffect).}:
-    let waiter = newFutureVar[void]()
-    uncatch waiter.complete()
   result = LimiterAsync(
     used: 0,
     size: size,
-    waiter: waiter,
+    waiter: nil,
     isClosed: false
   )
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
-  if not f.finished:
+  if f != nil and not f.finished:
     uncatch f.complete()
 
 proc inc*(lt: LimiterAsync) {.raises: [].} =
@@ -40,7 +35,7 @@ proc inc*(lt: LimiterAsync) {.raises: [].} =
 proc dec*(lt: LimiterAsync) {.raises: [].} =
   doAssert lt.used > 0
   dec lt.used
-  wakeupSoon lt.waiter.fut
+  wakeupSoon lt.waiter
 
 proc isFull*(lt: LimiterAsync): bool {.raises: [].} =
   lt.used == lt.size
@@ -51,20 +46,20 @@ proc isEmpty*(lt: LimiterAsync): bool {.raises: [].} =
 proc wait*(lt: LimiterAsync): Future[void] {.raises: [LimiterAsyncClosedError].} =
   doAssert lt.used > 0
   doAssert lt.used <= lt.size
-  doAssert lt.waiter.finished
+  doAssert lt.waiter == nil or lt.waiter.finished
   check not lt.isClosed, newLimiterAsyncClosedError()
-  lt.waiter.clean()
-  return lt.waiter.fut
+  lt.waiter = newFuture[void]()
+  return lt.waiter
 
 proc failSoon(f: Future[void]) {.raises: [].} =
-  if not f.finished:
+  if f != nil and not f.finished:
     uncatch f.fail newLimiterAsyncClosedError()
 
 proc close*(lt: LimiterAsync) {.raises: [].} =
   if lt.isClosed:
     return
   lt.isClosed = true
-  failSoon lt.waiter.fut
+  failSoon lt.waiter
 
 proc spawnCheck*(lt: LimiterAsync, f: Future[void]) {.raises: [LimiterAsyncClosedError].} =
   check not lt.isClosed, newLimiterAsyncClosedError()
