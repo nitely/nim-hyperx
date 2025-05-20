@@ -97,6 +97,7 @@ proc connect*(s: TestSocket, hostname: string, port: Port) {.async.} =
 proc close*(s: TestSocket) =
   s.isConnected = false
   s.recvSig.trigger()
+  s.recvSig.close()
   s.sentSig.close()
 
 # XXX untested server funcs
