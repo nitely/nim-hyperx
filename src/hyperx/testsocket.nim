@@ -6,12 +6,11 @@ import std/asyncdispatch
 import std/asyncnet
 import std/net
 
-import ./queue
+import ./signal
 
 type
   TestSocket* = ref object
-    recvData, sentData: QueueAsync[seq[byte]]
-    # need buff because recvData item can exceed recvInto size
+    recvSig, sentSig: SignalAsync
     recvBuff, sentBuff: seq[byte]
     recvIdx, sentIdx: int
     isConnected*: bool
@@ -21,8 +20,8 @@ type
 
 proc newMySocket*: TestSocket =
   TestSocket(
-    recvData: newQueue[seq[byte]](1000),
-    sentData: newQueue[seq[byte]](1000),
+    recvSig: newSignal(),
+    sentSig: newSignal(),
     recvBuff: newSeq[byte](),
     recvIdx: 0,
     sentBuff: newSeq[byte](),
@@ -38,14 +37,15 @@ proc newMySocketSsl*(certFile = "", keyFile = ""): TestSocket =
   result.isSsl = true
 
 proc putRecvData*(s: TestSocket, data: seq[byte]) {.async.} =
-  await s.recvData.put data
+  s.recvBuff.add data
+  s.recvSig.trigger()
 
 proc sentInto*(s: TestSocket, buff: pointer, size: int): Future[int] {.async.} =
   if not s.isConnected:
     return 0
   while s.sentIdx+size > s.sentBuff.len:
     let L = s.sentBuff.len
-    s.sentBuff.add await s.sentData.pop()
+    await s.sentSig.waitfor()
     if s.sentBuff.len == L:
       s.isConnected = false
       return 0
@@ -62,7 +62,7 @@ proc recvInto*(s: TestSocket, buff: pointer, size: int): Future[int] {.async.} =
     return 0
   while s.recvIdx+size > s.recvBuff.len:
     let L = s.recvBuff.len
-    s.recvBuff.add await s.recvData.pop()
+    await s.recvSig.waitfor()
     if s.recvBuff.len == L:
       s.isConnected = false
       return 0
@@ -74,16 +74,19 @@ proc send*(s: TestSocket, data: pointer, ln: int) {.async.} =
   doAssert ln > 0
   var dataCopy = newSeq[byte](ln)
   copyMem(addr dataCopy[0], data, ln)
-  await s.sentData.put dataCopy
+  s.sentBuff.add dataCopy
+  s.sentSig.trigger()
 
 proc send*(s: TestSocket, data: seq[byte]) {.async.} =
-  await s.sentData.put data
+  s.sentBuff.add data
+  s.sentSig.trigger()
 
 proc send*(s: TestSocket, data: string) {.async.} =
   doAssert data.len > 0
   var dataCopy = newSeq[byte](data.len)
   copyMem(addr dataCopy[0], unsafeAddr data[0], data.len)
-  await s.sentData.put dataCopy
+  s.sentBuff.add dataCopy
+  s.sentSig.trigger()
 
 proc connect*(s: TestSocket, hostname: string, port: Port) {.async.} =
   doAssert not s.isConnected
@@ -93,12 +96,9 @@ proc connect*(s: TestSocket, hostname: string, port: Port) {.async.} =
 
 proc close*(s: TestSocket) =
   s.isConnected = false
-  #XXX SIGSEGV in orc
-  #s.recvData.close()
-  proc terminate() =
-    asyncCheck s.recvData.put newSeq[byte]()
-    s.sentData.close()
-  callSoon terminate
+  s.recvSig.trigger()
+  s.recvSig.close()
+  s.sentSig.close()
 
 # XXX untested server funcs
 
@@ -128,4 +128,3 @@ proc wrapConnectedSocket*(
 ) =
   doAssert handshake == handshakeAsServer
   socket.hostname = hostname
-
