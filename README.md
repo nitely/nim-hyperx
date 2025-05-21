@@ -128,18 +128,12 @@ However, web-browsers do not support full-duplex streaming. So http/2 cannot be 
 
 ### Benchmarks
 
-The CI runs h2load on it, but it only starts a single server instance. Proper benchmarking would start a server per CPU, and run a few combinations of load. See [issue #5](https://github.com/nitely/nim-hyperx/issues/5#issuecomment-2480527542).
+A multi-thread server (same as localHost but using the `run` proc), compiled with orc, 16 threads, ssl disabled is able to process +2M requests/s on a Ryzen 9.
 
-Also try:
-
-- release: `-d:release` always compile in release mode.
-- refc: `--mm:refc` use refc GC instead of ORC.
-- orc: use orc in Nim +2.2.2.
-- h2c: disable TLS `newServer(..., ssl = false)` and use h2load `-ph2c` parameter
-- localServer.nim: it will respond "hello world" or any data it receives. You may want to tweak it to not send any data.
-- start a server instance per CPU and use `taskset` to set the process CPU affinity.
-- make sure the bench tool is hitting all server instances, not just one.
-- using [yasync](https://github.com/yglukhov/yasync) shows higher throughput and lower latency.
+```text
+$ h2load -n3000000 -c32 -m100 -ph2c -t4 http://127.0.0.1:8783
+finished in 1.43s, 2103304.50 req/s, 62.18MB/s
+```
 
 ### Memory leaks
 
