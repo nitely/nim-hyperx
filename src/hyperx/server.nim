@@ -3,6 +3,7 @@
 import std/asyncdispatch
 import std/asyncnet
 import std/net
+import std/nativesockets
 when defined(ssl):
   import ./atexit
 
@@ -12,6 +13,7 @@ import ./signal
 import ./limiter
 import ./errors
 import ./utils
+import ./pipes
 
 when defined(hyperxTest):
   import ./testsocket
@@ -323,3 +325,72 @@ proc run*(
         createThread(threads[i], worker, addr ctx)
     for i in 0 .. threads.len-1:
       joinThread(threads[i])
+
+type
+  WorkerContext2 = object
+    hostname: cstring
+    callback: SafeStreamCallback
+    chan: ptr Channel[AsyncFD]
+    pipeR: PipeFd
+
+proc clientWorker(ctx: ptr WorkerContext2) {.async.} =
+  while true:
+    var data = 0'u8
+    let read = await ctx.pipeR.readInto(addr data, sizeof(data))
+    doAssert read == 1
+    let sock = ctx.chan[].recv()
+    if sock != osInvalidSocket.AsyncFD:
+      register(sock)
+      let asock = newAsyncSocket(sock, AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
+      doAssert asock != nil
+      let client = newClient(ctServer, asock, $ctx.hostname)
+      asyncCheck clientHandler(client, ctx.callback)
+    else:
+      break
+
+proc worker(ctx: ptr WorkerContext2) {.thread.} =
+  discard getGlobalDispatcher()
+  register(ctx.pipeR.AsyncFD)
+  try:
+    waitFor clientWorker(ctx)
+  finally:
+    unregister(ctx.pipeR.AsyncFD)
+
+proc run2*(
+  hostname: string,
+  port: Port,
+  callback: SafeStreamCallback,
+  threads = 1
+) =
+  let socket = newSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+  socket.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
+  socket.bindAddr port
+  socket.listen()
+  let (pipeR, pipeW) = createPipe()
+  var chan: Channel[AsyncFD]
+  chan.open()
+  var ctx = WorkerContext2(
+    hostname: hostname,
+    callback: callback,
+    chan: addr chan,
+    pipeR: pipeR
+  )
+  var threads = newSeq[Thread[ptr WorkerContext2]](threads)
+  for i in 0 ..< threads.len:
+    createThread(threads[i], worker, addr ctx)
+  var client: Socket
+  var data = 1'u8
+  try:
+    while true:
+      socket.accept(client)
+      chan.send client.getFd().AsyncFD
+      pipeW.write(addr data, sizeof(data))
+  finally:
+    for _ in 0 ..< threads.len:
+      chan.send osInvalidSocket.AsyncFD
+      pipeW.write(addr data, sizeof(data))
+    for i in 0 ..< threads.len:
+      joinThread(threads[i])
+    pipeR.close()
+    socket.close()
+  doAssert ctx.callback != nil  # keep alive

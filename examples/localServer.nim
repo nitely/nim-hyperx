@@ -37,6 +37,10 @@ proc main() {.async.} =
   )
   await server.serve(processStream)
 
-when isMainModule:
-  waitFor main()
-  echo "ok"
+run2(
+  localHost, localPort, processStream, threads = 8 #, ssl = false
+)
+
+#when isMainModule:
+#  waitFor main()
+#  echo "ok"
