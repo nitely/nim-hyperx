@@ -323,3 +323,4 @@ proc run*(
         createThread(threads[i], worker, addr ctx)
     for i in 0 .. threads.len-1:
       joinThread(threads[i])
+  doAssert ctx.callback != nil  # keep ctx alive
