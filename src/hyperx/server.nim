@@ -13,7 +13,6 @@ import ./signal
 import ./limiter
 import ./errors
 import ./utils
-import ./pipes
 
 when defined(hyperxTest):
   import ./testsocket
@@ -331,30 +330,42 @@ type
     hostname: cstring
     callback: SafeStreamCallback
     chan: ptr Channel[AsyncFD]
-    pipeR: PipeFd
+    event: AsyncEvent
 
 proc clientWorker(ctx: ptr WorkerContext2) {.async.} =
+  var stopEvent = false
+  let fut = newFutureVar[void]()
+  addEvent(ctx.event, proc (fd: AsyncFD): bool =
+    if not fut.finished:
+      fut.complete()
+    return stopEvent
+  )
+  var sock: AsyncFD
   while true:
-    var data = 0'u8
-    let read = await ctx.pipeR.readInto(addr data, sizeof(data))
-    doAssert read == 1
-    let sock = ctx.chan[].recv()
-    if sock != osInvalidSocket.AsyncFD:
+    fut.clean()
+    # XXX tryRecv may fail because other threads calling it
+    #     and then the chan has sockets but event wont be triggered
+    #     use lock + UnckeckedArray instead; in theory but I've not seen it hang yet
+    let tried = ctx.chan[].tryRecv()
+    if tried.dataAvailable:
+      sock = tried.msg
+    if not tried.dataAvailable:
+      await Future[void](fut)
+    elif sock != osInvalidSocket.AsyncFD:
       register(sock)
       let asock = newAsyncSocket(sock, AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
       doAssert asock != nil
       let client = newClient(ctServer, asock, $ctx.hostname)
       asyncCheck clientHandler(client, ctx.callback)
     else:
+      stopEvent = true
+      ctx.event.trigger()
+      await Future[void](fut)
       break
 
 proc worker(ctx: ptr WorkerContext2) {.thread.} =
   discard getGlobalDispatcher()
-  register(ctx.pipeR.AsyncFD)
-  try:
-    waitFor clientWorker(ctx)
-  finally:
-    unregister(ctx.pipeR.AsyncFD)
+  waitFor clientWorker(ctx)
 
 proc run2*(
   hostname: string,
@@ -366,31 +377,29 @@ proc run2*(
   socket.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
   socket.bindAddr port
   socket.listen()
-  let (pipeR, pipeW) = createPipe()
   var chan: Channel[AsyncFD]
   chan.open()
   var ctx = WorkerContext2(
     hostname: hostname,
     callback: callback,
     chan: addr chan,
-    pipeR: pipeR
+    event: newAsyncEvent()
   )
   var threads = newSeq[Thread[ptr WorkerContext2]](threads)
   for i in 0 ..< threads.len:
     createThread(threads[i], worker, addr ctx)
   var client: Socket
-  var data = 1'u8
   try:
     while true:
       socket.accept(client)
-      chan.send client.getFd().AsyncFD
-      pipeW.write(addr data, sizeof(data))
+      ctx.chan[].send client.getFd().AsyncFD
+      ctx.event.trigger()
   finally:
     for _ in 0 ..< threads.len:
-      chan.send osInvalidSocket.AsyncFD
-      pipeW.write(addr data, sizeof(data))
+      ctx.chan[].send osInvalidSocket.AsyncFD
+      ctx.event.trigger()
     for i in 0 ..< threads.len:
       joinThread(threads[i])
-    pipeR.close()
+    ctx.event.close()
     socket.close()
   doAssert ctx.callback != nil  # keep alive
