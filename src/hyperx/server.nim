@@ -390,14 +390,15 @@ proc run2*(
   try:
     while true:
       socket.accept(client)
-      ctx.chan[].send client.getFd().AsyncFD
+      chan.send client.getFd().AsyncFD
       ctx.event.trigger()
   finally:
     for _ in 0 ..< threads.len:
-      ctx.chan[].send osInvalidSocket.AsyncFD
+      chan.send osInvalidSocket.AsyncFD
       ctx.event.trigger()
     for i in 0 ..< threads.len:
       joinThread(threads[i])
+    chan.close()
     ctx.event.close()
     socket.close()
   doAssert ctx.callback != nil  # keep alive
