@@ -332,6 +332,7 @@ type
     chan: ptr Channel[AsyncFD]
     event: AsyncEvent
 
+# XXX wait all clients to finish
 proc clientWorker(ctx: ptr WorkerContext2) {.async.} =
   var stopEvent = false
   let fut = newFutureVar[void]()
