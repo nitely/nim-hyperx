@@ -343,25 +343,22 @@ proc clientWorker(ctx: ptr WorkerContext2) {.async.} =
   var sock: AsyncFD
   while true:
     fut.clean()
-    # XXX tryRecv may fail because other threads calling it
-    #     and then the chan has sockets but event wont be triggered
-    #     use lock + UnckeckedArray instead; in theory but I've not seen it hang yet
     let tried = ctx.chan[].tryRecv()
     if tried.dataAvailable:
       sock = tried.msg
-    if not tried.dataAvailable:
-      await Future[void](fut)
-    elif sock != osInvalidSocket.AsyncFD:
-      register(sock)
-      let asock = newAsyncSocket(sock, AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
-      doAssert asock != nil
-      let client = newClient(ctServer, asock, $ctx.hostname)
-      asyncCheck clientHandler(client, ctx.callback)
+      if sock != osInvalidSocket.AsyncFD:
+        register(sock)
+        let asock = newAsyncSocket(sock, AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
+        doAssert asock != nil
+        let client = newClient(ctServer, asock, $ctx.hostname)
+        asyncCheck clientHandler(client, ctx.callback)
+      else:
+        stopEvent = true
+        ctx.event.trigger()
+        await Future[void](fut)
+        break
     else:
-      stopEvent = true
-      ctx.event.trigger()
       await Future[void](fut)
-      break
 
 proc worker(ctx: ptr WorkerContext2) {.thread.} =
   discard getGlobalDispatcher()
