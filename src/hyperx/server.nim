@@ -111,17 +111,21 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
     server.sock.listen()
 
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
-  catch:
-    # note OptNoDelay is inherited from server.sock
-    let sock = await server.sock.accept()
-    when defined(ssl):
-      if server.sock.isSsl:
-        when not defined(hyperxTest):
-          doAssert not sslContext.isNil
-        wrapConnectedSocket(
-          sslContext, sock, handshakeAsServer, server.hostname
-        )
-    return newClient(ctServer, sock, server.hostname)
+  while server.isConnected:
+    try:
+      # note OptNoDelay is inherited from server.sock
+      let sock = await server.sock.accept()
+      when defined(ssl):
+        if server.sock.isSsl:
+          when not defined(hyperxTest):
+            doAssert not sslContext.isNil
+          wrapConnectedSocket(
+            sslContext, sock, handshakeAsServer, server.hostname
+          )
+      return newClient(ctServer, sock, server.hostname)
+    except OsError, SslError:
+      debugErr2 getCurrentException()
+      debugErr getCurrentException()
 
 template with*(server: ServerContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
