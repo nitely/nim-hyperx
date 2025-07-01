@@ -136,6 +136,7 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
     except HyperxError, OsError, SslError:
       debugErr2 getCurrentException()
       debugErr getCurrentException()
+  raise newConnError("Server is disconnected")
 
 template with*(server: ServerContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
