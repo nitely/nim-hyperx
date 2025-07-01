@@ -110,20 +110,30 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
     server.sock.bindAddr server.port
     server.sock.listen()
 
+proc recvClientNaked(server: ServerContext): Future[ClientContext] {.async.} =
+  # note OptNoDelay is inherited from server.sock
+  let sock = await server.sock.accept()
+  try:
+    when defined(ssl):
+      if server.sock.isSsl:
+        when not defined(hyperxTest):
+          doAssert not sslContext.isNil
+        wrapConnectedSocket(
+          sslContext, sock, handshakeAsServer, server.hostname
+        )
+    return newClient(ctServer, sock, server.hostname)
+  except CatchableError as err:
+    sock.close()
+    raise err
+
+when not defined(ssl):
+  type SslError = object of CatchableError
+
 proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
   while server.isConnected:
     try:
-      # note OptNoDelay is inherited from server.sock
-      let sock = await server.sock.accept()
-      when defined(ssl):
-        if server.sock.isSsl:
-          when not defined(hyperxTest):
-            doAssert not sslContext.isNil
-          wrapConnectedSocket(
-            sslContext, sock, handshakeAsServer, server.hostname
-          )
-      return newClient(ctServer, sock, server.hostname)
-    except OsError, SslError:
+      return await server.recvClientNaked()
+    except HyperxError, OsError, SslError:
       debugErr2 getCurrentException()
       debugErr getCurrentException()
 
