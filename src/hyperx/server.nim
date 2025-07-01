@@ -110,10 +110,10 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
     server.sock.bindAddr server.port
     server.sock.listen()
 
-proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
-  catch:
-    # note OptNoDelay is inherited from server.sock
-    let sock = await server.sock.accept()
+proc recvClientNaked(server: ServerContext): Future[ClientContext] {.async.} =
+  # note OptNoDelay is inherited from server.sock
+  let sock = await server.sock.accept()
+  try:
     when defined(ssl):
       if server.sock.isSsl:
         when not defined(hyperxTest):
@@ -122,6 +122,21 @@ proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
           sslContext, sock, handshakeAsServer, server.hostname
         )
     return newClient(ctServer, sock, server.hostname)
+  except CatchableError as err:
+    sock.close()
+    raise err
+
+when not defined(ssl):
+  type SslError = object of CatchableError
+
+proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
+  while server.isConnected:
+    try:
+      return await server.recvClientNaked()
+    except HyperxError, OsError, SslError:
+      debugErr2 getCurrentException()
+      debugErr getCurrentException()
+  raise newConnError("Server is disconnected")
 
 template with*(server: ServerContext, body: untyped): untyped =
   discard getGlobalDispatcher()  # setup event loop
