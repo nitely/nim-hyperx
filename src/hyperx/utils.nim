@@ -90,16 +90,27 @@ template catch*(body: untyped): untyped =
     raise newConnError(err.msg, err)
 
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
+  if ss.len == 0: return
   let L = s.len
-  s.setLen(L+ss.len)
-  for i in 0 .. ss.len-1:
-    s[L+i] = ss[i].byte
+  when nimvm:
+    s.setLen(L+ss.len)
+    for i in 0 .. ss.len-1:
+      s[L+i] = ss[i].byte
+  else:
+    s.setLen(L+ss.len)
+    moveMem(addr s[L], unsafeAddr ss[0], ss.len)
 
 func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
+  if ss.len == 0: return
   let L = s.len
-  s.setLen(L+ss.len)
-  for i in 0 .. ss.len-1:
-    s[L+i] = ss[i].char
+  when nimvm:
+    s.setLen(L+ss.len)
+    for i in 0 .. ss.len-1:
+      s[L+i] = ss[i].char
+  else:
+    s.setLen(L+ss.len)
+    prepareMutation(s)
+    moveMem(addr s[L], unsafeAddr ss[0], ss.len)
 
 func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
   if s.len == 0:
