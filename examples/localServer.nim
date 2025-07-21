@@ -3,7 +3,9 @@
 {.define: ssl.}
 
 from std/os import getEnv
-import std/asyncdispatch
+from std/asyncdispatch import Port, waitFor
+import pkg/yasync
+import pkg/yasync/compat
 import ../src/hyperx/server
 
 const localHost* = "127.0.0.1"

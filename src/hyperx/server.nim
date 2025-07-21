@@ -1,10 +1,13 @@
 ## HTTP/2 server
 
-import std/asyncdispatch
+from std/asyncdispatch import getGlobalDispatcher, setGlobalDispatcher
 import std/asyncnet
 import std/net
 when defined(ssl):
   import ./atexit
+
+import pkg/yasync
+import pkg/yasync/compat
 
 import ./clientserver
 import ./stream
@@ -110,9 +113,9 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
     server.sock.bindAddr server.port
     server.sock.listen()
 
-proc recvClientNaked(server: ServerContext): Future[ClientContext] {.async.} =
+proc recvClientNaked(server: ServerContext): ClientContext {.async.} =
   # note OptNoDelay is inherited from server.sock
-  let sock = await server.sock.accept()
+  let sock = awaitc server.sock.accept()
   try:
     when defined(ssl):
       if server.sock.isSsl:
@@ -129,7 +132,7 @@ proc recvClientNaked(server: ServerContext): Future[ClientContext] {.async.} =
 when not defined(ssl):
   type SslError = object of CatchableError
 
-proc recvClient*(server: ServerContext): Future[ClientContext] {.async.} =
+proc recvClient*(server: ServerContext): ClientContext {.async.} =
   while server.isConnected:
     try:
       return await server.recvClientNaked()
@@ -149,7 +152,7 @@ template with*(server: ServerContext, body: untyped): untyped =
     server.close()
 
 # XXX remove
-proc recvStream*(client: ClientContext): Future[ClientStream] {.async.} =
+proc recvStream*(client: ClientContext): ClientStream {.async.} =
   try:
     while client.streamsRecv.len == 0:
       await client.streamsRecvSig.waitFor()
@@ -218,12 +221,12 @@ proc processStreams(
       for strm in client.streamsRecv:
         lt.spawnCheck streamHandler(
           newClientStream(client, strm), callback
-        )
+        ).toCompat
       client.streamsRecv.setLen 0
       check lt.error == nil, lt.error
   finally:
     client.close()
-    await lt.join()
+    awaitc lt.join()
 
 proc clientHandler(
   client: ClientContext,
@@ -258,11 +261,11 @@ proc serve*(
     with server:
       while server.isConnected:
         let client = await server.recvClient()
-        await lt.spawn clientHandler(client, callback)
+        awaitc lt.spawn clientHandler(client, callback).toCompat
         check lt.error == nil, lt.error
   finally:
     # XXX close all clients somehow
-    await lt.join()
+    awaitc lt.join()
 
 proc serve*(
   server: ServerContext,
@@ -275,10 +278,10 @@ proc serve*(
       let clientCallback = serverCallback server
       while server.isConnected:
         let client = await server.recvClient()
-        await lt.spawn clientHandler(client, clientCallback(client))
+        awaitc lt.spawn clientHandler(client, clientCallback(client)).toCompat
         check lt.error == nil, lt.error
   finally:
-    await lt.join()
+    awaitc lt.join()
 
 type
   WorkerContext = object

@@ -6,6 +6,8 @@ import std/asyncdispatch
 when defined(ssl):
   import ./atexit
 
+import pkg/yasync
+
 import ./clientserver
 import ./errors
 import ./utils
@@ -182,7 +184,7 @@ proc request(
   userAgent = defaultUserAgent,
   accept = defaultAccept,
   contentType = defaultContentType
-): Future[Response] {.async.} =
+): Response {.async.} =
   result = newResponse()
   let strm = client.newClientStream()
   with strm:
