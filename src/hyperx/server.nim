@@ -155,7 +155,7 @@ template with*(server: ServerContext, body: untyped): untyped =
 proc recvStream*(client: ClientContext): ClientStream {.async.} =
   try:
     while client.streamsRecv.len == 0:
-      awaitc client.streamsRecvSig.waitFor()
+      await client.streamsRecvSig.waitFor()
     let strm = client.streamsRecv.pop()
     result = newClientStream(client, strm)
   except QueueClosedError as err:
@@ -217,16 +217,16 @@ proc processStreams(
   try:
     while client.isConnected:
       while client.streamsRecv.len == 0:
-        awaitc client.streamsRecvSig.waitFor()
+        await client.streamsRecvSig.waitFor()
       for strm in client.streamsRecv:
         lt.spawnCheck streamHandler(
           newClientStream(client, strm), callback
-        ).toCompat
+        )
       client.streamsRecv.setLen 0
       check lt.error == nil, lt.error
   finally:
     client.close()
-    awaitc lt.join()
+    await lt.join()
 
 proc clientHandler(
   client: ClientContext,
@@ -261,11 +261,11 @@ proc serve*(
     with server:
       while server.isConnected:
         let client = await server.recvClient()
-        awaitc lt.spawn clientHandler(client, callback).toCompat
+        await lt.spawn clientHandler(client, callback)
         check lt.error == nil, lt.error
   finally:
     # XXX close all clients somehow
-    awaitc lt.join()
+    await lt.join()
 
 proc serve*(
   server: ServerContext,
@@ -278,10 +278,10 @@ proc serve*(
       let clientCallback = serverCallback server
       while server.isConnected:
         let client = await server.recvClient()
-        awaitc lt.spawn clientHandler(client, clientCallback(client)).toCompat
+        await lt.spawn clientHandler(client, clientCallback(client))
         check lt.error == nil, lt.error
   finally:
-    awaitc lt.join()
+    await lt.join()
 
 type
   WorkerContext = object

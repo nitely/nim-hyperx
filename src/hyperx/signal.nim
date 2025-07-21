@@ -1,4 +1,5 @@
-import std/asyncdispatch
+from std/asyncdispatch import callSoon
+import pkg/yasync
 
 import ./utils
 import ./errors
@@ -28,12 +29,13 @@ proc len*(sig: SignalAsync): int {.raises: [].} =
 proc waitFor*(sig: SignalAsync): Future[void] {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
-  result = newFuture[void]()
+  result = newFuture(void)
   sig.waiters.add result
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
-  if not f.finished:
-    uncatch f.complete()
+  uncatch callSoon proc =
+    if not f.finished:
+      uncatch f.complete()
 
 proc trigger*(sig: SignalAsync) {.raises: [SignalClosedError].} =
   if sig.isClosed:
@@ -46,8 +48,9 @@ func isClosed*(sig: SignalAsync): bool {.raises: [].} =
   sig.isClosed
 
 proc failSoon(f: Future[void]) {.raises: [].} =
-  if not f.finished:
-    uncatch f.fail newSignalClosedError()
+  uncatch callSoon proc =
+    if not f.finished:
+      uncatch f.fail newSignalClosedError()
 
 proc close*(sig: SignalAsync) {.raises: [].}  =
   if sig.isClosed:

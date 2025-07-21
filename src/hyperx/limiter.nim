@@ -1,4 +1,5 @@
-import std/asyncdispatch
+from std/asyncdispatch import callSoon
+import pkg/yasync
 
 import ./utils
 import ./errors
@@ -25,8 +26,10 @@ func newLimiter*(size: int): LimiterAsync {.raises: [].} =
   )
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
-  if f != nil and not f.finished:
-    uncatch f.complete()
+  if f == nil: return
+  uncatch callSoon proc =
+    if not f.finished:
+      uncatch f.complete()
 
 proc inc*(lt: LimiterAsync) {.raises: [].} =
   doAssert lt.used < lt.size
@@ -48,12 +51,14 @@ proc wait*(lt: LimiterAsync): Future[void] {.raises: [LimiterAsyncClosedError].}
   doAssert lt.used <= lt.size
   doAssert lt.waiter == nil or lt.waiter.finished
   check not lt.isClosed, newLimiterAsyncClosedError()
-  lt.waiter = newFuture[void]()
+  lt.waiter = newFuture(void)
   return lt.waiter
 
 proc failSoon(f: Future[void]) {.raises: [].} =
-  if f != nil and not f.finished:
-    uncatch f.fail newLimiterAsyncClosedError()
+  if f == nil: return
+  uncatch callSoon proc =
+    if not f.finished:
+      uncatch f.fail newLimiterAsyncClosedError()
 
 proc close*(lt: LimiterAsync) {.raises: [].} =
   if lt.isClosed:
@@ -64,10 +69,9 @@ proc close*(lt: LimiterAsync) {.raises: [].} =
 proc spawnCheck*(lt: LimiterAsync, f: Future[void]) {.raises: [LimiterAsyncClosedError].} =
   check not lt.isClosed, newLimiterAsyncClosedError()
   inc lt
-  uncatch f.addCallback(proc () {.raises: [].} =
+  uncatch f.then(proc (error: ref Exception) {.raises: [].} =
     dec lt
-    if f.failed:
-      lt.error ?= f.error
+    lt.error ?= error
   )
 
 proc spawn*(lt: LimiterAsync, f: Future[void]) {.async.} =
@@ -83,7 +87,7 @@ proc join*(lt: LimiterAsync) {.async.} =
 when isMainModule:
   discard getGlobalDispatcher()
   proc sleepCycle: Future[void] =
-    let fut = newFuture[void]()
+    let fut = newFuture(void)
     proc wakeup = fut.complete()
     callSoon wakeup
     return fut
