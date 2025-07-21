@@ -1,4 +1,3 @@
-from std/asyncdispatch import callSoon
 import pkg/yasync
 
 import ./utils
@@ -33,32 +32,32 @@ proc waitFor*(sig: SignalAsync): Future[void] {.raises: [SignalClosedError].} =
   sig.waiters.add result
 
 proc wakeupSoon(f: Future[void]) {.raises: [].} =
-  uncatch callSoon proc =
-    if not f.finished:
-      uncatch f.complete()
+  if not f.finished:
+    uncatch f.complete()
 
 proc trigger*(sig: SignalAsync) {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
-  for fut in sig.waiters:
-    wakeupSoon fut
+  let waiters = sig.waiters
   sig.waiters.setLen 0
+  for fut in waiters:
+    wakeupSoon fut
 
 func isClosed*(sig: SignalAsync): bool {.raises: [].} =
   sig.isClosed
 
 proc failSoon(f: Future[void]) {.raises: [].} =
-  uncatch callSoon proc =
-    if not f.finished:
-      uncatch f.fail newSignalClosedError()
+  if not f.finished:
+    uncatch f.fail newSignalClosedError()
 
 proc close*(sig: SignalAsync) {.raises: [].}  =
   if sig.isClosed:
     return
   sig.isClosed = true
-  for fut in sig.waiters:
-    failSoon fut
+  let waiters = sig.waiters
   sig.waiters.setLen 0
+  for fut in waiters:
+    failSoon fut
 
 when isMainModule:
   discard getGlobalDispatcher()
