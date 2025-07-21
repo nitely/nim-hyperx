@@ -294,8 +294,8 @@ proc close*(s: var Streams) {.raises: [].} =
   if s.isClosed:
     return
   s.isClosed = true
-  for stream in values s:
-    stream.close()
+  #for stream in values s:
+  #  stream.close()
 
 when isMainModule:
   import ./utils

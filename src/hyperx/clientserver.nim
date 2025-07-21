@@ -315,7 +315,7 @@ proc sendTaskNaked(client: ClientContext) {.async.} =
   while true:
     while client.sendBuf.len == 0:
       client.sendBufDrainSig.trigger()
-      await client.sendBufSig.waitFor()
+      awaitc client.sendBufSig.waitFor()
     swap buf, client.sendBuf
     client.sendBuf.setLen 0
     client.sendBufDrainSig.trigger()
@@ -347,11 +347,11 @@ proc send(client: ClientContext, frm: Frame) {.async.} =
     client.sendBuf.add frm.s
     client.sendBufSig.trigger()
     if frm.typ == frmtGoAway or client.sendBuf.len > 64 * 1024:
-      await client.sendBufDrainSig.waitFor()
+      awaitc client.sendBufDrainSig.waitFor()
     # need to wait for sock.send to complete
     if frm.typ == frmtGoAway:
       client.sendBufSig.trigger()
-      await client.sendBufDrainSig.waitFor()
+      awaitc client.sendBufDrainSig.waitFor()
   except QueueClosedError as err:
     doAssert not client.isConnected
     check client.error == nil, newError(client.error, err)
@@ -849,7 +849,7 @@ proc recvDispatcher(client: ClientContext, mainStream: Stream) {.async.} =
 proc windowUpdateTaskNaked(client: ClientContext) {.async.} =
   while client.isConnected:
     while client.windowProcessed <= stgWindowSize.int div 2:
-      await client.windowUpdateSig.waitFor()
+      awaitc client.windowUpdateSig.waitFor()
     doAssert client.windowProcessed > 0
     doAssert client.windowPending >= client.windowProcessed
     client.windowPending -= client.windowProcessed
@@ -980,7 +980,7 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   template stream: untyped = strm.stream
   try:
     if stream.stateRecv != csStateEnded and stream.headersRecv.len == 0:
-      await stream.headersRecvSig.waitFor()
+      awaitc stream.headersRecvSig.waitFor()
     data[].add stream.headersRecv
     stream.headersRecv.setLen 0
   except QueueClosedError as err:
@@ -994,7 +994,7 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
   template stream: untyped = strm.stream
   try:
     if stream.stateRecv != csStateEnded and stream.bodyRecv.len == 0:
-      await stream.bodyRecvSig.waitFor()
+      awaitc stream.bodyRecvSig.waitFor()
     let bodyL = stream.bodyRecvLen
     data[].add stream.bodyRecv
     stream.bodyRecv.setLen 0
@@ -1081,11 +1081,11 @@ proc sendBody*(
     while dataIdxA <= L:
       while stream.peerWindow <= 0 or client.peerWindow <= 0:
         while stream.peerWindow <= 0:
-          await stream.peerWindowUpdateSig.waitFor()
+          awaitc stream.peerWindowUpdateSig.waitFor()
         while client.peerWindow <= 0:
           check stream.state in strmStateDataSendAllowed,
             newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
-          await client.peerWindowUpdateSig.waitFor()
+          awaitc client.peerWindowUpdateSig.waitFor()
       # avoid window update if cannot write
       check stream.state in strmStateDataSendAllowed,
         newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
@@ -1129,11 +1129,11 @@ proc ping(client: ClientContext, strm: Stream) {.async.} =
   # will ever be in progress
   doAssert strm.id in client.streams
   if strm.pingSig.len > 0:
-    await strm.pingSig.waitFor()
+    awaitc strm.pingSig.waitFor()
   else:
     let sig = strm.pingSig.waitFor()
     await client.send newPingFrame(strm.id.uint32)
-    await sig
+    awaitc sig
 
 proc ping(strm: ClientStream) {.async.} =
   await strm.client.ping(strm.stream)

@@ -35,7 +35,7 @@ proc processStream(strm: ClientStream) {.async.} =
 proc main() {.async.} =
   echo "Serving forever"
   let server = newServer(
-    localHost, localPort, certFile, keyFile
+    localHost, localPort, certFile, keyFile, ssl = false
   )
   await server.serve(processStream)
 

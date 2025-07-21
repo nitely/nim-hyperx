@@ -155,7 +155,7 @@ template with*(server: ServerContext, body: untyped): untyped =
 proc recvStream*(client: ClientContext): ClientStream {.async.} =
   try:
     while client.streamsRecv.len == 0:
-      await client.streamsRecvSig.waitFor()
+      awaitc client.streamsRecvSig.waitFor()
     let strm = client.streamsRecv.pop()
     result = newClientStream(client, strm)
   except QueueClosedError as err:
@@ -217,7 +217,7 @@ proc processStreams(
   try:
     while client.isConnected:
       while client.streamsRecv.len == 0:
-        await client.streamsRecvSig.waitFor()
+        awaitc client.streamsRecvSig.waitFor()
       for strm in client.streamsRecv:
         lt.spawnCheck streamHandler(
           newClientStream(client, strm), callback
