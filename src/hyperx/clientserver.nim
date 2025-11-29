@@ -973,6 +973,15 @@ proc windowEnd(strm: ClientStream) {.raises: [].} =
   except SignalClosedError:
     doAssert not client.isConnected
 
+proc recvHeadersNow*(strm: ClientStream, data: ref string) =
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  doAssert client.typ == ctServer
+  check client.error == nil, newError(client.error)
+  check stream.error == nil, newError(stream.error)
+  data[].add stream.headersRecv
+  stream.headersRecv.setLen 0
+
 proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
@@ -1060,7 +1069,7 @@ proc sendHeaders*(
     client.hpackEncode(henc, n, v)
   result = strm.sendHeadersImpl(henc, finish)
 
-proc sendBody*(
+proc sendBodySlow(
   strm: ClientStream,
   data: ref string,
   finish = false
@@ -1109,6 +1118,36 @@ proc sendBody*(
     check client.error == nil, newError(client.error, err)
     check stream.error == nil, newError(stream.error, err)
     raise err
+
+proc sendBody*(
+  strm: ClientStream,
+  data: ref string,
+  finish = false
+): Future[void] =
+  template client: untyped = strm.client
+  template stream: untyped = strm.stream
+  template frm: untyped = strm.client.sendFrm
+  check stream.state in strmStateDataSendAllowed,
+    newErrorOrDefault(stream.error, newStrmError hyxStreamClosed)
+  doAssert stream.stateSend in {csStateHeaders, csStateData}
+  let L = data[].len
+  let peerWindow = min(client.peerWindow, stream.peerWindow)
+  let sendableSize = min(min(peerWindow, stgInitialMaxFrameSize.int), L)
+  if sendableSize == L:  # XXX check can write to buffer
+    frm.clear()
+    frm.setTyp frmtData
+    frm.setSid stream.id
+    frm.setPayloadLen L.FrmPayloadLen
+    if finish:
+      frm.flags.incl frmfEndStream
+      stream.stateSend = csStateEnded
+    frm.s.add data[]
+    stream.peerWindow -= frm.payloadLen.int32
+    client.peerWindow -= frm.payloadLen.int32
+    return write(client, stream, frm)
+  else:
+    doAssert false
+    return sendBodySlow(strm, data, finish)
 
 template with*(strm: ClientStream, body: untyped): untyped =
   try:

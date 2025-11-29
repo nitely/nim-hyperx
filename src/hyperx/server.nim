@@ -20,6 +20,7 @@ when defined(hyperxStats):
 
 export
   with,
+  recvHeadersNow,
   recvHeaders,
   recvBody,
   recvTrailers,

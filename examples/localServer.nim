@@ -1,6 +1,6 @@
 ## Echo server
 
-{.define: ssl.}
+#{.define: ssl.}
 
 from std/os import getEnv
 import std/asyncdispatch
@@ -14,7 +14,7 @@ const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 proc processStream(strm: ClientStream) {.async.} =
   ## Full-duplex echo stream
   let data = new string
-  await strm.recvHeaders(data)
+  strm.recvHeadersNow(data)
   await strm.sendHeaders(
     @[(":status", "200")], finish = false
   )
@@ -33,7 +33,7 @@ proc processStream(strm: ClientStream) {.async.} =
 proc main() {.async.} =
   echo "Serving forever"
   let server = newServer(
-    localHost, localPort, certFile, keyFile
+    localHost, localPort, certFile, keyFile, ssl = false
   )
   await server.serve(processStream)
 
