@@ -10,14 +10,15 @@ func newSignalClosedError(): ref SignalClosedError {.raises: [].} =
   result = (ref SignalClosedError)(msg: "Signal is closed")
 
 type
-  SignalAsync* = ref object
+  SignalAsync* = object
     ## Wait for a signal. When triggers wakes everyone up
     waiters: seq[Future[void]]
     isClosed: bool
 
+proc `=copy`(dest: var SignalAsync; source: SignalAsync) {.error.}
+
 proc newSignal*(): SignalAsync {.raises: [].} =
-  new result
-  result = SignalAsync(
+  SignalAsync(
     waiters: newSeq[Future[void]](),
     isClosed: false
   )
@@ -25,7 +26,7 @@ proc newSignal*(): SignalAsync {.raises: [].} =
 proc len*(sig: SignalAsync): int {.raises: [].} =
   sig.waiters.len
 
-proc waitFor*(sig: SignalAsync): Future[void] {.raises: [SignalClosedError].} =
+proc waitFor*(sig: var SignalAsync): Future[void] {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
   result = newFuture[void]()
@@ -35,7 +36,7 @@ proc wakeupSoon(f: Future[void]) {.raises: [].} =
   if not f.finished:
     uncatch f.complete()
 
-proc trigger*(sig: SignalAsync) {.raises: [SignalClosedError].} =
+proc trigger*(sig: var SignalAsync) {.raises: [SignalClosedError].} =
   if sig.isClosed:
     raise newSignalClosedError()
   for fut in sig.waiters:
@@ -49,7 +50,7 @@ proc failSoon(f: Future[void]) {.raises: [].} =
   if not f.finished:
     uncatch f.fail newSignalClosedError()
 
-proc close*(sig: SignalAsync) {.raises: [].}  =
+proc close*(sig: var SignalAsync) {.raises: [].}  =
   if sig.isClosed:
     return
   sig.isClosed = true
