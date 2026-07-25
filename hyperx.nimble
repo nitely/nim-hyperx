@@ -28,6 +28,10 @@ task test, "Test":
   exec "nim c -r -f tests/testclientserver.nim"
   exec "nim c -r -f tests/testservercatch.nim"
 
+  when (NimMajor, NimMinor) >= (2, 3) and defined(linux) and defined(amd64):
+    exec "nim r -d:danger --mm:arc --debugger:native -d:useMalloc --debuginfo:on --linedir:on --passC:'-fno-omit-frame-pointer' --passC:'-mno-omit-leaf-frame-pointer' --passC:\"-fsanitize=address\" --passL:\"-fsanitize=address\" tests/testclientserver.nim"
+    exec "nim r -d:danger --mm:orc --debugger:native -d:useMalloc --debuginfo:on --linedir:on --passC:'-fno-omit-frame-pointer' --passC:'-mno-omit-leaf-frame-pointer' --passC:\"-fsanitize=address\" --passL:\"-fsanitize=address\" tests/testclientserver.nim"
+
 task testexamples, "Test examples":
   exec "nim c -r -f -d:hyperxSanityCheck examples/streamClient.nim"
   exec "nim c -r -f -d:hyperxSanityCheck -d:release examples/dataStream.nim"
