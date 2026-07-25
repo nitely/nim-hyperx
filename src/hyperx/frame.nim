@@ -470,7 +470,7 @@ func debugPayload*(frm: Frame): string {.raises: [].} =
 
 when isMainModule:
   block:
-    var frm = newFrame()
+    var frm = initFrame()
     frm.setTyp frmtData
     doAssert isValidSize(frm, 123)
     frm.setTyp frmtHeaders
@@ -494,7 +494,7 @@ when isMainModule:
     doAssert not isValidSize(frm, 3)
     doAssert not isValidSize(frm, 5)
   block:
-    var frm = newFrame()
+    var frm = initFrame()
     frm.setTyp frmtSettings
     doAssert isValidSize(frm, 0)
     doAssert isValidSize(frm, 6)
