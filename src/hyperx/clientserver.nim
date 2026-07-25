@@ -406,17 +406,18 @@ const serverHandshakeBlob = handshakeBlob(ctServer)
 proc handshake(client: ClientContext) {.async.} =
   debugInfo "handshake"
   try:
-    check not client.sock.isClosed, newConnClosedError()
-    case client.typ
-    of ctClient: client.sendBuf.add clientHandshakeBlob
-    of ctServer: client.sendBuf.add serverHandshakeBlob
-    client.sendBufSig.trigger()
     if client.typ == ctServer:
       var blob = newString(preface.len)
       check not client.sock.isClosed, newConnClosedError()
       let blobRln = await client.sock.recvInto(addr blob[0], blob.len)
       check blobRln == blob.len, newConnClosedError()
       check blob == preface, newConnError(hyxProtocolError)
+    # h2test expect go-away instead of settings if preface is invalid
+    check not client.sock.isClosed, newConnClosedError()
+    case client.typ
+    of ctClient: client.sendBuf.add clientHandshakeBlob
+    of ctServer: client.sendBuf.add serverHandshakeBlob
+    client.sendBufSig.trigger()
   except QueueClosedError as err:
     doAssert not client.isConnected
     debugErr2 err
