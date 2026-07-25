@@ -285,6 +285,7 @@ func setWindowUpdate*(
   frm.clear()
   frm.grow frmWindowUpdateSize
   frm.setTyp frmtWindowUpdate
+  frm.setSid sid
   frm.setPayloadLen frmWindowUpdateSize.FrmPayloadLen
   frm.s.assignAt(frmHeaderSize, increment.uint32)
 

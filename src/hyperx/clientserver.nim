@@ -973,7 +973,7 @@ func sendEnded*(strm: ClientStream): bool {.raises: [].} =
   strm.stream.stateSend == csStateEnded
 
 proc write(strm: ClientStream): Future[void] =
-  return write(strm.client, strm.stream)
+  write(strm.client, strm.stream)
 
 proc windowEnd(strm: ClientStream) {.raises: [].} =
   template client: untyped = strm.client
