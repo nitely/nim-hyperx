@@ -298,9 +298,8 @@ proc close*(s: var Streams) {.raises: [].} =
     stream.close()
 
 when isMainModule:
-  import ./utils
   func frame(typ: FrmTyp, flags = 0.FrmFlags): Frame =
-    result = newFrame()
+    result = initFrame()
     result.setTyp typ
     result.setFlags flags
   const allEvents = {

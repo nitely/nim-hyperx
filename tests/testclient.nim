@@ -192,7 +192,7 @@ testAsync "response with headers prio":
 
 testAsync "response with bad prio length":
   proc replyPrio(tc: TestClientContext) {.async.} =
-    let frm1 = tc.frame(
+    var frm1 = tc.frame(
       frmtHeaders, @[frmfPriority, frmfEndHeaders]
     )
     frm1.add "1".toBytes
@@ -420,7 +420,8 @@ testAsync "stream error NO_ERROR handling":
     var frm = frame(frmtHeaders, sid, @[frmfEndHeaders, frmfEndStream])
     frm.add hencode(tc, headers).toBytes
     await tc.reply frm
-    await tc.reply newRstStreamFrame(sid, frmeNoError)
+    frm.setRstStream(sid, frmeNoError)
+    await tc.reply frm
   let dataIn = newStringRef()
   let dataOut = newStringRef("123")
   var tc = newTestClient("foo.bar")
@@ -445,7 +446,8 @@ testAsync "stream NO_ERROR before request completes":
     var frm = frame(frmtHeaders, sid, @[frmfEndHeaders, frmfEndStream])
     frm.add hencode(tc, headers).toBytes
     await tc.reply frm
-    await tc.reply newRstStreamFrame(sid, frmeNoError)
+    frm.setRstStream(sid, frmeNoError)
+    await tc.reply frm
   let dataIn = newStringRef()
   let dataOut = newStringRef("123")
   var tc = newTestClient("foo.bar")

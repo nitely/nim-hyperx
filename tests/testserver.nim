@@ -169,7 +169,7 @@ testAsync "consume window size":
       await tc.recv frmData1.s
       sentCount += text.len
     doAssert sentCount <= stgWindowSize.int
-    let frmEnd = frame(frmtData, strmId.FrmSid, @[frmfEndStream])
+    var frmEnd = frame(frmtData, strmId.FrmSid, @[frmfEndStream])
     frmEnd.add toOpenArray(text.toBytes, 0, stgWindowSize.int-sentCount-1)
     await tc.recv frmEnd.s
 

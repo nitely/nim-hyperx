@@ -49,16 +49,16 @@ proc destroyServerSslContext* =
   definedSsl:
     destroySslContext()
 
-proc defaultSslContext(
-  certFile, keyFile: string
-): SslContext {.raises: [HyperxConnError], definedSsl.} =
-  if not sslContext.isNil:
-    return sslContext
-  sslContext = defaultSslContext(ctServer, certFile, keyFile)
-  atExitCall(destroySslContext)
-  return sslContext
-
 when not defined(hyperxTest):
+  proc defaultSslContext(
+    certFile, keyFile: string
+  ): SslContext {.raises: [HyperxConnError], definedSsl.} =
+    if not sslContext.isNil:
+      return sslContext
+    sslContext = defaultSslContext(ctServer, certFile, keyFile)
+    atExitCall(destroySslContext)
+    return sslContext
+
   proc newMySocketSsl(
     certFile = "",
     keyFile = ""

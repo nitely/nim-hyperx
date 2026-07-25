@@ -53,7 +53,7 @@ proc frame*(
   sid: FrmSid,
   flags: seq[FrmFlag] = @[]
 ): Frame =
-  result = newFrame()
+  result = initFrame()
   result.setTyp typ
   result.setSid sid
   for f in flags:
@@ -149,7 +149,7 @@ proc sent*(tc: TestClientContext, size: int): Future[seq[byte]] {.async.} =
   result = await tc.client.sentTestData(size)
 
 proc sent*(tc: TestClientContext): Future[Frame] {.async.} =
-  result = newEmptyFrame()
+  result = initEmptyFrame()
   result.s = await tc.client.sentTestData(frmHeaderSize)
   doAssert result.len > 0, "Client closed"
   doAssert result.len == frmHeaderSize
