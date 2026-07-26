@@ -1209,6 +1209,6 @@ when isMainModule:
     doAssert stgDisablePriority == 1'u32
     doAssert stgMaxHeaderListSize == 16_384
     doAssert stgWindowSize == 65_535
-    doAssert stgMaxHeaders = 100
+    doAssert stgMaxHeaders == 100
 
   echo "ok"
