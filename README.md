@@ -135,13 +135,9 @@ $ h2load -n3000000 -c32 -m100 -ph2c -t4 http://127.0.0.1:8783
 finished in 1.43s, 2103304.50 req/s, 62.18MB/s
 ```
 
-### Memory leaks
-
-Use `--mm:refc`. It only leaks under orc; one reason is [this](https://github.com/nim-lang/Nim/issues/23615), I did not investigate further.
-
 ### ORC
 
-Nim's stdlib async creates cycles, and the ORC cycle collector does not run often enough. Related [nim issue](https://github.com/nim-lang/Nim/issues/21631). This has been fixed in Nim +2.2.2, however orc has other memory issues as mentioned above. You may want to use `--mm:refc` instead of orc.
+Hyperx works better in Nim +2.2.12 (or devel) under ORC. Older Nim versions leak memory.
 
 ### SSL
 
