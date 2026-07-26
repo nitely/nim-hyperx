@@ -43,6 +43,7 @@ const
   stgServerMaxConcurrentStreams* {.intdefine: "hyperxMaxConcurrentStrms".} = 100
   stgMaxSettingsList* {.intdefine: "hyperxMaxSettingsList".} = 100
   stgMaxHeaderListSize* {.intdefine: "hyperxMaxHeaderListSize".} = 16_384
+  stgMaxHeaders* {.intdefine: "hyperxMaxHeaders".} = 100
 
 type
   ClientTyp* = enum
@@ -275,6 +276,7 @@ func hpackDecode(
   let L = payload.len
   var canResize = true
   var headerListSize = 0
+  var headersCount = 0
   try:
     while i < L:
       doAssert i > i2; i2 = i
@@ -289,6 +291,8 @@ func hpackDecode(
       else:
         headerListSize += nn.len+vv.len+32
         check headerListSize <= stgMaxHeaderListSize, newConnError(hyxProtocolError)
+        inc headersCount
+        check headersCount <= stgMaxHeaders, newConnError(hyxProtocolError)
         # note this validate headers and trailers
         validateHeader(ss, nn, vv)
         # can resize multiple times before a header, but not after
@@ -1205,5 +1209,6 @@ when isMainModule:
     doAssert stgDisablePriority == 1'u32
     doAssert stgMaxHeaderListSize == 16_384
     doAssert stgWindowSize == 65_535
+    doAssert stgMaxHeaders == 100
 
   echo "ok"

@@ -295,10 +295,33 @@ testAsync "client onClose":
   doAssert closed == 1
   doAssert checked == 2
 
-testAsync "exceed Max Header List Size":
+# XXX limited by max headers (100)
+#     it needs header continuation because of frame 16KB limit
+#     to send one big header
+#testAsync "exceed Max Header List Size":
+#  var headers = defaultHeaders
+#  for _ in 0 ..< 8*1024:
+#    headers.add ("x-foo", "foo bar baz qux quz")
+#  var checked = 0
+#  var client = newClient(localHost, localPort)
+#  with client:
+#    let strm = client.newClientStream()
+#    with strm:
+#      await strm.sendHeaders(headers, finish = true)
+#      var data = new string
+#      try:
+#        await strm.recvHeaders(data)
+#        doAssert false
+#      except HyperxConnError as err:
+#        doAssert err.code == hyxProtocolError
+#        inc checked
+#    inc checked
+#  doAssert checked == 2
+
+testAsync "exceed Max Headers":
   var headers = defaultHeaders
-  for _ in 0 ..< 8*1024:
-    headers.add ("x-foo", "foo bar baz qux quz")
+  for _ in 0 ..< 101:
+    headers.add ("x-foo", "foo")
   var checked = 0
   var client = newClient(localHost, localPort)
   with client:
