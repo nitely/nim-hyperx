@@ -112,8 +112,11 @@ else:
   type MyAsyncSocket* = AsyncSocket
 
 when not defined(hyperxTest):
-  proc newMySocket*: MyAsyncSocket {.raises: [HyperxConnError].} =
-    result = catch newAsyncSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP, buffered = true)
+  proc newMySocket*(
+    domain: Domain = Domain.AF_INET,
+    protocol: Protocol = Protocol.IPPROTO_TCP
+  ): MyAsyncSocket {.raises: [HyperxConnError].} =
+    result = catch newAsyncSocket(domain, SOCK_STREAM, protocol, buffered = true)
     doAssert result != nil
 
 type
@@ -122,6 +125,7 @@ type
     sock*: MyAsyncSocket
     hostname*: string
     port: Port
+    domain: Domain
     isConnected*: bool
     isGracefulShutdown: bool
     headersEnc, headersDec: DynHeaders
@@ -153,13 +157,15 @@ proc newClient*(
   typ: ClientTyp,
   sock: MyAsyncSocket,
   hostname: string,
-  port = Port 443
+  port = Port 443,
+  domain = Domain.AF_INET
 ): ClientContext {.raises: [].} =
   result = ClientContext(
     typ: typ,
     sock: sock,
     hostname: hostname,
     port: port,
+    domain: domain,
     isConnected: false,
     isGracefulShutdown: false,
     headersEnc: initDynHeaders(stgHeaderTableSize.int),
@@ -906,7 +912,16 @@ proc connect*(client: ClientContext) {.async.} =
   doAssert not client.isConnected
   client.isConnected = true
   if client.typ == ctClient:
-    catch await client.sock.connect(client.hostname, client.port)
+    case client.domain
+    of Domain.AF_INET, Domain.AF_INET6:
+      catch await client.sock.connect(client.hostname, client.port)
+    of Domain.AF_UNIX:
+      when defined(posix):
+        catch await client.sock.connectUnix(client.hostname)
+      else:
+        doAssert false
+    of Domain.AF_UNSPEC:
+      doAssert false
   client.sendFut = client.sendTask()
   await client.handshake()
   client.winupFut = client.windowUpdateTask()
