@@ -3,6 +3,9 @@
 import std/asyncdispatch
 import std/asyncnet
 import std/net
+when defined(posix):
+  import std/oserrors
+  import std/posix
 when defined(ssl):
   import ./atexit
 
@@ -60,10 +63,12 @@ when not defined(hyperxTest):
     return sslContext
 
   proc newMySocketSsl(
+    domain = Domain.AF_INET,
+    protocol = Protocol.IPPROTO_TCP,
     certFile = "",
     keyFile = ""
   ): MyAsyncSocket {.raises: [HyperxConnError], definedSsl.} =
-    result = newMySocket()
+    result = newMySocket(domain, protocol)
     catch wrapSocket(defaultSslContext(certFile, keyFile), result)
 
 type
@@ -71,7 +76,11 @@ type
     sock: MyAsyncSocket
     hostname: string
     port: Port
+    domain: Domain
     isConnected: bool
+    unixBound: bool
+    when defined(posix):
+      unixMode: Mode
 
 const isSslDefined = defined(ssl)
 
@@ -80,34 +89,72 @@ proc newServer*(
   port: Port,
   sslCertFile = "",
   sslKeyFile = "",
-  ssl: static[bool] = true
+  ssl: static[bool] = true,
+  domain = Domain.AF_INET
 ): ServerContext {.raises: [HyperxConnError].} =
+  doAssert domain in {Domain.AF_INET, Domain.AF_INET6}
   when ssl and not isSslDefined:
     {.error: "this lib needs -d:ssl".}
   template sock: untyped =
     when ssl:
-      newMySocketSsl(sslCertFile, sslKeyFile)
+      newMySocketSsl(domain, certFile = sslCertFile, keyFile = sslKeyFile)
     else:
-      newMySocket()
+      newMySocket(domain)
   ServerContext(
     sock: sock,
     hostname: hostname,
     port: port,
+    domain: domain,
     isConnected: false
   )
+
+when defined(posix):
+  proc newServerUnix*(
+    path: string,
+    mode = 0o660.Mode
+  ): ServerContext {.raises: [HyperxConnError].} =
+    ServerContext(
+      sock: newMySocket(Domain.AF_UNIX, Protocol.IPPROTO_IP),
+      hostname: path,
+      port: Port(0),
+      domain: Domain.AF_UNIX,
+      isConnected: false,
+      unixMode: mode,
+      unixBound: false
+    )
 
 proc close*(server: ServerContext) {.raises: [HyperxConnError].} =
   if not server.isConnected:
     return
   server.isConnected = false
-  catch server.sock.close()
+  catch:
+    server.sock.close()
+    when defined(posix):
+      if server.unixBound:
+        server.unixBound = false
+        if unlink(server.hostname.cstring) != 0:
+          let error = osLastError()
+          if error != OSErrorCode(ENOENT):
+            raiseOSError(error, server.hostname)
 
 proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
   catch:
-    server.sock.setSockOpt(OptReuseAddr, true)
-    server.sock.setSockOpt(OptReusePort, true)
-    server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
-    server.sock.bindAddr server.port
+    case server.domain
+    of Domain.AF_UNIX:
+      when defined(posix):
+        server.sock.bindUnix(server.hostname)
+        server.unixBound = true
+        if chmod(server.hostname.cstring, server.unixMode) != 0:
+          raiseOSError(osLastError(), server.hostname)
+      else:
+        doAssert false
+    of Domain.AF_INET, Domain.AF_INET6:
+      server.sock.setSockOpt(OptReuseAddr, true)
+      server.sock.setSockOpt(OptReusePort, true)
+      server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
+      server.sock.bindAddr server.port
+    of Domain.AF_UNSPEC:
+      doAssert false
     server.sock.listen()
 
 proc recvClientNaked(server: ServerContext): Future[ClientContext] {.async.} =
@@ -121,7 +168,7 @@ proc recvClientNaked(server: ServerContext): Future[ClientContext] {.async.} =
         wrapConnectedSocket(
           sslContext, sock, handshakeAsServer, server.hostname
         )
-    return newClient(ctServer, sock, server.hostname)
+    return newClient(ctServer, sock, server.hostname, server.port, server.domain)
   except CatchableError as err:
     sock.close()
     raise err

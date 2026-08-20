@@ -88,6 +88,22 @@ Beware HTTP/2 requires TLS, so if you want to test the server locally you'll nee
 
 You may disable SSL by passing `ssl = false` to `newServer/newClient` for local testing.
 
+On POSIX systems, cleartext HTTP/2 may use a Unix domain socket:
+
+```nim
+import std/net
+import std/posix
+import pkg/hyperx/client
+import pkg/hyperx/server
+
+let server = newServerUnix("/run/hyperx.sock", 0o660.Mode)
+let client = newClientUnix("/run/hyperx.sock")
+```
+
+The socket is removed on clean shutdown. Binding fails if the path already
+exists. IPv6 clients and servers may pass `domain = Domain.AF_INET6` to
+`newClient` and `newServer`.
+
 ## Usage
 
 Read the [examples](https://github.com/nitely/nim-hyperx/blob/master/examples/).

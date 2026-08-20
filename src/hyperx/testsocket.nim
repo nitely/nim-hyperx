@@ -16,9 +16,14 @@ type
     isConnected*: bool
     hostname*: string
     port*: Port
+    domain*: Domain
+    protocol*: Protocol
     isSsl*: bool
 
-proc newMySocket*: TestSocket =
+proc newMySocket*(
+  domain: Domain = Domain.AF_INET,
+  protocol: Protocol = Protocol.IPPROTO_TCP
+): TestSocket =
   TestSocket(
     recvSig: newSignal(),
     sentSig: newSignal(),
@@ -29,11 +34,18 @@ proc newMySocket*: TestSocket =
     isConnected: false,
     hostname: "",
     port: Port 0,
+    domain: domain,
+    protocol: protocol,
     isSsl: false
   )
 
-proc newMySocketSsl*(certFile = "", keyFile = ""): TestSocket =
-  result = newMySocket()
+proc newMySocketSsl*(
+  domain: Domain = Domain.AF_INET,
+  protocol: Protocol = Protocol.IPPROTO_TCP,
+  certFile = "",
+  keyFile = ""
+): TestSocket =
+  result = newMySocket(domain, protocol)
   result.isSsl = true
 
 proc putRecvData*(s: TestSocket, data: seq[byte]) {.async.} =
@@ -94,6 +106,11 @@ proc connect*(s: TestSocket, hostname: string, port: Port) {.async.} =
   s.hostname = hostname
   s.port = port
 
+proc connectUnix*(s: TestSocket, path: string) {.async.} =
+  doAssert not s.isConnected
+  s.isConnected = true
+  s.hostname = path
+
 proc close*(s: TestSocket) =
   s.isConnected = false
   s.recvSig.trigger()
@@ -109,15 +126,19 @@ proc bindAddr*(s: TestSocket, port = Port(0)) =
   doAssert not s.isConnected
   s.port = port
 
+proc bindUnix*(s: TestSocket, path: string) =
+  doAssert not s.isConnected
+  s.hostname = path
+
 proc listen*(s: TestSocket) =
   doAssert not s.isConnected
   s.isConnected = true
 
 proc accept*(s: TestSocket): Future[TestSocket] {.async.} =
   result = if s.isSsl:
-    newMySocketSsl()
+    newMySocketSsl(s.domain, s.protocol)
   else:
-    newMySocket()
+    newMySocket(s.domain, s.protocol)
   result.isConnected = true
 
 proc wrapConnectedSocket*(
