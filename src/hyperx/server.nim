@@ -107,7 +107,7 @@ proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
     server.sock.setSockOpt(OptReuseAddr, true)
     server.sock.setSockOpt(OptReusePort, true)
     server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
-    server.sock.bindAddr server.port
+    server.sock.bindAddr(server.port, server.hostname)
     server.sock.listen()
 
 proc recvClientNaked(server: ServerContext): Future[ClientContext] {.async.} =
