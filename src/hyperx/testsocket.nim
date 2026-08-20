@@ -105,9 +105,10 @@ proc close*(s: TestSocket) =
 proc setSockOpt*(s: TestSocket, opt = OptReuseAddr, x = true, level = 0) =
   discard
 
-proc bindAddr*(s: TestSocket, port = Port(0)) =
+proc bindAddr*(s: TestSocket, port = Port(0), address = "") =
   doAssert not s.isConnected
   s.port = port
+  s.hostname = address
 
 proc listen*(s: TestSocket) =
   doAssert not s.isConnected
