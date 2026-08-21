@@ -10,6 +10,8 @@ when defined(posix):
 
   let path = getTempDir() / ("hyperx-" & $getCurrentProcessId() & ".sock")
   discard unlink(path.cstring)
+  writeFile(path, "stale")
+  doAssert fileExists(path)
 
   proc test() {.async.} =
     var requestHeaders = ""
@@ -22,12 +24,11 @@ when defined(posix):
         await strm.recvBody(data)
       await strm.sendHeaders(status = 204, contentLen = 0)
 
-    let hxServer = newServerUnix(path, 0o640.Mode)
+    let hxServer = newServerUnix(path)
     let serverFut = hxServer.serve(processStream)
     var info: Stat
     doAssert stat(path.cstring, info) == 0
     doAssert S_ISSOCK(info.st_mode)
-    doAssert (info.st_mode and Mode(0o777)) == Mode(0o640)
 
     let client = newClientUnix(path)
     with client:
@@ -43,13 +44,14 @@ when defined(posix):
       ":method: GET\r\n" &
       ":scheme: https\r\n" &
       ":path: /\r\n" &
-      ":authority: localhost\r\n" &
+      ":authority: " & path & "\r\n" &
       "user-agent: Nim-HyperX/0.1\r\n" &
       "accept: */*\r\n"
 
   waitFor test()
 
   var info: Stat
-  doAssert lstat(path.cstring, info) != 0
-  doAssert osLastError() == OSErrorCode(ENOENT)
+  doAssert lstat(path.cstring, info) == 0
+  doAssert S_ISSOCK(info.st_mode)
+  doAssert unlink(path.cstring) == 0
   echo "ok"

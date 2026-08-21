@@ -4,7 +4,6 @@ import std/asyncdispatch
 import std/asyncnet
 import std/net
 when defined(posix):
-  import std/oserrors
   import std/posix
 when defined(ssl):
   import ./atexit
@@ -78,9 +77,6 @@ type
     port: Port
     domain: Domain
     isConnected: bool
-    unixBound: bool
-    when defined(posix):
-      unixMode: Mode
 
 const isSslDefined = defined(ssl)
 
@@ -109,50 +105,35 @@ proc newServer*(
   )
 
 when defined(posix):
-  proc newServerUnix*(
-    path: string,
-    mode = 0o660.Mode
-  ): ServerContext {.raises: [HyperxConnError].} =
+  proc newServerUnix*(path: string): ServerContext {.raises: [HyperxConnError].} =
     ServerContext(
       sock: newMySocket(Domain.AF_UNIX, Protocol.IPPROTO_IP),
       hostname: path,
       port: Port(0),
       domain: Domain.AF_UNIX,
-      isConnected: false,
-      unixMode: mode,
-      unixBound: false
+      isConnected: false
     )
 
 proc close*(server: ServerContext) {.raises: [HyperxConnError].} =
   if not server.isConnected:
     return
   server.isConnected = false
-  catch:
-    server.sock.close()
-    when defined(posix):
-      if server.unixBound:
-        server.unixBound = false
-        if unlink(server.hostname.cstring) != 0:
-          let error = osLastError()
-          if error != OSErrorCode(ENOENT):
-            raiseOSError(error, server.hostname)
+  catch server.sock.close()
 
 proc listen(server: ServerContext) {.raises: [HyperxConnError].} =
   catch:
     case server.domain
     of Domain.AF_UNIX:
       when defined(posix):
+        discard unlink(server.hostname.cstring)
         server.sock.bindUnix(server.hostname)
-        server.unixBound = true
-        if chmod(server.hostname.cstring, server.unixMode) != 0:
-          raiseOSError(osLastError(), server.hostname)
       else:
         doAssert false
     of Domain.AF_INET, Domain.AF_INET6:
       server.sock.setSockOpt(OptReuseAddr, true)
       server.sock.setSockOpt(OptReusePort, true)
       server.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
-      server.sock.bindAddr server.port
+      server.sock.bindAddr(server.port, server.hostname)
     of Domain.AF_UNSPEC:
       doAssert false
     server.sock.listen()

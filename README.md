@@ -92,17 +92,15 @@ On POSIX systems, cleartext HTTP/2 may use a Unix domain socket:
 
 ```nim
 import std/net
-import std/posix
 import pkg/hyperx/client
 import pkg/hyperx/server
 
-let server = newServerUnix("/run/hyperx.sock", 0o660.Mode)
-let client = newClientUnix("/run/hyperx.sock")
+let server = newServerUnix("/var/run/hyperx.sock")
+let client = newClientUnix("/var/run/hyperx.sock")
 ```
 
-The socket is removed on clean shutdown. Binding fails if the path already
-exists. IPv6 clients and servers may pass `domain = Domain.AF_INET6` to
-`newClient` and `newServer`.
+The server unlinks any existing path immediately before binding. IPv6 clients
+and servers may pass `domain = Domain.AF_INET6` to `newClient` and `newServer`.
 
 ## Usage
 

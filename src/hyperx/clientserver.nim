@@ -126,7 +126,6 @@ type
     hostname*: string
     port: Port
     domain: Domain
-    unixPath: string
     isConnected*: bool
     isGracefulShutdown: bool
     headersEnc, headersDec: DynHeaders
@@ -159,8 +158,7 @@ proc newClient*(
   sock: MyAsyncSocket,
   hostname: string,
   port = Port 443,
-  domain = Domain.AF_INET,
-  unixPath = ""
+  domain = Domain.AF_INET
 ): ClientContext {.raises: [].} =
   result = ClientContext(
     typ: typ,
@@ -168,7 +166,6 @@ proc newClient*(
     hostname: hostname,
     port: port,
     domain: domain,
-    unixPath: unixPath,
     isConnected: false,
     isGracefulShutdown: false,
     headersEnc: initDynHeaders(stgHeaderTableSize.int),
@@ -920,7 +917,7 @@ proc connect*(client: ClientContext) {.async.} =
       catch await client.sock.connect(client.hostname, client.port)
     of Domain.AF_UNIX:
       when defined(posix):
-        catch await client.sock.connectUnix(client.unixPath)
+        catch await client.sock.connectUnix(client.hostname)
       else:
         doAssert false
     of Domain.AF_UNSPEC:

@@ -83,17 +83,13 @@ proc newClient*(
   catch result.sock.setSockOpt(OptNoDelay, true, level = IPPROTO_TCP.cint)
 
 when defined(posix):
-  proc newClientUnix*(
-    path: string,
-    authority = "localhost"
-  ): ClientContext {.raises: [HyperxConnError].} =
+  proc newClientUnix*(path: string): ClientContext {.raises: [HyperxConnError].} =
     result = newClient(
       ctClient,
       newMySocket(Domain.AF_UNIX, Protocol.IPPROTO_IP),
-      authority,
+      path,
       Port(0),
-      Domain.AF_UNIX,
-      path
+      Domain.AF_UNIX
     )
 
 type
