@@ -11,15 +11,18 @@ const localPort* = Port 8783
 const certFile = getEnv "HYPERX_TEST_CERTFILE"
 const keyFile = getEnv "HYPERX_TEST_KEYFILE"
 
+const helloWorld = "Hello world!"
+const helloWorldData = @(toOpenArrayByte(helloWorld, 0, helloWorld.high))
+
 proc processStream(strm: ClientStream) {.async.} =
   ## Full-duplex echo stream
-  let data = new string
+  let data = new seq[byte]
   await strm.recvHeaders(data)
   await strm.sendHeaders(
     @[(":status", "200")], finish = false
   )
   if strm.recvEnded:
-    data[] = "Hello world!"
+    data[] = helloWorldData
     await strm.sendBody(data, finish = true)
   while not strm.recvEnded:
     data[].setLen 0
