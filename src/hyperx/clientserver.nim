@@ -525,7 +525,7 @@ proc read(client: ClientContext) {.async.} =
   check payloadLen >= paddingLen.int, newConnError(hyxProtocolError)
   check isValidSize(frm, payloadLen), newConnError(hyxFrameSizeError)
   if payloadLen > 0:
-    frm.grow payloadLen
+    frm.growUninit payloadLen
     check not client.sock.isClosed, newConnClosedError()
     let payloadRln = await client.sock.recvInto(
       frm.rawPayloadBytesPtr, payloadLen

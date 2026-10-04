@@ -1,5 +1,6 @@
 import std/strutils
 import std/strformat
+import ./utils_bytes
 
 template ones(n: untyped): uint = (1.uint shl n) - 1
 
@@ -159,6 +160,9 @@ template payload*(frm: Frame): untyped =
 func grow*(frm: var Frame, size: int) {.raises: [].} =
   frm.s.setLen frm.s.len+size
 
+func growUninit*(frm: var Frame, size: int) {.raises: [].} =
+  frm.s.setLenUninit2 frm.s.len+size
+
 func shrink*(frm: var Frame, size: int) {.raises: [].} =
   doAssert frm.s.len >= size
   doAssert frm.s.len-size >= frmHeaderSize
@@ -211,7 +215,7 @@ func setSid*(frm: var Frame, sid: FrmSid) {.raises: [].} =
   frm.s.assignAt(5, sid.uint32)
 
 func add*(frm: var Frame, payload: openArray[byte]) {.raises: [].} =
-  frm.s.add payload
+  frm.s.add2 payload
   frm.setPayloadLen frm.payload.len.FrmPayloadLen
 
 func isValidSize*(frm: Frame, size: int): bool {.raises: [].} =
@@ -250,7 +254,7 @@ func setData*(
   frm.setPayloadLen data.len.FrmPayloadLen
   if isEnd:
     frm.flags.incl frmfEndStream
-  frm.s.add data
+  frm.s.add2 data
 
 func setGoAway*(
   frm: var Frame,
