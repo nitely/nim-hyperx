@@ -92,8 +92,12 @@ template catch*(body: untyped): untyped =
 func toString*(s: openArray[byte]): string {.raises: [].} =
   ## Copy bytes into a string; for the public APIs that use strings
   result = newString(s.len)
-  for i in 0 ..< s.len:
-    result[i] = s[i].char
+  when nimvm:
+    for i in 0 ..< s.len:
+      result[i] = s[i].char
+  else:
+    if s.len > 0:
+      copyMem(addr result[0], addr s[0], s.len)
 
 func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
   if s.len == 0:
