@@ -99,6 +99,19 @@ func toString*(s: openArray[byte]): string {.raises: [].} =
     if s.len > 0:
       copyMem(addr result[0], addr s[0], s.len)
 
+template setLenUninit2*(s, newlen: untyped): untyped =
+  when (NimMajor, NimMinor, NimPatch) >= (2, 2, 10):
+    setLenUninit(s, newlen)
+  else:
+    setLen(s, newlen)
+
+func add2*(s: var seq[byte], x: openArray[byte]) {.inline, raises: [].} =
+  ## Faster than system's add, which copies byte by byte
+  if x.len > 0:
+    let L = s.len
+    s.setLenUninit2(L+x.len)
+    copyMem(addr s[L], addr x[0], x.len)
+
 func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
   if s.len == 0:
     raise newException(ValueError, "not a number")
@@ -122,21 +135,24 @@ func find(s: openArray[byte], c: byte, i: int): int {.raises: [].} =
       return i
     inc i
 
-func `==`(a: openArray[byte], b: string): bool {.raises: [].} =
-  if a.len != b.len:
-    return false
-  var i = 0
-  while i < a.len:
-    if a[i] != b[i].byte:
-      return false
-    inc i
-  return true
+#{.push checks: off.}
+#func `==`(a, b: openArray[byte]): bool {.raises: [].} =
+#  if a.len != b.len:
+#    return false
+#  var diff = 0'u8
+#  for i in 0 ..< a.len:
+#    diff = diff or (a[i] xor b[i])
+#  diff == 0
+#{.pop.}
 
-func contains(s: openArray[string], item: openArray[byte]): bool {.raises: [].} =
+func contains(s: openArray[seq[byte]], item: openArray[byte]): bool {.raises: [].} =
   result = false
   for x in s:
     if item == x:
       return true
+
+template asBytes(s: openArray[char]): untyped =
+  s.toOpenArrayByte(0, s.high)
 
 # XXX move headers stuff to its own module
 #     or back to clientserver, it's not used
@@ -168,7 +184,7 @@ func contentLen*(s: openArray[byte]): int64 {.raises: [ValueError].} =
   result = -1
   var val = 0 .. -1
   for (nn, vv) in headersIt(s):
-    if toOpenArray(s, nn.a, nn.b) == "content-length":
+    if toOpenArray(s, nn.a, nn.b) == "content-length".asBytes:
       if val.b != -1:
         raise newException(ValueError, "more than one content-length")
       val = vv
@@ -176,11 +192,11 @@ func contentLen*(s: openArray[byte]): int64 {.raises: [ValueError].} =
     return parseBigInt toOpenArray(s, val.a, val.b)
 
 const connSpecificHeaders = [
-  "connection",
-  "proxy-connection",
-  "keep-alive",
-  "transfer-encoding",
-  "upgrade"
+  @("connection".asBytes),
+  @("proxy-connection".asBytes),
+  @("keep-alive".asBytes),
+  @("transfer-encoding".asBytes),
+  @("upgrade".asBytes)
 ]
 
 func serverHeadersValidation*(s: openArray[byte]) {.raises: [HyperxStrmError].} =
@@ -193,23 +209,23 @@ func serverHeadersValidation*(s: openArray[byte]) {.raises: [HyperxStrmError].} 
       inc regularFieldCount
       check toOpenArray(s, nn.a, nn.b) notin connSpecificHeaders,
         newStrmError(hyxProtocolError)
-      if toOpenArray(s, nn.a, nn.b) == "te":
-        check toOpenArray(s, vv.a, vv.b) == "trailers",
+      if toOpenArray(s, nn.a, nn.b) == "te".asBytes:
+        check toOpenArray(s, vv.a, vv.b) == "trailers".asBytes,
           newStrmError(hyxProtocolError)
     else:
       check regularFieldCount == 0, newStrmError(hyxProtocolError)
-      if toOpenArray(s, nn.a, nn.b) == ":path":
+      if toOpenArray(s, nn.a, nn.b) == ":path".asBytes:
         check vv.len > 0, newStrmError(hyxProtocolError)
         check not hasPath, newStrmError(hyxProtocolError)
         hasPath = true
-      elif toOpenArray(s, nn.a, nn.b) == ":method":
+      elif toOpenArray(s, nn.a, nn.b) == ":method".asBytes:
         check not hasMethod, newStrmError(hyxProtocolError)
         hasMethod = true
-      elif toOpenArray(s, nn.a, nn.b) == ":scheme":
+      elif toOpenArray(s, nn.a, nn.b) == ":scheme".asBytes:
         check not hasScheme, newStrmError(hyxProtocolError)
         hasScheme = true
       else:
-        check toOpenArray(s, nn.a, nn.b) == ":authority",
+        check toOpenArray(s, nn.a, nn.b) == ":authority".asBytes,
           newStrmError(hyxProtocolError)
   check hasMethod, newStrmError(hyxProtocolError)
   check hasScheme, newStrmError(hyxProtocolError)
@@ -223,11 +239,11 @@ func clientHeadersValidation*(s: openArray[byte]) {.raises: [HyperxStrmError].} 
       inc regularFieldCount
       check toOpenArray(s, nn.a, nn.b) notin connSpecificHeaders,
         newStrmError(hyxProtocolError)
-      check toOpenArray(s, nn.a, nn.b) != "te",
+      check toOpenArray(s, nn.a, nn.b) != "te".asBytes,
         newStrmError(hyxProtocolError)
     else:
       check regularFieldCount == 0, newStrmError(hyxProtocolError)
-      check toOpenArray(s, nn.a, nn.b) == ":status",
+      check toOpenArray(s, nn.a, nn.b) == ":status".asBytes,
         newStrmError(hyxProtocolError)
       check not hasStatus, newStrmError(hyxProtocolError)
       hasStatus = true

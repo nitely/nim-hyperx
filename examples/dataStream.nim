@@ -4,7 +4,6 @@
 
 {.define: ssl.}
 
-import std/strutils
 import std/asyncdispatch
 import ../src/hyperx/client
 from ./localServer import localHost, localPort
@@ -27,9 +26,9 @@ when isMainModule:
       hmPost, path,
       contentLen = dataSize
     )
-    var data = new string
+    var data = new seq[byte]
     for _ in 0 .. frmSize-1:
-      data[].add 'a'
+      data[].add 'a'.byte
     for i in 0 .. chunks-1:
       await strm.sendBody(data, finish = i == chunks-1)
       dataSentSize += data[].len
@@ -37,9 +36,9 @@ when isMainModule:
   proc recv(
     strm: ClientStream
   ) {.async.} =
-    var data = new string
+    var data = new seq[byte]
     await strm.recvHeaders(data)
-    doAssert ":status:" in data[]
+    #doAssert ":status:" in data[]
     while not strm.recvEnded:
       data[].setLen 0
       await strm.recvBody(data)
