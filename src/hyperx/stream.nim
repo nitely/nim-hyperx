@@ -176,7 +176,7 @@ type
     pingSig*: SignalAsync
     stateRecv*, stateSend*: StreamCtxState
     contentLen*, contentLenRecv*: int64
-    headersRecv*, bodyRecv*, trailersRecv*: string
+    headersRecv*, bodyRecv*, trailersRecv*: seq[byte]
     headersRecvSig*, bodyRecvSig*: SignalAsync
     bodyRecvLen*: int
     error*: ref HyperxStrmError
@@ -196,12 +196,12 @@ proc newStream(id: StreamId, peerWindow: int32): Stream {.raises: [].} =
     stateSend: csStateHeaders,
     contentLen: 0,
     contentLenRecv: 0,
-    bodyRecv: "",
+    bodyRecv: @[],
     bodyRecvSig: newSignal(),
     bodyRecvLen: 0,
-    headersRecv: "",
+    headersRecv: @[],
     headersRecvSig: newSignal(),
-    trailersRecv: ""
+    trailersRecv: @[]
   )
 
 proc close*(stream: Stream) {.raises: [].} =

@@ -89,17 +89,15 @@ template catch*(body: untyped): untyped =
     debugErr2 err
     raise newConnError(err.msg, err)
 
-func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
-  let L = s.len
-  s.setLen(L+ss.len)
-  for i in 0 .. ss.len-1:
-    s[L+i] = ss[i].byte
-
-func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
-  let L = s.len
-  s.setLen(L+ss.len)
-  for i in 0 .. ss.len-1:
-    s[L+i] = ss[i].char
+func toString*(s: openArray[byte]): string {.raises: [].} =
+  ## Copy bytes into a string; for the public APIs that use strings
+  result = newString(s.len)
+  when nimvm:
+    for i in 0 ..< s.len:
+      result[i] = s[i].char
+  else:
+    if s.len > 0:
+      copyMem(addr result[0], addr s[0], s.len)
 
 func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
   if s.len == 0:
@@ -116,7 +114,6 @@ func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
     result = result * 10 + c
     inc i
 
-# XXX remove once frm is string
 func find(s: openArray[byte], c: byte, i: int): int {.raises: [].} =
   result = -1
   var i = i
