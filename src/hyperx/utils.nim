@@ -1,6 +1,9 @@
 ## Shared utilities
 
 import ./errors
+import ./utils_bytes
+
+export utils_bytes
 
 template definedSsl*(def: untyped): untyped =
   when defined(ssl):
@@ -98,19 +101,6 @@ func toString*(s: openArray[byte]): string {.raises: [].} =
   else:
     if s.len > 0:
       copyMem(addr result[0], addr s[0], s.len)
-
-template setLenUninit2*(s, newlen: untyped): untyped =
-  when (NimMajor, NimMinor, NimPatch) >= (2, 2, 10):
-    setLenUninit(s, newlen)
-  else:
-    setLen(s, newlen)
-
-func add2*(s: var seq[byte], x: openArray[byte]) {.inline, raises: [].} =
-  ## Faster than system's add, which copies byte by byte
-  if x.len > 0:
-    let L = s.len
-    s.setLenUninit2(L+x.len)
-    copyMem(addr s[L], addr x[0], x.len)
 
 func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
   if s.len == 0:
