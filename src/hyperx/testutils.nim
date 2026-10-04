@@ -56,7 +56,7 @@ proc frame*(
 
 type
   PeerContext = ref object
-    headersEnc*, headersDec*: DynHeaders
+    headersEnc*, headersDec*: Hpack
   TestClientContext* = ref object
     client*: ClientContext
     peer*: PeerContext
@@ -64,8 +64,8 @@ type
 
 func newPeerContext(): PeerContext =
   PeerContext(
-    headersEnc: initDynHeaders(4096),
-    headersDec: initDynHeaders(4096)
+    headersEnc: initHpack(4096),
+    headersDec: initHpack(4096)
   )
 
 func newTestClient*(client: ClientContext): TestClientContext =
@@ -156,7 +156,7 @@ proc sent*(tc: TestClientContext): Future[Frame] {.async.} =
     doAssert payload.len == result.payloadLen.int
   if result.typ == frmtHeaders:
     var ss = newSeq[byte]()
-    var bb = newSeq[HBounds]()
+    var bb = newSeq[HpackBound]()
     hdecodeAll(payload, tc.peer.headersDec, ss, bb)
     result.add ss
   else:

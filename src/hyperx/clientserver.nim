@@ -128,7 +128,7 @@ type
     domain: Domain
     isConnected*: bool
     isGracefulShutdown: bool
-    headersEnc, headersDec: DynHeaders
+    headersEnc, headersDec: Hpack
     streams: Streams
     streamsRecv*: seq[Stream]
     streamsRecvSig*: SignalAsync
@@ -168,8 +168,8 @@ proc newClient*(
     domain: domain,
     isConnected: false,
     isGracefulShutdown: false,
-    headersEnc: initDynHeaders(stgHeaderTableSize.int),
-    headersDec: initDynHeaders(stgHeaderTableSize.int),
+    headersEnc: initHpack(stgHeaderTableSize.int),
+    headersDec: initHpack(stgHeaderTableSize.int),
     streams: initStreams(),
     currStreamId: 0.StreamId,
     streamsRecv: newSeq[Stream](),
