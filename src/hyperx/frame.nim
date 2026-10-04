@@ -238,13 +238,12 @@ func isPadded*(frm: Frame): bool {.raises: [].} =
 func hasPrio*(frm: Frame): bool {.raises: [].} =
   frmfPriority in frm.flags and frm.typ == frmtHeaders
 
-# XXX func; but must receive openArray[byte]
-template setData*(
+func setData*(
   frm: var Frame,
   sid: FrmSid,
   isEnd: bool,
-  data: openArray[char]
-): untyped =
+  data: openArray[byte]
+) {.raises: [].} =
   frm.clear()
   frm.setTyp frmtData
   frm.setSid sid

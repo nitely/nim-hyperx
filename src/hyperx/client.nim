@@ -156,8 +156,7 @@ func newResponse*(): Response {.raises: [].} =
   )
 
 func text*(r: Response): string {.raises: [].} =
-  result = ""
-  result.add r.data.s
+  r.data.s.toString
 
 proc send(
   strm: ClientStream,
@@ -173,17 +172,15 @@ proc send(
     contentType = contentType,
     contentLen = data.len
   )
-  let body = new string
-  body[] = ""
   if data.len > 0:
-    body[].add data
+    let body = new seq[byte]
+    body[] = data
     await strm.sendBody(body, finish = true)
 
 proc recv(strm: ClientStream, response: Response) {.async.} =
-  let body = new string
-  body[] = ""
+  let body = new seq[byte]
   await strm.recvHeaders(body)
-  response.headers.add body[]
+  response.headers.add body[].toString
   body[].setLen 0
   while not strm.recvEnded:
     await strm.recvBody(body)

@@ -43,11 +43,6 @@ func toString(bytes: openArray[byte]): string =
   for b in bytes:
     result.add b.char
 
-func toBytes(s: string): seq[byte] =
-  result = newSeq[byte]()
-  for c in s:
-    result.add c.byte
-
 proc frame*(
   typ: FrmTyp,
   sid: FrmSid,
@@ -90,14 +85,16 @@ proc frame*(
 ): Frame =
   result = frame(typ, tc.sid.FrmSid, flags)
 
-proc hencode*(tc: TestClientContext, hs: string): string =
-  var resp = newSeq[byte]()
+proc hencodeBytes(tc: TestClientContext, hs: string): seq[byte] =
+  result = newSeq[byte]()
   for h in hs.splitLines:
     if h.len == 0:
       continue
     let parts = h.split(": ", 1)
-    discard hencode(parts[0], parts[1], tc.peer.headersEnc, resp)
-  result = resp.toString
+    discard hencode(parts[0], parts[1], tc.peer.headersEnc, result)
+
+proc hencode*(tc: TestClientContext, hs: string): string =
+  tc.hencodeBytes(hs).toString
 
 proc reply*(
   tc: TestClientContext,
@@ -107,12 +104,12 @@ proc reply*(
   var frm1 = frame(
     frmtHeaders, tc.sid.FrmSid, @[frmfEndHeaders]
   )
-  frm1.add hencode(tc, headers).toBytes
+  frm1.add tc.hencodeBytes(headers)
   await tc.client.putRecvTestData frm1.s
   var frm2 = frame(
     frmtData, tc.sid.FrmSid, @[frmfEndStream]
   )
-  frm2.add text.toBytes
+  frm2.add text.toOpenArrayByte(0, text.high)
   await tc.client.putRecvTestData frm2.s
   tc.sid += 2
 
@@ -126,7 +123,7 @@ proc recv*(tc: TestClientContext, headers: string) {.async.} =
   var frm1 = frame(
     frmtHeaders, tc.sid.FrmSid, @[frmfEndHeaders, frmfEndStream]
   )
-  frm1.add hencode(tc, headers).toBytes
+  frm1.add tc.hencodeBytes(headers)
   await tc.client.putRecvTestData frm1.s
   tc.sid += 2
 
@@ -139,7 +136,7 @@ proc recv*(
   var frm1 = frame(frmtHeaders, sid.FrmSid, @[frmfEndHeaders])
   if finish:
     frm1.flags.incl frmfEndStream
-  frm1.add hencode(tc, headers).toBytes
+  frm1.add tc.hencodeBytes(headers)
   await tc.client.putRecvTestData frm1.s
 
 proc recv*(tc: TestClientContext, s: seq[byte]) {.async.} =
@@ -158,10 +155,10 @@ proc sent*(tc: TestClientContext): Future[Frame] {.async.} =
     payload = await tc.client.sentTestData(result.payloadLen.int)
     doAssert payload.len == result.payloadLen.int
   if result.typ == frmtHeaders:
-    var ss = ""
+    var ss = newSeq[byte]()
     var bb = newSeq[HBounds]()
     hdecodeAll(payload, tc.peer.headersDec, ss, bb)
-    result.add toBytes(ss)
+    result.add ss
   else:
     result.add payload
 

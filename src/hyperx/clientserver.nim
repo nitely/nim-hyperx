@@ -140,7 +140,7 @@ type
     peerWindowUpdateSig: SignalAsync
     windowPending, windowProcessed: int
     windowUpdateSig: SignalAsync
-    sendBuf: string
+    sendBuf: seq[byte]
     sendBufSig, sendBufDrainSig: SignalAsync
     sendFrm, recvFrm: Frame
       # beware, sendFrm is shared across streams
@@ -182,7 +182,7 @@ proc newClient*(
     windowPending: 0,
     windowProcessed: 0,
     windowUpdateSig: newSignal(),
-    sendBuf: "",
+    sendBuf: @[],
     sendBufSig: newSignal(),
     sendBufDrainSig: newSignal(),
     sendFrm: initEmptyFrame(),
@@ -245,7 +245,7 @@ when defined(hyperxSanityCheck):
     #debugEcho "sanity checked"
 
 func validateHeader(
-  ss: string,
+  ss: openArray[byte],
   nn, vv: Slice[int]
 ) {.raises: [HyperxConnError].} =
   # https://www.rfc-editor.org/rfc/rfc9113.html#name-field-validity
@@ -259,19 +259,19 @@ func validateHeader(
   check nn.len > 0, newConnError(hyxProtocolError)
   var i = 0
   for ii in nn:
-    check ss[ii].uint8 notin badNameChars, newConnError(hyxProtocolError)
+    check ss[ii] notin badNameChars, newConnError(hyxProtocolError)
     if i > 0:
-      check ss[ii] != ':', newConnError(hyxProtocolError)
+      check ss[ii] != ':'.byte, newConnError(hyxProtocolError)
     inc i
   for ii in vv:
-    check ss[ii].uint8 notin {0x00'u8, 0x0a, 0x0d}, newConnError(hyxProtocolError)
+    check ss[ii] notin {0x00'u8, 0x0a, 0x0d}, newConnError(hyxProtocolError)
   if vv.len > 0:
-    check ss[vv.a].uint8 notin {0x20'u8, 0x09}, newConnError(hyxProtocolError)
-    check ss[vv.b].uint8 notin {0x20'u8, 0x09}, newConnError(hyxProtocolError)
+    check ss[vv.a] notin {0x20'u8, 0x09}, newConnError(hyxProtocolError)
+    check ss[vv.b] notin {0x20'u8, 0x09}, newConnError(hyxProtocolError)
 
 func hpackDecode(
   client: ClientContext,
-  ss: var string,
+  ss: var seq[byte],
   payload: openArray[byte]
 ) {.raises: [HyperxConnError].} =
   var dhSize = -1
@@ -310,7 +310,7 @@ func hpackDecode(
 
 func hpackEncode*(
   client: ClientContext,
-  payload: var seq[byte],  # XXX var string
+  payload: var seq[byte],
   name, value: openArray[char]
 ) {.raises: [HyperxConnError].} =
   ## headers must be added synchronously, no await in between,
@@ -322,7 +322,7 @@ func hpackEncode*(
     raise newConnError(err.msg, err)
 
 proc sendTaskNaked(client: ClientContext) {.async.} =
-  var buf = ""
+  var buf = newSeq[byte]()
   while true:
     while client.sendBuf.len == 0:
       client.sendBufDrainSig.trigger()
@@ -387,10 +387,10 @@ proc sendSilently(client: ClientContext) {.async.} =
   except HyperxError:
     debugErr getCurrentException()
 
-func handshakeBlob(typ: ClientTyp): string {.compileTime.} =
-  result = ""
+func handshakeBlob(typ: ClientTyp): seq[byte] {.compileTime.} =
+  result = @[]
   if typ == ctClient:
-    result.add preface
+    result.add preface.toOpenArrayByte(0, preface.high)
   var frmStg = initFrame()
   frmStg.setSettings()
   case typ
@@ -767,7 +767,7 @@ proc recvDispatcherNaked(client: ClientContext, mainStream: Stream) {.async.} =
   ## stream messages.
   template frm: untyped = client.recvFrm
   doAssert mainStream.id == frmSidMain
-  var headers = ""
+  var headers = newSeq[byte]()
   while client.isConnected:
     await client.read()
     debugInfo "recv data on stream " & $frm.sid.int
@@ -1008,7 +1008,7 @@ proc windowEnd(strm: ClientStream) {.raises: [].} =
   except SignalClosedError:
     doAssert not client.isConnected
 
-proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
+proc recvHeaders*(strm: ClientStream, data: ref seq[byte]) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   try:
@@ -1022,7 +1022,13 @@ proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
     check stream.error == nil, newError(stream.error, err)
     raise err
 
-proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
+proc recvHeaders*(strm: ClientStream, data: ref string) {.async.} =
+  ## Compat; prefer the ``ref seq[byte]`` version
+  let b = new seq[byte]
+  await strm.recvHeaders(b)
+  data[].add b[].toString
+
+proc recvBody*(strm: ClientStream, data: ref seq[byte]) {.async.} =
   template client: untyped = strm.client
   template stream: untyped = strm.stream
   try:
@@ -1054,8 +1060,14 @@ proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
     check stream.error == nil, newError(stream.error, err)
     raise err
 
+proc recvBody*(strm: ClientStream, data: ref string) {.async.} =
+  ## Compat; prefer the ``ref seq[byte]`` version
+  let b = new seq[byte]
+  await strm.recvBody(b)
+  data[].add b[].toString
+
 func recvTrailers*(strm: ClientStream): string =
-  result = strm.stream.trailersRecv
+  result = strm.stream.trailersRecv.toString
 
 proc sendHeadersImpl*(
   strm: ClientStream,
@@ -1098,7 +1110,7 @@ proc sendHeaders*(
 
 proc sendBody*(
   strm: ClientStream,
-  data: ref string,
+  data: ref seq[byte],
   finish = false
 ) {.async.} =
   template client: untyped = strm.client
@@ -1141,6 +1153,16 @@ proc sendBody*(
     check client.error == nil, newError(client.error, err)
     check stream.error == nil, newError(stream.error, err)
     raise err
+
+proc sendBody*(
+  strm: ClientStream,
+  data: ref string,
+  finish = false
+) {.async.} =
+  ## Compat; prefer the ``ref seq[byte]`` version
+  let b = new seq[byte]
+  b[] = @(data[].toOpenArrayByte(0, data[].high))
+  await strm.sendBody(b, finish)
 
 template with*(strm: ClientStream, body: untyped): untyped =
   try:
