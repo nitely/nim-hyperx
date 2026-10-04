@@ -9,7 +9,7 @@ skipDirs = @["tests", "examples"]
 
 requires "nim >= 2.0.14"
 #requires "hpack >= 0.5.0"
-requires "https://github.com/nitely/nim-hpack#ad8f7b7f0dba8efa280d162c8698808353e7cb94"
+requires "https://github.com/nitely/nim-hpack#b5f60618fb41b6337a87155e97937585414e0d6f"
 
 task test, "Test":
   exec "nim c -r src/hyperx/utils.nim"
