@@ -145,10 +145,12 @@ func rawBytesPtr*(frm: var Frame): ptr byte {.raises: [].} =
 func rawPayloadBytesPtr*(frm: var Frame): ptr byte {.raises: [].} =
   addr frm.s[frmHeaderSize]
 
+{.push checks: off.}
 func clear*(frm: var Frame) {.raises: [].} =
   frm.s.setLen frmHeaderSize
   for i in 0 .. frm.s.len-1:
     frm.s[i] = 0
+{.pop.}
 
 func len*(frm: Frame): int {.raises: [].} =
   frm.s.len

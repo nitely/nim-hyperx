@@ -89,17 +89,21 @@ template catch*(body: untyped): untyped =
     debugErr2 err
     raise newConnError(err.msg, err)
 
+{.push checks: off.}
 func add*(s: var seq[byte], ss: openArray[char]) {.raises: [].} =
   let L = s.len
   s.setLen(L+ss.len)
   for i in 0 .. ss.len-1:
     s[L+i] = ss[i].byte
+{.pop.}
 
+{.push checks: off.}
 func add*(s: var string, ss: openArray[byte]) {.raises: [].} =
   let L = s.len
   s.setLen(L+ss.len)
   for i in 0 .. ss.len-1:
     s[L+i] = ss[i].char
+{.pop.}
 
 func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
   if s.len == 0:
@@ -125,15 +129,15 @@ func find(s: openArray[byte], c: byte, i: int): int {.raises: [].} =
       return i
     inc i
 
-func `==`(a: openArray[byte], b: string): bool {.raises: [].} =
+{.push checks: off.}
+func `==`(a: openArray[byte], b: openArray[char]): bool {.raises: [].} =
   if a.len != b.len:
     return false
-  var i = 0
-  while i < a.len:
-    if a[i] != b[i].byte:
-      return false
-    inc i
-  return true
+  var diff = 0'u8
+  for i in 0 ..< a.len:
+    diff = diff or (a[i].uint8 xor b[i].uint8)
+  diff == 0
+{.pop.}
 
 func contains(s: openArray[string], item: openArray[byte]): bool {.raises: [].} =
   result = false
