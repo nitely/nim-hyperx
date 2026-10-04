@@ -184,7 +184,7 @@ proc recv(strm: ClientStream, response: Response) {.async.} =
   body[].setLen 0
   while not strm.recvEnded:
     await strm.recvBody(body)
-  response.data.s.add body[]
+  response.data.s.add2 body[]
 
 proc request(
   client: ClientContext,

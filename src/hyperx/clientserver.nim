@@ -358,7 +358,7 @@ proc send(client: ClientContext) {.async.} =
   let frmTyp = frm.typ
   let frmLen {.used.} = frm.len
   try:
-    client.sendBuf.add frm.s
+    client.sendBuf.add2 frm.s
     client.sendBufSig.trigger()
     if frmTyp == frmtGoAway or client.sendBuf.len > 64 * 1024:
       await client.sendBufDrainSig.waitFor()
@@ -425,8 +425,8 @@ proc handshake(client: ClientContext) {.async.} =
     # h2test expect go-away instead of settings if preface is invalid
     check not client.sock.isClosed, newConnClosedError()
     case client.typ
-    of ctClient: client.sendBuf.add clientHandshakeBlob
-    of ctServer: client.sendBuf.add serverHandshakeBlob
+    of ctClient: client.sendBuf.add2 clientHandshakeBlob
+    of ctServer: client.sendBuf.add2 serverHandshakeBlob
     client.sendBufSig.trigger()
   except QueueClosedError as err:
     doAssert not client.isConnected
@@ -650,7 +650,7 @@ proc write(client: ClientContext, stream: Stream): Future[void] =
     var payload = newSeq[byte]()
     client.headersEnc.encodeLastResize(payload)
     client.headersEnc.clearLastResize()
-    payload.add frm.payload
+    payload.add2 frm.payload
     frm.shrink frm.payload.len
     frm.add payload
   stream.doTransitionSend(frm)
@@ -682,7 +682,7 @@ proc processHeaders(client: ClientContext, strm: Stream) {.raises: [HyperxError]
     if frm.payload[9] == '1'.byte:
       check frmfEndStream notin frm.flags, newStrmError(hyxProtocolError)
       return
-  strm.headersRecv.add frm.payload
+  strm.headersRecv.add2 frm.payload
   try:
     strm.contentLen = contentLen(frm.payload)
   except ValueError as err:
@@ -710,7 +710,7 @@ proc processData(client: ClientContext, strm: Stream) {.raises: [HyperxError].} 
   doAssert strm.stateRecv == csStateData
   case frm.typ
   of frmtHeaders:
-    strm.trailersRecv.add frm.payload
+    strm.trailersRecv.add2 frm.payload
     check frmfEndStream in frm.flags, newStrmError(hyxProtocolError)
     if client.typ == ctServer:
       strm.contentLenCheck()
@@ -719,7 +719,7 @@ proc processData(client: ClientContext, strm: Stream) {.raises: [HyperxError].} 
     strm.bodyRecvSig.trigger()
     strm.bodyRecvSig.close()
   of frmtData:
-    strm.bodyRecv.add frm.payload
+    strm.bodyRecv.add2 frm.payload
     strm.bodyRecvLen += frm.payloadLen.int
     strm.contentLenRecv += frm.payload.len
     strm.bodyRecvSig.trigger()
@@ -796,7 +796,7 @@ proc recvDispatcherNaked(client: ClientContext, mainStream: Stream) {.async.} =
         headers.setLen 0
         client.hpackDecode(headers, frm.payload)
         frm.shrink frm.payload.len
-        frm.s.add headers
+        frm.s.add2 headers
       if frm.typ == frmtData and frm.payloadLen.int > 0:
         check client.windowPending <= stgWindowSize.int - frm.payloadLen.int,
           newConnError(hyxFlowControlError)
@@ -1014,7 +1014,7 @@ proc recvHeaders*(strm: ClientStream, data: ref seq[byte]) {.async.} =
   try:
     if stream.stateRecv != csStateEnded and stream.headersRecv.len == 0:
       await stream.headersRecvSig.waitFor()
-    data[].add stream.headersRecv
+    data[].add2 stream.headersRecv
     stream.headersRecv.setLen 0
   except QueueClosedError as err:
     debugErr2 err
@@ -1035,7 +1035,7 @@ proc recvBody*(strm: ClientStream, data: ref seq[byte]) {.async.} =
     if stream.stateRecv != csStateEnded and stream.bodyRecv.len == 0:
       await stream.bodyRecvSig.waitFor()
     let bodyL = stream.bodyRecvLen
-    data[].add stream.bodyRecv
+    data[].add2 stream.bodyRecv
     stream.bodyRecv.setLen 0
     stream.bodyRecvLen = 0
     if stream.bodyRecvSig.isClosed:

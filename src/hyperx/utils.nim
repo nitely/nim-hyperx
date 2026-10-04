@@ -105,17 +105,12 @@ template setLenUninit2*(s, newlen: untyped): untyped =
   else:
     setLen(s, newlen)
 
-func add*(s: var seq[byte], x: openArray[byte]) {.inline, raises: [].} =
+func add2*(s: var seq[byte], x: openArray[byte]) {.inline, raises: [].} =
   ## Faster than system's add, which copies byte by byte
   if x.len > 0:
     let L = s.len
-    when nimvm:
-      s.setLen(L+x.len)
-      for i in 0 ..< x.len:
-        s[L+i] = x[i]
-    else:
-      s.setLenUninit2(L+x.len)
-      copyMem(addr s[L], addr x[0], x.len)
+    s.setLenUninit2(L+x.len)
+    copyMem(addr s[L], addr x[0], x.len)
 
 func parseBigInt(s: openArray[byte]): int64 {.raises: [ValueError].} =
   if s.len == 0:
