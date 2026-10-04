@@ -36,6 +36,8 @@ task test, "Test":
 task testexamples, "Test examples":
   exec "nim c -r -f -d:hyperxSanityCheck examples/streamClient.nim"
   exec "nim c -r -f -d:hyperxSanityCheck -d:release examples/dataStream.nim"
+  exec "nim c examples/simpleQueries.nim"
+  exec "nim c examples/multipleGets.nim"
 
 task testclient, "Test client only":
   exec "nim c -r -f tests/testclient.nim"
